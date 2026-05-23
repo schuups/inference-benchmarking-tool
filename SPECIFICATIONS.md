@@ -1,8 +1,24 @@
 # Inference Benchmarking — Specification
 
 This document enumerates all requirements captured through design and implementation.
-It supersedes the scattered notes in ARCHITECTURE.md (which describes an earlier design state)
-and consolidates everything into a single reference.
+
+## Table of Contents
+
+1. [Guiding Principles](#1-guiding-principles)
+2. [Deployment Targets](#2-deployment-targets)
+3. [Resource Identification](#3-resource-identification)
+4. [Resource Lifecycle (Cleanup)](#4-resource-lifecycle-cleanup)
+5. [Server Configuration Options](#5-server-configuration-options)
+6. [Prompt Generation](#6-prompt-generation)
+7. [Inductor Pre-compilation Primer](#7-inductor-pre-compilation-primer)
+8. [Load Generation](#8-load-generation)
+9. [Measurement](#9-measurement)
+10. [Benchmarker Infrastructure](#10-benchmarker-infrastructure)
+11. [Results](#11-results)
+12. [Reporting](#12-reporting)
+13. [Cluster-Specific Constraints (Alps / GH200)](#13-cluster-specific-constraints-alps--gh200)
+14. [Known Issues & Workarounds](#14-known-issues--workarounds)
+15. [Open Items](#15-open-items)
 
 ---
 
@@ -16,8 +32,11 @@ and consolidates everything into a single reference.
   server completions. This faithfully models queuing behaviour under overload.
 - **Reproducible by config**: a single YAML file fully specifies a sweep. Re-running the same
   file must produce comparable results.
-- **Separation of concerns**: the inference server and the load generator always run as separate
-  SLURM allocations; load-generator CPU never competes with GPU inference.
+- **Separation of concerns**: the inference server runs on its own (GPU) allocation. The
+  **Benchmarker** is a separate SLURM allocation hosting the **dataset generator** and the
+  **load generator** as distinct, sequential phases — prompt preparation always completes
+  before measurement begins. No benchmark CPU work competes with GPU inference, and dataset
+  generation never overlaps with load generation.
 - **Clean cluster state**: all deployed resources must be cleaned up after every run — on both
   success and failure paths. No orphaned jobs, pods, services, secrets, or scratch directories.
 
@@ -25,27 +44,48 @@ and consolidates everything into a single reference.
 
 ## 2. Deployment Targets
 
-### 2.1 SLURM (clariden / Alps)
+### 2.1 SLURM
 
-- Server job submitted to the `debug` partition (GPU); benchmarker to `normal` (CPU).
+Applies to both SLURM clusters (`clariden`, `beverin`).
+
+- All jobs (inference server, Benchmarker, NCCL benchmarks, image builds) submit to the
+  `normal` partition.
 - Account: `csstaff` (or `a-csstaff`). Never use other accounts.
-- Both `debug` and `normal` partition time limits must be respected (`debug` ≤ 1.5 h on clariden).
+- **Time-limit alignment**: every job in a single experiment — inference server, Benchmarker,
+  and any K8s-deployed components — must be configured with the **same** time limit, set
+  conservatively enough to cover: model load + CUDA graph capture + inductor compilation
+  primer + dataset generation + full sweep.
 - Multi-node support via Ray: `tensor_parallel_size` / `gpus_per_node` determine node count.
-- `server_time_limit` and `benchmarker_time_limit` must be set conservatively; exceeding the
-  debug partition hard limit returns `sbatch: error: Requested time limit is invalid`.
-- The `benchmarker_time_limit` must be long enough for: model load + CUDA graph capture +
-  inductor compilation primer + prompt generation + full sweep.
 
-### 2.2 Kubernetes (Alps, namespace `ml`)
+Access is via distinct FirecREST MCP servers, both registered in Claude Code:
 
-- GPU nodes are `nid006xxx` (arm64 GH200, driver 590 / CUDA 13.1). **Not** `breithorn-worker-*`
-  (CPU-only).
-- `nodeSelector: beta.kubernetes.io/instance-type: gh200` is required to target GPU nodes.
-- `VLLM_ENABLE_CUDA_COMPATIBILITY=1` must **not** be set for driver 590; it causes Error 803.
-  (It was required for the old driver 525/535 nodes, which have since been replaced.)
+| Cluster | Hardware | FirecREST MCP server |
+|---|---|---|
+| `clariden` | NVIDIA Grace-Hopper (GH200) | "ML Platform" |
+| `beverin` | AMD MI300A | "HPC Platform" |
+
+Per-cluster constraints (driver versions, capstor paths, vLLM flag compatibility) live in §13.
+
+### 2.2 Kubernetes (`breithorn`)
+
+`breithorn` is the single Kubernetes target. It hosts multiple GPU node types:
+
+| Node type | Hardware | Availability |
+|---|---|---|
+| `gh200` | NVIDIA Grace-Hopper | Available |
+| `mi300a` | AMD MI300A | Planned (not yet available) |
+
+- `nodeSelector: beta.kubernetes.io/instance-type: <type>` targets a specific node type.
+- A single experiment may pin different components to different node types (e.g. GH200 prefill
+  + MI300A decode for prefill-disaggregation studies). The deployment manifest sets the
+  `nodeSelector` per component.
+- Time limit on K8s-deployed components must match the SLURM `server_time_limit` /
+  `benchmarker_time_limit` of the same experiment (see §2.1).
 - `kubectl apply --validate=false` is required (Rancher API unreachable from operator laptop).
-- K8s cluster is typically at near-100% GPU utilisation; benchmark scheduling must account for
+- The cluster is typically at near-100% GPU utilisation; benchmark scheduling must account for
   this. Orphaned pods from failed runs consume GPUs indefinitely.
+- `VLLM_ENABLE_CUDA_COMPATIBILITY=1` must **not** be set for current GH200 drivers (causes
+  Error 803). It was required for the old driver 525/535 nodes, which have since been replaced.
 
 ---
 
@@ -112,40 +152,9 @@ coordinator → backends → Jinja2 templates.
 
 ---
 
-## 6. Load Generation & Measurement
+## 6. Prompt Generation
 
-### 6.1 Sweep structure
-
-- **Warmup phase**: requests sent but metrics excluded. Long enough for:
-  - Inductor JIT compilation to complete after primer (≥ 1 full round of compilation per model)
-  - KV cache and queue to reach steady state
-- **Measurement phase**: TTFT, ITL, E2E recorded per request.
-- **Drain phase**: in-flight requests after measurement window are allowed to complete up to
-  `drain_timeout_s`.
-- `request_timeout_s`: client-side TTFT hard cutoff; exceeded requests recorded as `success=0`.
-
-### 6.2 Open-loop Poisson arrivals
-
-- Inter-arrival times drawn from `Exp(1/λ)`.
-- Each arriving request is routed to one of N server instances according to `routing_strategy`.
-
-### 6.3 Routing strategies
-
-- `random` (default): uniformly random instance selection per request.
-- `session_affinity`: `prompt_idx % N` — same prompt always routes to the same instance.
-  Enables meaningful prefix-cache benefit across multi-turn sessions. Useful to measure
-  the effect of session affinity vs random routing in multi-instance deployments.
-
-### 6.4 Metrics recorded per request
-
-- `ttft_ms`: time from send to first token (authoritative SLO metric)
-- `tpot_ms`: inter-token latency (mean across output tokens)
-- `e2e_ms`: total request time
-- `input_tokens`, `output_tokens`, `success`, `error`
-
-### 6.5 Server metrics (scraped periodically)
-
-- `requests_running`, `requests_waiting`, `gpu_cache_pct`, `spec_accept_rate`
+> Being edited in `SPECIFICATIONS_prompt_generation.md`. Will be merged back here when ready.
 
 ---
 
@@ -167,106 +176,231 @@ decoding.
 
 ---
 
-## 8. Prompt Generation
+## 8. Load Generation
 
-### 8.1 Location
+### 8.1 Server readiness and model-loading tracking
 
-Prompts are generated **on the SLURM benchmarker node** from `dataset_config` in `run_config.json`.
-This avoids the FirecREST 5 MB direct-upload limit and allows arbitrarily large prompt pools.
-The coordinator no longer uploads `prompts.json`.
+Before the sweep starts, the load generator must, for **each** deployed instance:
 
-### 8.2 Prompt uniqueness requirement
+- Wait for `/health 200`. Per-instance wait bounded by `server_ready_timeout_s` (default 3600 s;
+  see §10.1). If any instance fails to come ready within the timeout, the experiment aborts.
+- Parse the per-instance model-loading breakdown from the backend's structured logs / runtime
+  API and persist one row per instance into the `instances` table (§11.2) with the
+  `model_load_*` fields populated (§10.2).
+- Run the inductor pre-compilation primer (§7).
 
-Every prompt must start with a distinct token block so that the vLLM prefix cache does not serve
-synthetic cache hits. Requirements:
-- Each prompt begins with a unique `[prompt-NNNNNN]` or `[session-NNNNNN]` header.
-- Without this, filler-text prompts share identical first blocks → 100% cache hit rate →
-  TTFT drops to ~100 ms regardless of server load (artefact, not real performance).
+The sweep begins only once **all** instances are ready, profiled, and primed.
 
-### 8.3 Supported dataset sources
+### 8.2 Sweep structure
 
-Controlled by `dataset_config.dataset_source` in the benchmark YAML:
+- **Warmup phase**: requests sent but metrics excluded. Long enough for:
+  - Inductor JIT compilation to complete after primer (≥ 1 full round of compilation per model)
+  - KV cache and queue to reach steady state
+- **Measurement phase**: TTFT, ITL, E2E recorded per request.
+- **Drain phase**: in-flight requests after measurement window are allowed to complete up to
+  `drain_timeout_s`.
+- `request_timeout_s`: client-side TTFT hard cutoff; exceeded requests recorded as `success=0`.
 
-| Value | Description |
-|---|---|
-| `"synthetic"` (default) | Filler text with unique `[prompt-NNNNNN]` headers. No network required. |
-| `"longbench"` | LongBench code tasks (`lcc` + `repobench-p`) downloaded from HuggingFace via `urllib` as a single `data.zip`. No extra libraries required. Falls back to synthetic on failure. |
+### 8.3 Open-loop Poisson arrivals
 
-### 8.4 LongBench specifics
+- Inter-arrival times drawn from `Exp(1/λ)`.
+- Each arriving request is routed to one of N server instances according to `routing_strategy`.
 
-- Tasks: `lcc` (Long Code Completion, real Python/C++/Java files, ~13–22 K tokens) and
-  `repobench-p` (repository-level Python completion, ~14–22 K tokens).
-- Content: real GitHub repositories, appropriate for speculative decoding acceptance rate
-  measurement with same-family draft/target model pairs.
-- Length filter: examples are accepted if their token count falls within 40–160% of `input_length.mean`.
-- Pool is repeated (with unique session headers) if `num_prompts` exceeds available examples.
+### 8.4 Routing strategies
 
-### 8.5 Notes on dataset suitability
-
-- **Synthetic prompts**: acceptable for latency and throughput benchmarking but produce
-  near-zero speculative decoding acceptance rates (random text is unpredictable).
-- **LongBench / real code**: required for meaningful speculative decoding acceptance rate
-  measurements. Both Apertus-8B and Apertus-70B were trained on the same data, so
-  same-family speculative acceptance rates should be 0.5–0.7 on real code.
+- `random` (default): uniformly random instance selection per request.
+- `session_affinity`: `prompt_idx % N` — same prompt always routes to the same instance.
+  Enables meaningful prefix-cache benefit across multi-turn sessions. Useful to measure
+  the effect of session affinity vs random routing in multi-instance deployments.
 
 ---
 
-## 9. Benchmarker Infrastructure
+## 9. Measurement
 
-### 9.1 Health-check timeout
+### 9.1 Metrics recorded per request
+
+- `ttft_ms`: time from send to first token (authoritative SLO metric)
+- `tpot_ms`: inter-token latency (mean across output tokens)
+- `e2e_ms`: total request time
+- `input_tokens`, `output_tokens`, `success`, `error`
+
+### 9.2 Request error tracking
+
+Every failed request (`success=0`) is **kept** in the `requests` table (§11.3) — never dropped —
+with its `error` column populated. The classification is used both for diagnosis and for
+reporting error rates per λ level (see §12.1).
+
+The `error` column carries `<class>:<detail>`, with class drawn from:
+
+| Class | Triggered by |
+|---|---|
+| `timeout` | Client-side `request_timeout_s` exceeded before the first token. |
+| `http_<status>` | Non-2xx HTTP response (e.g. `http_429` for queue saturation, `http_500` for server crash). |
+| `connection` | TCP refusal / reset / DNS failure / TLS handshake error. |
+| `server` | 2xx response but the payload signals an error (truncated stream, malformed SSE, etc.). |
+| `unknown` | Anything else; the raw exception message is appended for triage. |
+
+Reports aggregate by class so the reader can distinguish queue saturation (`http_429` / `timeout`)
+from server-side failure (`http_5xx` / `connection`).
+
+### 9.3 Server metrics (scraped periodically)
+
+- `requests_running`, `requests_waiting`, `gpu_cache_pct`, `spec_accept_rate`
+
+---
+
+## 10. Benchmarker Infrastructure
+
+### 10.1 Health-check timeout
 
 The benchmarker health check must wait at least as long as `server_ready_timeout_s` (default 3600 s)
 before giving up. The former 10-minute hardcoded limit was too short for servers with speculative
 decoding (dual model load + CUDA graph capture ≥ 15 min).
 
-### 9.2 Model loading time tracking
+### 10.2 Model loading time tracking
 
-- The benchmarker records `SERVER_LOAD_TIME_S` = time from job start to first `/health 200`.
-- Passed to the load generator via `--server-load-time-s`.
-- Stored in `experiments.server_load_time_s` (SQLite column, backward-compatible via `ALTER TABLE`).
-- Shown in every report notebook under "Model loading times".
+The Benchmarker records both the **total** time-to-ready and its **individual components**,
+so that optimization decisions are driven by data — knowing whether to attack weight load,
+graph capture, or compilation requires measuring each in isolation. Components that a given
+backend cannot expose are stored as `NULL` rather than collapsed into another bucket.
+
+A single experiment may deploy **multiple instances** of the same configuration (e.g. when
+testing request routing across replicas). Each instance is measured independently, so the
+load data is stored **per instance** in the dedicated `instances` table (§11.2).
+
+All fields share the `model_load_` prefix to make the group easy to identify:
+
+| Field | Measures |
+|---|---|
+| `model_load_total_s` | Total: from job start to first `/health 200`. |
+| `model_load_weights_s` | Reading model weights from storage into device memory. |
+| `model_load_engine_init_s` | Engine/runtime startup not attributable to the other components (tokenizer load, KV cache allocation, distributed init). |
+| `model_load_cuda_graph_capture_s` | CUDA graph capture phase. |
+| `model_load_inductor_compile_s` | `torch.inductor` JIT compilation primer (large-prefill path; add the draft-model path for speculative decoding). |
+
+- Each component must be parsed from the backend's structured logs or runtime API (per
+  backend; see backend-specific notes in §13).
+- Reports show both the total and the per-component stack, per instance, with the totals
+  aggregated across instances for the experiment summary (see §12).
 
 ---
 
-## 10. Results & Reporting
+## 11. Results
 
-### 10.1 Database schema
+Per-run results live in a SQLite database file (`run_<id>.db`) with four tables:
+`experiments` (one row per sweep), `instances` (one row per deployed server instance),
+`requests` (one row per issued request), and `server_stats` (periodic samples of
+server-side counters).
 
-SQLite per-run file (`run_<id>.db`):
+### 11.1 `experiments` table
 
-```
-experiments   run_id, model, backend, backend_config, dataset_config,
-              rate_levels, warmup_s, measurement_s, created_at, server_load_time_s
-requests      run_id, rate_lambda, request_id, ttft_ms, tpot_ms, e2e_ms,
-              input_tokens, output_tokens, success, error
-server_stats  run_id, rate_lambda, ts, requests_running, requests_waiting,
-              gpu_cache_pct, spec_accept_rate
-```
+One row per sweep — the configuration and overall outcome of the run.
 
-### 10.2 Report notebook (`experiments/template_report.ipynb`)
+| Column | Type | Semantic |
+|---|---|---|
+| `run_id` | TEXT, PK | Unique identifier (`timestamp + model_slug + backend + deployment + 4-hex random`; see §4.4). |
+| `model` | TEXT | Model identifier (HuggingFace ID or path). |
+| `backend` | TEXT | Inference engine (`vllm`, `sglang`, `dynamo`). |
+| `backend_config` | TEXT (JSON) | Serialized `BackendConfig` — all fields from §5. |
+| `dataset_config` | TEXT (JSON) | Serialized dataset configuration (§6). |
+| `rate_levels` | TEXT (JSON) | List of λ values (req/s) swept in this run. |
+| `warmup_s` | INTEGER | Warmup phase duration in seconds (metrics excluded; see §8.2). |
+| `measurement_s` | INTEGER | Measurement phase duration in seconds. |
+| `created_at` | TEXT (ISO 8601) | Experiment start timestamp. |
+
+### 11.2 `instances` table
+
+One row per deployed server instance for the experiment. A single experiment may deploy
+multiple instances of the same configuration (routing tests, disaggregation studies, multi-
+replica deployments); each instance has its own load profile (§10.2).
+
+| Column | Type | Semantic |
+|---|---|---|
+| `run_id` | TEXT, FK | Foreign key to `experiments.run_id`. |
+| `instance_id` | TEXT | Per-experiment instance identifier (stable across the run). Composite PK with `run_id`. |
+| `endpoint` | TEXT | URL the load generator targets for this instance (`host:port`). |
+| `node` | TEXT | Hosting node — SLURM node name or K8s pod / node-type. `NULL` if not applicable. |
+| `model_load_total_s` | REAL | Total time-to-ready for this instance (§10.2). |
+| `model_load_weights_s` | REAL | Weights load subcomponent (§10.2). |
+| `model_load_engine_init_s` | REAL | Engine/runtime startup subcomponent (§10.2). |
+| `model_load_cuda_graph_capture_s` | REAL | CUDA graph capture subcomponent (§10.2). |
+| `model_load_inductor_compile_s` | REAL | Inductor compilation primer subcomponent (§10.2). |
+
+Loading-time components a backend cannot expose are stored `NULL` (see §10.2).
+
+### 11.3 `requests` table
+
+One row per issued request — the per-request latency record.
+
+| Column | Type | Semantic |
+|---|---|---|
+| `run_id` | TEXT, FK | Foreign key to `experiments.run_id`. |
+| `rate_lambda` | REAL | λ value (req/s) of the sweep step this request belongs to. |
+| `request_id` | INTEGER | Per-rate-level request index (monotonic). |
+| `ttft_ms` | REAL | Time to first token, milliseconds — authoritative SLO metric (§9.1). |
+| `tpot_ms` | REAL | Inter-token latency, mean across the request's output tokens. |
+| `e2e_ms` | REAL | End-to-end request time, milliseconds. |
+| `input_tokens` | INTEGER | Number of input tokens. |
+| `output_tokens` | INTEGER | Number of generated output tokens. |
+| `success` | INTEGER | `1` if completed within timeouts; `0` if client-side `request_timeout_s` exceeded or the server returned an error. |
+| `error` | TEXT | Error message or class when `success=0`; `NULL` otherwise. |
+
+### 11.4 `server_stats` table
+
+Periodic samples of server-side counters during a sweep step. Sampling cadence is
+backend-dependent.
+
+| Column | Type | Semantic |
+|---|---|---|
+| `run_id` | TEXT, FK | Foreign key to `experiments.run_id`. |
+| `rate_lambda` | REAL | λ value (req/s) of the sweep step being sampled. |
+| `ts` | TEXT (ISO 8601) | Sample timestamp. |
+| `requests_running` | INTEGER | Requests currently executing on the server. |
+| `requests_waiting` | INTEGER | Requests queued on the server. |
+| `gpu_cache_pct` | REAL | KV cache utilization, percent. |
+| `spec_accept_rate` | REAL | Speculative-decoding token acceptance rate; `NULL` if speculative decoding disabled. |
+
+### 11.5 Experiment directories
+
+Each completed sweep produces an `experiments/YYYY-MM-DD_description/` folder containing:
+
+- `benchmark_config.yaml` (copy of the input config for provenance)
+- the run's SQLite DB file (`run_<id>.db`)
+- deployment artifacts used for the run (sbatch scripts, Kubernetes YAML, Dockerfile)
+- the executed report notebook and its rendered outputs (see §12)
+
+---
+
+## 12. Reporting
+
+The Reports generator produces a Jupyter notebook from the centralized results database
+and writes it back into the experiment directory.
+
+### 12.1 Report notebook (`experiments/template_report.ipynb`)
 
 Every experiment report must include:
 
 - Experiment title and description
 - Configuration summary table (model, TP, KV dtype, spec dec, SLO, etc.)
-- **Model loading times** per environment (from `server_load_time_s`)
+- **Model loading times**: per instance (from the `instances` table, §11.2),
+  `model_load_total_s` plus the per-component breakdown (`model_load_weights_s`,
+  `model_load_engine_init_s`, `model_load_cuda_graph_capture_s`,
+  `model_load_inductor_compile_s`) — see §10.2.
 - TTFT p50/p95 vs λ plot (log scale) with SLO line
 - ITL p50/p95 vs λ plot
 - Failure rate bar chart (bottom panel of each plot)
 - Raw per-rate-level data table
 
-### 10.3 Experiment directories
+### 12.2 Notebook output
 
-Each completed sweep produces an `experiments/YYYY-MM-DD_description/` folder containing:
-- `benchmark_config.yaml` (copy for provenance)
-- `report.ipynb` (executed notebook)
-- `ttft.png`, `itl.png`
+The executed notebook (`report.ipynb`) and its rendered plots (`ttft.png`, `itl.png`)
+are written into the corresponding `experiments/YYYY-MM-DD_description/` folder (§11.5).
 
 ---
 
-## 11. Cluster-Specific Constraints (Alps / GH200)
+## 13. Cluster-Specific Constraints (Alps / GH200)
 
-### 11.1 vLLM flag compatibility (vllm-cxi v0.20.x)
+### 13.1 vLLM flag compatibility (vllm-cxi v0.20.x)
 
 | Flag | Status | Notes |
 |---|---|---|
@@ -278,13 +412,13 @@ Each completed sweep produces an `experiments/YYYY-MM-DD_description/` folder co
 | `--safetensors-load-strategy` | ✅ Works | |
 | `--speculative-config` | ✅ Works | JSON string |
 
-### 11.2 Capstor filesystem
+### 13.2 Capstor filesystem
 
 - capstor is **Lustre**, not Ceph. vLLM misidentifies it and disables auto-prefetch.
 - Use `--safetensors-load-strategy=prefetch` to force Lustre-optimised parallel shard loading.
 - Expected gain: ~10–20 s on a 131 GiB checkpoint.
 
-### 11.3 GH200 KV cache capacity (70B, TP=4)
+### 13.3 GH200 KV cache capacity (70B, TP=4)
 
 ```
 Available KV per GPU  = (96 GiB × gpu_memory_utilization) − (140 GiB / 4 GPUs)
@@ -298,7 +432,7 @@ Additional KV capacity  = 100 / 1.91 ≈ 52 additional slots
 Total concurrent        ≈ 80 slots
 ```
 
-### 11.4 Speculative decoding with shared GPUs
+### 13.4 Speculative decoding with shared GPUs
 
 - Running draft at TP=4 on the **same** 4 GPUs as the 70B target is counterproductive:
   NCCL allreduce overhead for 5 draft passes per cycle (320 extra syncs) erases the
@@ -306,7 +440,7 @@ Total concurrent        ≈ 80 slots
 - Optimal configuration when GPUs are shared: **draft TP=1**, accept reduced GPU-0 KV capacity.
 - Optimal configuration when dedicated GPUs are available: **draft on separate node/GPUs**.
 
-### 11.5 Inductor compilation timing
+### 13.5 Inductor compilation timing
 
 - **Target model (70B)**: first large-prefill request triggers ~60 s compile.
 - **Draft model (8B)**: adds separate compile path, typically 30–60 s additional.
@@ -316,7 +450,7 @@ Total concurrent        ≈ 80 slots
 
 ---
 
-## 12. Known Issues & Workarounds
+## 14. Known Issues & Workarounds
 
 | Issue | Workaround |
 |---|---|
@@ -330,7 +464,7 @@ Total concurrent        ≈ 80 slots
 
 ---
 
-## 13. Open Items
+## 15. Open Items
 
 See `TODOs.md` for tracked future work. Key items:
 

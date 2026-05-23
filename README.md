@@ -1,5 +1,7 @@
 # Inference Benchmarking Tool
 
+__This is a refactoring of the early experimentations made in [https://github.com/schuups/inference-benchmarking](https://github.com/schuups/inference-benchmarking).__
+
 Systematic measurement of LLM inference deployments across latency/throughput envelopes, Pareto frontiers, token and cost efficiency, reliability, model loading time, and hardware elasticity.
 
 Requests are issued as open-loop load at a fixed Poisson rate λ, independent of server completions — this models realistic queuing behavior and produces latency-vs-throughput operating curves.

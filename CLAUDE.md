@@ -7,7 +7,7 @@ Systematic measurement of LLM inference deployments across multiple dimensions:
 - **Token efficiency**: tokens consumed per task for a given model + config (system prompts, templates).
 - **Cost efficiency**: cost per completed task at a given SLO — for buy-vs-scale decisions.
 - **Reliability**: request error rates across load levels.
-- **Model loading times**: time-to-ready per configuration (SPECIFICATIONS.md §9.2) — supports auto-scaling decisions.
+- **Model loading times**: time-to-ready per configuration (SPECIFICATIONS.md §10.2) — supports auto-scaling decisions.
 - **Hardware elasticity**: benefit of dynamically adding compute under load.
 
 ## Architecture
@@ -18,10 +18,10 @@ A LLM deployment can use different engines (vLLM, SGLang, Nvidia Dynamo), span a
 
 - **`tool/pre-flight-checks.py`** — verifies cluster accessibility and required configuration before running experiments.
 - **Planner** — supports experiment preparation via interaction with Claude Code (rendering Jinja2 templates, deployment scripts).
-- **Coordinator** (laptop) — submits experiments, monitors them, collects results into the centralized DB on the laptop, and cleans up on success and failure. SLURM via FirecREST MCP, K8s via kubectl. (§2, §4, §10)
-- **Dataset generator** (on the Benchmarker) — produces the prompt dataset (synthetic with unique headers, or real-text e.g. LongBench). (§8)
-- **Load generator** (on the Benchmarker) — core engine: awaits LLM readiness, sends requests at Poisson rate λ, collects per-request metrics. (§6, §7, §9)
-- **Reports generator** — generates and executes a Jupyter notebook producing tables and plots from the centralized results DB. (§10)
+- **Coordinator** (laptop) — submits experiments, monitors them, collects results into the centralized DB on the laptop, and cleans up on success and failure. SLURM via FirecREST MCP, K8s via kubectl. (§2, §4, §11)
+- **Dataset generator** (on the Benchmarker) — produces the prompt dataset (synthetic with unique headers, or real-text e.g. LongBench). (§6)
+- **Load generator** (on the Benchmarker) — core engine: awaits LLM readiness, sends requests at Poisson rate λ, collects per-request metrics. (§7, §8, §9, §10)
+- **Reports generator** — generates and executes a Jupyter notebook producing tables and plots from the centralized results DB. (§12)
 - **Cleaner** — periodic GC for state that escaped per-run teardown (orphaned JFrog images, leftover K8s Ingress/PV/Services, stale SLURM scratch dirs). (§4)
 
 ## Targeted Infrastructures
