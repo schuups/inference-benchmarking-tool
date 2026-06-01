@@ -19,6 +19,34 @@
 ## Prompt / Dataset Generation
 
 - [ ] Support multi-modal prompt length distributions in the dataset generator
+- [ ] **Audio and video modalities** — v1 covers text and image only (SPECIFICATIONS.md
+  §7.5, §7.11); add `audio` and `video` as additional modalities, with `audio_corpus` /
+  `video_corpus` source kinds, per-second / per-clip token-cost accounting, and
+  registry-load-time acceptance of `modalities: [audio]` / `modalities: [video]`.
+- [ ] **Confirm scenario-registry replaces `dataset_source`** (SPECIFICATIONS.md §7) — the
+  previous design had a top-level `dataset_source` knob; the current spec embeds source
+  choice inside the scenario registry. Confirm this is the intended end state (no separate
+  `dataset_source` at the benchmark-YAML level beyond `source_overrides`).
+- [ ] **`source_overrides` schema per source kind** (§7.4) — enumerate the keys each source
+  accepts (e.g. LongBench task subset, COCO split, reasoning-trace dataset name). The
+  field is declared but its per-source schema is not specified.
+- [ ] **Fan-out template DSL for agentic scenarios** (§7.10) — specify the grammar of the
+  fan-out template (turn types, allowed transitions, cycle-count distribution). Options:
+  inline YAML state-machine in the scenario entry, a small Python DSL, or replay-only
+  from recorded agent traces (SWE-Bench Verified, τ-bench, …).
+- [ ] **Image token-cost fallback table** (§7.11) — the per-model per-image token estimate
+  needs a structured home (probably alongside the tokenizer ID in a model-info registry).
+  Numbers are not in the registry yet.
+- [ ] **Think-time distribution defaults** (§7.3) — recommend a default range per scenario
+  for the sequential-session `think_time_ms` field (chat short, agentic-coding longer, …).
+  Currently no defaults are specified.
+- [ ] **Scenario-registry revision pinning for reproducibility** (§7.14) — define how the
+  scenario-registry revision is "recorded alongside" the dataset: git SHA on the
+  experiment row? content hash of the YAML file? Pick a storage location and mechanism.
+- [ ] **Per-tool `result_content_source` synthesis** (§7.10) — specify how a tool-result
+  body of a sampled token length is produced from each `result_content_source.kind`
+  (`synthetic` / `longbench` / `static`). The enum exists; the synthesis mechanics do
+  not.
 
 ## Metrics & Analysis
 

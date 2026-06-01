@@ -59,25 +59,11 @@ MLPerf Inference: Datacenter is a valuable, fair, reproducible cross-platform be
 6. **Modern LLM and multimodal workloads.** Long-context, reasoning-heavy, multimodal, and heterogeneous request mixes (mixed prefill/decode pressure, mixed latency sensitivity) — exposing memory-hierarchy, scheduling, and interconnect bottlenecks rather than peak FLOPs.
 7. **Forward-looking scenario taxonomy.** Workload taxonomy reviewed on cadence against leading indicators; scenarios carry maturity tags so procurement evidence distinguishes validated patterns from emerging trends.
 
-## Architecture
+## Reference documentation
 
-- **Inference deployment under test** — the complete LLM serving stack: the engine (vLLM, SGLang, or NVIDIA Dynamo) on its own GPU allocation (SLURM or Kubernetes, single- or multi-replica), *plus* the ingress, authentication, and accounting layers in front of it. The framework load-tests the entire request path as users experience it, not the model server in isolation.
-- **Coordinator** (laptop) — submits experiments, monitors execution, collects results into a centralized database on the laptop, and cleans up on success and failure.
-- **Benchmarker** (SLURM allocation, separate from the inference server) — hosts the **dataset generator** and the **load generator**.
-- **Reports generator** — produces Jupyter notebooks (tables, plots) from the centralized results database.
-- **Cleaner** — periodic garbage-collection pass for state that escaped the Coordinator's per-run teardown.
-
-A LLM deployment can use different engines (vLLM, SGLang, Nvidia Dynamo), span one or many GPUs / nodes, be deployed on SLURM (via FirecREST) or Kubernetes, and involve one or multiple replicas to exercise ingress and routing overhead.
-
-See `SPECIFICATIONS.md` for detailed requirements, schema definitions, and cluster-specific constraints.
-
-## Targeted Infrastructures
-
-| Name | Type | Access | Notes |
-|---|---|---|---|
-| `clariden` | SLURM | FirecREST MCP (ML Platform) | Grace-Hopper (GH200) nodes |
-| `beverin` | SLURM | FirecREST MCP (HPC Platform) | AMD MI300A nodes |
-| `breithorn` | Kubernetes | kubectl | L1/L2 cluster |
+- [`CLAUDE.md`](CLAUDE.md) — architecture (components and their boundaries), targeted clusters, repo layout, environment constants, working agreement.
+- [`SPECIFICATIONS.md`](SPECIFICATIONS.md) — authoritative requirements, schema definitions, cluster-specific constraints, and known workarounds.
+- [`TODOs.md`](TODOs.md) — tracked future work.
 
 ## Current models of interest
 
@@ -92,21 +78,12 @@ Capability columns indicate whether the model natively supports each modality/fe
 
 Apertus 70B 1.5 is the incremental successor to Apertus 70B with better tool-use and image input added; public material is sparse.
 
-## Layout
-
-- `tool/` — implementation of the components above; includes `pre-flight-checks.py`
-- `experiments/` — per-experiment folders (`YYYY-MM-DD_description/`) with config, deployment artifacts, raw results
-- `reports/` — generated notebooks and rendered outputs
-- `examples/` — reference Docker image builds, K8s and SLURM deployments
-- `firecrest-mcp/` — FirecREST MCP server registered in Claude Code
-- `SPECIFICATIONS.md` — authoritative reference for requirements and constraints
-- `TODOs.md` — tracked future work
-
 ## Future roadmap
 
 - Support **geo-redundancy scenarios**: load-test multi-site deployments to characterise failover latency (time from primary-site failure to standby serving traffic), in-flight request loss during failover, and the steady-state cost of cross-site routing — making availability and disaster-recovery posture testable by this tool.
 - Cover **resource elasticity**: auto-scaling latency (time from load-spike detection to an additional replica ready and serving), request-loss during scale-up / scale-down events, and pre-warmed-pool sizing trade-offs. Results feed directly into the requirements definition for the elasticity feature of CSCS vClusters.
 - Extend this benchmarking tool beyond infrastructure-centric metrics (e.g. TTFT and ITL) toward task efficiency evaluation — measuring how effectively a deployment configuration completes real tasks under realistic agentic workflows. This includes studying how deployment-time controls such as system prompts, decoding policies, tool availability, and context-management strategies influence token efficiency, task completion quality, and overall operational cost.
+- Extend **modality coverage** beyond text + image: v1 of the dataset generator handles only text and image scenarios; **audio** and **video** inputs (paired corpora, per-second / per-clip token-cost accounting, registry-load-time acceptance of `modalities: [audio]` / `modalities: [video]`) are deferred — tracked in [`TODOs.md`](TODOs.md).
 
 ## References
 

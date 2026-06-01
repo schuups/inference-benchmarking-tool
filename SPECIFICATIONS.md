@@ -205,7 +205,297 @@ individual features so procurement evidence can isolate the value of each.
 
 ## 7. Prompt Generation
 
-> Being edited in `SPECIFICATIONS_prompt_generation.md`. Will be merged back here when ready.
+### 7.1 Location and ownership
+
+Prompts are produced on the **Benchmarker** SLURM allocation by its **dataset-generator**
+subcomponent, from `dataset_config` in the benchmark YAML, sequentially before the
+load-generator phase starts (per §1's separation of concerns). Generating on the cluster
+sidesteps the FirecREST 5 MB direct-upload limit and allows arbitrarily large prompt
+pools — the coordinator never ships prompt data to the cluster.
+
+### 7.2 Key concepts
+
+Three artefacts cooperate to produce a benchmark dataset:
+
+- **Scenario registry** (`tool/scenarios/<slug>.yaml`) — the canonical declaration of what
+  each scenario is: its source, length distributions, multi-turn structure, session mode,
+  tool catalog (if agentic), modalities (if multimodal), and the `modelled` / `not_modelled`
+  lists that feed the scenario manifest (§13.8).
+- **`dataset_config`** in the benchmark YAML — the per-run knobs: which scenario to run,
+  the master seed, `num_prompts`, and any per-run overrides to registry defaults.
+- **Dataset generator** — reads both, materializes the prompt pool on capstor scratch,
+  and emits the scenario manifest as a structured side-effect for the experiment row (§13.1).
+
+The registry is data, not code: adding a new scenario does not require editing the
+generator. Registry entries are versioned with the repo; changes to a scenario's
+`modelled` / `not_modelled` lists are reviewable in PRs.
+
+### 7.3 Scenario registry
+
+Each registry entry is a YAML file with the schema below. Fields not relevant to a given
+scenario are omitted (e.g. `tools` only applies to agentic scenarios).
+
+```yaml
+name: agentic-coding-large-prompt
+summary: AI-assisted coding session with large initial prompt and short follow-ups.
+maturity: established                # established | emerging | exploratory
+modalities: [text]                   # text, image (audio and video deferred — §7.11)
+
+source:
+  kind: longbench                    # see §7.5
+  config: { tasks: [lcc, repobench-p] }
+
+input_length:
+  distribution: lognormal            # lognormal | normal | fixed
+  params: { mean: 20000, sigma: 0.3, min: 8000, max: 64000 }
+
+output_length:
+  distribution: lognormal
+  params: { mean: 512, sigma: 0.4, min: 32, max: 4096 }
+
+session:
+  mode: sequential                   # sequential | open_loop  (see §7.9)
+  turns_per_session:
+    distribution: lognormal
+    params: { mean: 3, sigma: 0.4, min: 1, max: 12 }
+  prefix_strategy: append_delta      # only supported strategy (see §7.9)
+  think_time_ms: { distribution: lognormal, params: { mean: 1500, sigma: 0.4 } }  # sequential mode only
+
+tools: []                            # only for agentic scenarios (§7.10)
+
+manifest:
+  modelled:
+    - "long multi-turn prompts (8K–64K input tokens)"
+    - "follow-up turns reusing the initial context"
+  not_modelled:
+    - "no image inputs"
+    - "no tool-call interleaving"
+```
+
+`assumptions` is **not** stored in the registry — it is computed at runtime from the
+actual `dataset_config` consumed (§7.13).
+
+### 7.4 dataset_config schema
+
+The benchmark YAML's `dataset_config` block:
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `scenario` | string | yes | Must match a registered scenario name. |
+| `num_prompts` | integer | yes | Size of the generated prompt pool. The load generator's request stream draws from this pool. |
+| `seed` | integer | yes | Master seed; sub-seeds derived deterministically (§7.12). |
+| `input_length` | object | no | Per-run override of the registry's `input_length` distribution. |
+| `output_length` | object | no | Per-run override of the registry's `output_length` distribution. |
+| `session` | object | no | Per-run override of session fields. |
+| `tokenizer_id` | string | no | Override the tokenizer (defaults to the target model's; see §7.8). |
+| `source_overrides` | object | no | Source-specific overrides (e.g. LongBench task subset). |
+
+Any field absent from `dataset_config` is inherited from the scenario registry.
+Validation aborts the run before submission if `scenario` is missing or refers to an
+unknown registry entry.
+
+### 7.5 Dataset sources
+
+The `source.kind` enum, with v1 scope:
+
+| `kind` | Description |
+|---|---|
+| `synthetic` | Filler text with unique `[prompt-NNNNNN]` headers. No network required. Acceptable for latency/throughput; near-zero speculative-decoding acceptance rate (§7.15). |
+| `longbench` | LongBench code tasks (`lcc`, `repobench-p`) downloaded from HuggingFace via `urllib` + `zipfile`. Real GitHub source; suitable for speculative-decoding measurements. |
+| `reasoning_trace_replay` | Replays recorded reasoning traces from public datasets (GSM8K-with-cot, MATH, AIME, R1-distill traces). Output length is taken from the recorded target and overrides the scenario's `output_length`. |
+| `tool_registry` | Drives agentic scenarios; prompts are generated from a tool catalog + task template registry (§7.10). |
+| `image_corpus` | Image inputs paired with text prompts. v1: fixed corpus (e.g. COCO); image-token cost counted into `input_tokens` (§7.11). |
+
+**Audio and video are intentionally not in v1.** Tracked as future work in `TODOs.md`.
+A scenario declaring `modalities: [audio]` or `modalities: [video]` is rejected at
+registry-load time until support lands.
+
+### 7.6 Prompt uniqueness requirement
+
+Every prompt must start with a distinct token block so that the engine's automatic prefix
+cache — one of the features under test (§6 features table), implemented by vLLM, SGLang,
+and equivalents — does not serve synthetic cache hits.
+
+- Single-turn scenarios: each prompt begins with a unique `[prompt-NNNNNN]` header.
+- Multi-turn scenarios: each session begins with a unique `[session-NNNNNN]` header that
+  is reused across the session's turns, so the engine's prefix cache *does* hit on the
+  shared session prefix (this is the locality the benchmark is meant to expose; see §7.9).
+- Without this discipline, filler-text prompts share identical first blocks → 100% cache
+  hit rate → TTFT drops to ~100 ms regardless of server load (artefact, not real
+  performance).
+
+### 7.7 Length distributions and output length control
+
+**Input length** distribution shape is **per scenario** (declared in the registry; §7.3).
+Supported shapes: `lognormal` (truncated), `normal` (truncated), `fixed`. Heavy-tailed
+`lognormal` matches observed LLM-workload distributions and is the recommended default;
+`fixed` is useful for isolation studies.
+
+**Output length** is controlled per request:
+
+- Each prompt carries a target `max_tokens` sampled from the scenario's `output_length`
+  distribution.
+- The load generator sends `max_tokens=<sampled>` **and** `ignore_eos=True`, forcing the
+  model to emit exactly that many decode tokens.
+
+`ignore_eos` makes decode cost reproducible across runs and across models — measured
+TPOT and `output_tokens` no longer depend on each model's stopping behaviour for a given
+prompt.
+
+Sources that carry ground-truth output lengths (`reasoning_trace_replay`,
+`tool_registry`) override the sampled value with the recorded target.
+
+### 7.8 Tokenization
+
+Length filtering, length-distribution sampling, and the `input_tokens` field in the
+generated dataset all use the **target model's tokenizer**, loaded by HuggingFace ID.
+The tokenizer is fetched on the Benchmarker at dataset-generation time.
+
+- Changing the target model invalidates the generated dataset and triggers regeneration
+  (the dataset is per-run on capstor scratch; §7.14).
+- For draft/target same-family pairs (e.g. Apertus-8B draft + Apertus-70B 1.5 target),
+  tokenizers are identical and only one is loaded.
+- For cross-family draft/target pairs the **target's** tokenizer is authoritative; any
+  draft-tokenizer mismatch is logged but does not block the run.
+
+### 7.9 Multi-turn / session structure
+
+Multi-turn scenarios produce N turns per session, where N is sampled from the scenario's
+`session.turns_per_session` distribution (§7.3).
+
+**Prefix strategy** is always **`append_delta`**: turn K+1's prompt = full prior
+transcript + new user turn. The engine's prefix cache reuses the shared prefix naturally
+— exactly as real chat / agentic clients do. (A `regenerate` strategy was considered
+but rejected: it defeats the prefix cache and is better expressed as a separate ablation
+by disabling prefix caching at the backend.)
+
+**Session mode** governs how follow-up turns interact with the load generator's open-loop
+arrival process (§10.3):
+
+| `session.mode` | Follow-up behaviour | Use for |
+|---|---|---|
+| `open_loop` (default) | All turns of a session are scheduled by the arrival process; turn K+1 fires on its own schedule regardless of when turn K completed. Preserves open-loop queueing semantics throughout. | RAG-style independent queries against a shared long-lived prefix; reasoning workloads; any scenario where turn ordering is incidental. |
+| `sequential` | Turn K+1 is sent only after turn K's response has been received, plus a `think_time_ms` delay sampled from the registry's distribution. Introduces closed-loop coupling *within a session*; cross-session arrivals remain open-loop (session starts are still Poisson per §10.3). | Conversational chat; agentic-coding follow-ups; any scenario where a follow-up message cannot meaningfully precede its predecessor's response. |
+
+Sequential sessions document their closed-loop-within-session coupling in the
+`assumptions` field of the scenario manifest (§7.13) so reports interpret tail-latency
+results accordingly.
+
+### 7.10 Agentic scenarios
+
+Agentic scenarios fan one user request into many model invocations (think → tool call →
+tool result → think …). The unit of measurement is the **agent task** (§13.7); child
+model invocations are recorded in the `requests` table (§13.3) with their parent's
+`agent_task_id`.
+
+**Tool registry.** `tool/tools/<tool-name>.yaml` declares each available tool:
+
+```yaml
+name: read_file
+schema:                              # JSON schema for the tool call
+  type: object
+  properties:
+    path: { type: string }
+  required: [path]
+result_size:                         # distribution of injected tool-result token counts
+  distribution: lognormal
+  params: { mean: 2000, sigma: 0.5, min: 50, max: 32000 }
+result_content_source:               # how the synthesized tool-result body is produced
+  kind: longbench                    # synthetic | longbench | static
+```
+
+Each scenario in the registry references the tools it offers via
+`tools: [read_file, run_tests, …]`. This produces the **bimodal output distribution** the
+README §3 calls out (tiny structured tool calls drawn from the schema + large injected
+results drawn from each tool's `result_size`) without requiring scenario-level
+distribution tuning.
+
+**Fan-out template.** Each agentic scenario declares a fan-out template specifying the
+shape of the agent task: turn types (`think`, `tool_call`, `tool_result`), allowed
+transitions, and the distribution over the number of think/tool cycles per task. The
+template is consumed by the load generator to drive `sequential` execution of the task's
+child requests. (Template DSL grammar is unspecified — tracked in `TODOs.md`.)
+
+**Schema-constrained decoding.** When the model emits a tool call, the load generator
+requests structured-output decoding against the tool's JSON schema. The result's validity
+is recorded per request in `requests.structured_output_valid` (§13.3) and aggregated per
+task into `agent_tasks.task_tool_calls_valid` (§13.7).
+
+### 7.11 Multimodal prompts (v1)
+
+v1 supports **image** inputs alongside text; **audio and video are deferred** (tracked
+in `TODOs.md`).
+
+- `image_corpus`: image inputs drawn from a fixed corpus (e.g. COCO) and paired with a
+  text prompt template from the scenario registry. The number of images per prompt
+  follows a scenario-declared distribution.
+- Image token cost is computed by the target model's tokenizer (or the backend's
+  multimodal-aware reporter when the tokenizer cannot tokenize raw image bytes) and
+  counted into `input_tokens`. Backends that do not surface per-modality token counts
+  fall back to a model-card-derived per-image token estimate, recorded in the manifest's
+  `assumptions`.
+- A scenario declaring `modalities: [audio]` or `modalities: [video]` is rejected at
+  registry-load time until the corresponding modality support lands.
+
+### 7.12 Seeding and determinism
+
+`dataset_config.seed` is a single integer. The generator derives per-axis sub-seeds
+deterministically by hashing the master seed with a constant per-axis salt:
+
+```python
+sub_seed(seed, axis) = blake2b(f"{seed}:{axis}".encode(), digest_size=8).digest()
+# axes: "header", "length_input", "length_output", "selection", "turns",
+#       "tool_choice", "image_pick", "thinktime"
+```
+
+Reproducibility contract:
+
+- Same `dataset_config` + same scenario-registry revision + same target tokenizer →
+  identical prompt pool (byte-for-byte).
+- Changing the target model triggers regeneration (different tokenizer → different
+  length filtering and different sampled lengths).
+
+### 7.13 Scenario manifest emission
+
+Per §13.8, every experiment row carries a structured `scenario_manifest` JSON object.
+The dataset generator produces it as a side-effect of running, combining:
+
+- `name`, `summary`, `maturity`, `modelled`, `not_modelled` — copied **verbatim** from
+  the scenario registry entry.
+- `assumptions` — auto-filled at runtime from the `dataset_config` actually consumed,
+  including: input / output length distribution shape + parameters; turns-per-session
+  distribution; session mode; prefix strategy; source `kind` + relevant source config;
+  master seed; tokenizer ID; modalities; tool list (agentic only). Sufficient to
+  reconstruct what the run measured without re-reading the registry at a specific revision.
+
+Validation: the run aborts before load-generation if any required manifest field is
+missing or fails schema validation.
+
+### 7.14 Persistence and source-failure semantics
+
+**Persistence.** Generated datasets live on the Benchmarker's capstor scratch directory
+for the duration of the run, reused across sweep steps within the experiment, and
+deleted by the §4 teardown. They are **not** copied into `experiments/<run>/` — only the
+manifest (persisted on `experiments.scenario_manifest`) and the master seed are needed
+for reproduction; the dataset can always be regenerated from those plus the scenario-
+registry revision recorded alongside.
+
+**Source-failure semantics.** A failure of any dataset source (LongBench download error,
+HuggingFace unreachable, tool registry malformed, image corpus mount missing, etc.)
+**aborts the run** with a clear error. There is no silent fallback to synthetic data —
+this avoids the trap where, e.g., a speculative-decoding experiment silently degrades to
+filler text and reports ~0% acceptance as if it were a property of the model.
+
+### 7.15 Notes on dataset suitability
+
+- **Synthetic prompts**: acceptable for latency and throughput benchmarking but produce
+  near-zero speculative-decoding acceptance rates (random text is unpredictable).
+- **LongBench / real code**: required for meaningful speculative-decoding acceptance rate
+  measurements. For same-family draft/target pairings (e.g. Apertus-8B as the draft for
+  the Apertus-70B 1.5 target — Apertus-8B is of interest exclusively in the draft role),
+  acceptance rates on real code are typically in the 0.5–0.7 range.
+- **Reasoning-trace replay**: required when measuring speculative-acceptance for
+  reasoning workloads — synthetic prompts produce the same near-zero rate as for code.
 
 ---
 
