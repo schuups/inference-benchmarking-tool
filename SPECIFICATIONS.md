@@ -505,27 +505,29 @@ Synthetic micro-benchmarks executed in the **exact software environment in which
 engine will be launched moments later** — same container image, same environment variables,
 same mount points, same NUMA / CPU pinning, same library load paths, same NCCL / RCCL
 configuration — immediately before the LLM engine binary starts. Without this gate, a
-degraded NCCL fabric, slow weight storage, or under-clocked memory silently biases LLM
-benchmark results — good throughput / latency numbers measured on top of a degraded
-foundation are misleading. Running the checks in any sibling environment (a different image,
-a stripped init container, a clean shell on the same node) measures something other than
-what the engine will sit on, and defeats the gate.
+degraded NCCL fabric or slow weight storage silently biases LLM benchmark results — good
+throughput / latency numbers measured on top of a degraded foundation are misleading.
+Running the checks in any sibling environment (a different image, a stripped init container,
+a clean shell on the same node) measures something other than what the engine will sit on,
+and defeats the gate.
 
 ### 8.1 Scope
 
-Pre-checks cover the hardware planes whose performance directly bounds LLM serving:
+Pre-checks cover the two planes whose performance directly bounds LLM serving:
 
 | Plane | Benchmark | Validates |
 |---|---|---|
-| GPU collectives | NCCL / RCCL all-reduce and all-gather, multiple message sizes | TP communication bandwidth across the deployed GPU group |
-| GPU memory | `bandwidthTest` (or device-side STREAM) | HBM read/write bandwidth per GPU |
-| System memory | STREAM | Host DRAM bandwidth (Grace DRAM on GH200; node RAM elsewhere) |
-| Storage | Sequential read against the model-weights mount | Capstor / PVC throughput (validates `safetensors_load_strategy=prefetch` effectiveness) |
-| Network (multi-node only) | Point-to-point `iperf3` between TP nodes | Inter-node link (IB / Ethernet) bandwidth |
+| Collective communication | NCCL / RCCL `all_reduce`, `all_gather`, and `alltoall` (see `examples/nccl-tests/`), run at the exact rank topology the engine will use | Both **intra-node** GPU-to-GPU bandwidth (NVLink / NVLink-C2C on GH200, Infinity Fabric on MI300A) and **inter-node** fabric bandwidth (HPE Slingshot 11 on Alps). One pre-check job covers both: NCCL / RCCL exercises whichever links the rank set requires. The three-collective set is the union of what dense and MoE inference exercise — `all_reduce` for TP forward, `all_gather` for sequence-parallel and weight gather, `alltoall` for MoE expert dispatch. Add `reduce_scatter`, `sendrecv`, `broadcast`, etc. to the suite for engines using those paths (e.g. pipeline parallelism). No separate IB / Ethernet / `iperf3` test — Alps has no IB, and Slingshot is exercised end-to-end via the AWS OFI NCCL plugin. |
+| Storage | Sequential read against the model-weights mount the engine job uses (`PVC` on Kubernetes; `capstor` or `iopstor` on SLURM, whichever the engine job mounts) | Filesystem read throughput as seen by the engine. On `capstor` (Lustre) this also validates that `safetensors_load_strategy=prefetch` is taking effect (see §15.2). |
+
+GPU memory bandwidth (`bandwidthTest`) and host DRAM bandwidth (STREAM) are intentionally
+**not** in the pre-check suite — they are stable per-SKU characteristics that rarely
+degrade in isolation without also degrading the NCCL / RCCL bandwidth above, so a separate
+test adds maintenance without adding signal.
 
 Each pre-check must run on the **exact** topology *and* the **exact** software environment
 the experiment will use: same node(s), same GPUs, same container image, same environment
-variables, same mounts, same NUMA / CPU pinning, same library and NCCL/RCCL configuration,
+variables, same mounts, same NUMA / CPU pinning, same library and NCCL / RCCL configuration,
 same TP size. Running it anywhere else measures a different stack from the one the LLM
 engine will actually sit on, and defeats the gate.
 
@@ -541,8 +543,23 @@ engine will actually sit on, and defeats the gate.
     *not* as a separate init container. The engine sidecar's env vars, volume mounts,
     `securityContext`, and resource requests are then guaranteed to be in effect during
     the checks.
-- Total wall-clock budget for the full pre-check suite: ≤ 120 s (configurable via
-  `system_prechecks_timeout_s`).
+- The NCCL benchmark uses upstream [`NVIDIA/nccl-tests`](https://github.com/NVIDIA/nccl-tests),
+  compiled inside the engine container at first use and cached on persistent storage. No
+  dedicated test image — the binaries live in the same image the engine runs in. Two
+  configuration knobs flow from the benchmark YAML / sweep:
+  - `nccl_tests_version` — the git tag to build (e.g. `2.17.1`). Pinned per experiment for
+    reproducibility; bumping it triggers a fresh build into a separate cache directory and
+    leaves earlier caches intact.
+  - `nccl_tests_cache_dir` — persistent path where compiled binaries live (default
+    `/capstor/scratch/cscs/$USER/nccl-tests-cache` on SLURM, a PVC mount on K8s). Shared
+    across experiments; safe to delete to force a rebuild.
+
+  Because the build runs inside the engine container, the engine image must carry the
+  build tools (`make`, `g++`, `libopenmpi-dev`, `openmpi-bin`, `curl`, `tar`). Pre-checks
+  abort with a clear error if any are missing.
+- Total wall-clock budget for the full pre-check suite: ≤ 120 s on cache-hit (configurable
+  via `system_prechecks_timeout_s`); the first-time `nccl-tests` build adds ~30 s and is
+  not counted against this budget.
 - Pre-check output is streamed to the structured log and persisted in the `system_prechecks`
   table (§13.6).
 
@@ -557,16 +574,26 @@ authoritative ground truth and is updated as new systems are characterised. Each
 
 Initial table (placeholder values — populated after first characterisation runs on each system):
 
-| Cluster | Node | TP | Benchmark | Size | Expected | Tolerance |
-|---|---|---|---|---|---|---|
-| `clariden` | GH200 | 4 | NCCL all-reduce | 16 MiB | TBD GB/s | -10% |
-| `clariden` | GH200 | 4 | NCCL all-reduce | 256 MiB | TBD GB/s | -10% |
-| `clariden` | GH200 | 1 | HBM bandwidth | — | TBD GB/s | -5% |
-| `clariden` | GH200 | 1 | Grace DRAM bandwidth | — | TBD GB/s | -10% |
-| `clariden` | GH200 | 1 | Capstor sequential read | 1 MiB blocks | TBD GB/s | -15% |
-| `beverin` | MI300A | 4 | RCCL all-reduce | 16 MiB | TBD GB/s | -10% |
-| `beverin` | MI300A | 1 | HBM bandwidth | — | TBD GB/s | -5% |
-| `breithorn` | gh200 | 4 | NCCL all-reduce | 16 MiB | TBD GB/s | -10% |
+| Cluster | Scope | Benchmark | Size | Expected | Tolerance |
+|---|---|---|---|---|---|
+| `clariden` | 4× GH200, 1 node | NCCL `all_reduce` | 128 MiB | TBD GB/s busbw | -10% |
+| `clariden` | 4× GH200, 1 node | NCCL `all_gather` | 128 MiB | TBD GB/s busbw | -10% |
+| `clariden` | 4× GH200, 1 node | NCCL `alltoall` | 128 MiB | TBD GB/s busbw | -10% |
+| `clariden` | 8× GH200, 2 nodes | NCCL `all_reduce` | 128 MiB | TBD GB/s busbw | -10% |
+| `clariden` | 8× GH200, 2 nodes | NCCL `all_gather` | 128 MiB | TBD GB/s busbw | -10% |
+| `clariden` | 8× GH200, 2 nodes | NCCL `alltoall` | 128 MiB | TBD GB/s busbw | -10% |
+| `clariden` | `capstor` weights mount | Sequential read | 1 MiB blocks | TBD GB/s | -15% |
+| `clariden` | `iopstor` weights mount | Sequential read | 1 MiB blocks | TBD GB/s | -15% |
+| `beverin` | 4× MI300A, 1 node | RCCL `all_reduce` | 128 MiB | TBD GB/s busbw | -10% |
+| `beverin` | 4× MI300A, 1 node | RCCL `all_gather` | 128 MiB | TBD GB/s busbw | -10% |
+| `beverin` | 4× MI300A, 1 node | RCCL `alltoall` | 128 MiB | TBD GB/s busbw | -10% |
+| `beverin` | 8× MI300A, 2 nodes | RCCL `all_reduce` | 128 MiB | TBD GB/s busbw | -10% |
+| `beverin` | 8× MI300A, 2 nodes | RCCL `all_gather` | 128 MiB | TBD GB/s busbw | -10% |
+| `beverin` | 8× MI300A, 2 nodes | RCCL `alltoall` | 128 MiB | TBD GB/s busbw | -10% |
+| `breithorn` | 4× gh200, 1 pod | NCCL `all_reduce` | 128 MiB | TBD GB/s busbw | -10% |
+| `breithorn` | 4× gh200, 1 pod | NCCL `all_gather` | 128 MiB | TBD GB/s busbw | -10% |
+| `breithorn` | 4× gh200, 1 pod | NCCL `alltoall` | 128 MiB | TBD GB/s busbw | -10% |
+| `breithorn` | PVC weights mount | Sequential read | 1 MiB blocks | TBD GB/s | -15% |
 
 ### 8.4 Outcome and abort flow
 
