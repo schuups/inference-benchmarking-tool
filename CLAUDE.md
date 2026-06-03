@@ -26,8 +26,8 @@ Laptop-side (run by the operator, not allocated on any cluster):
 
 Cluster-side (allocated on the cluster under test):
 
-- **Benchmarker** — Coordinator-submitted SLURM allocation, one per experiment, separate from the inference deployment's. Spawns and supervises the inference deployment(s) under test (submits jobs/manifests, polls readiness, records model-load times into `instances`, tears down at end-of-experiment), and hosts:
-  - **Dataset generator** — produces the prompt dataset (synthetic with unique headers, or real-text e.g. LongBench); runs to completion before the load generator starts (per §1's separation of concerns). (§7)
+- **Benchmarker** — Coordinator-submitted SLURM allocation, one per experiment, separate from the inference deployment's. Runs three sequential phases — dataset prep → engine spawn → load generation. Spawns the inference deployment(s) under test **only after the dataset generator has completed** (so GPUs stay out of idle during CPU-bound prompt prep); polls readiness, records model-load times into `instances`, tears down at end-of-experiment. Hosts:
+  - **Dataset generator** — produces the prompt dataset (synthetic with unique headers, or real-text e.g. LongBench). (§7)
   - **Load generator** — awaits LLM readiness, sends requests at Poisson rate λ, collects per-request metrics. (§7, §8, §9, §10)
 - **Inference deployment(s) under test** — the actual subject of measurement: one or more LLM serving stacks (engine + replicas + ingress/auth/accounting where applicable), spawned by the Benchmarker as separate SLURM jobs (SLURM target) or K8s manifests (K8s target). A single experiment may deploy multiple instances of the same configuration for multi-replica / routing studies — each instance is recorded as a row in the `instances` table. (§2, §5, §13.2)
 

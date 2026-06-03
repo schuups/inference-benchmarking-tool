@@ -1,13 +1,15 @@
 #!/bin/bash
 #
-# Intra-node NCCL pre-check: 1 node × 4 GH200 GPUs over NVLink-C2C.
+# Intra-node NCCL + NVSHMEM pre-check: 1 node × 4 GH200 GPUs over NVLink-C2C.
 #
-# Runs in the SAME engine container as the vLLM job would (engine EDF passed
-# via $ENGINE_EDF), per SPECIFICATIONS.md §8.2. Build is cached on persistent
-# storage; first run compiles nccl-tests, subsequent runs reuse the binaries.
+# All steps run in the SAME engine container session (one srun, concatenated
+# commands), matching the Kubernetes "bash -c 'precheck && exec engine'" form
+# (SPECIFICATIONS.md §8.2). Pass the engine EDF via $ENGINE_EDF.
 #
-# Collective set covers TP, sequence-parallel, and MoE expert dispatch:
-#   all_reduce, all_gather, alltoall. Override via COLLECTIVES.
+# Builds nccl-tests on first run (rank 0 only, others wait on sentinel) and
+# caches under a stack-fingerprinted directory so a bumped engine image lands
+# in a fresh cache. NVSHMEM is skipped with a warning if the engine image
+# does not ship the perftest binaries.
 
 #SBATCH --account=csstaff
 #SBATCH --partition=normal
@@ -24,18 +26,20 @@
 : "${NCCL_TESTS_CACHE:=/capstor/scratch/cscs/$USER/nccl-tests-cache}"
 : "${COLLECTIVES:=all_reduce all_gather alltoall}"
 : "${MSG_END:=8G}"
+: "${NVSHMEM_REQUIRED:=0}"
 : "${ENGINE_EDF:?point ENGINE_EDF at the engine EDF path, e.g. /capstor/scratch/cscs/USER/experiment/engine.toml}"
-export NCCL_TESTS_VERSION NCCL_TESTS_CACHE COLLECTIVES MSG_END
+export NCCL_TESTS_VERSION NCCL_TESTS_CACHE COLLECTIVES MSG_END NVSHMEM_REQUIRED
 
 PRECHECK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export PRECHECK_DIR
 
-# 1) Build once (cached). One rank only.
-srun -n 1 --environment="${ENGINE_EDF}" \
+# One srun, one container session per rank. Each rank runs the full chain:
+# build (rank 0 only, others wait), run NCCL collectives, run NVSHMEM perftest.
+# In the real benchmarker, append `&& exec <engine command>` so the engine
+# also runs in the same container session — identical libfabric/CUDA/NCCL.
+srun --mpi=pmix --environment="${ENGINE_EDF}" bash -c '
+    set -eo pipefail
     "${PRECHECK_DIR}/build-nccl-tests.sh"
-
-# 2) Run the collective set at the engine's intra-node rank topology.
-srun --mpi=pmix --environment="${ENGINE_EDF}" \
     "${PRECHECK_DIR}/run-collectives.sh"
-
-# In the real benchmark, the engine srun follows here (same allocation, same
-# EDF). This example stops after the pre-check.
+    "${PRECHECK_DIR}/run-nvshmem.sh"
+'

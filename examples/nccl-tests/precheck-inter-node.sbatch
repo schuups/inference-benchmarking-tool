@@ -1,13 +1,13 @@
 #!/bin/bash
 #
-# Inter-node NCCL pre-check: 2 nodes × 4 GH200 GPUs over HPE Slingshot 11.
+# Inter-node NCCL + NVSHMEM pre-check: 2 nodes × 4 GH200 GPUs over HPE Slingshot 11.
 #
-# Runs in the SAME engine container as the vLLM job would (engine EDF passed
-# via $ENGINE_EDF), per SPECIFICATIONS.md §8.2. Build is cached; first run
-# compiles, subsequent runs reuse.
+# All steps run in the SAME engine container session (one srun, concatenated
+# commands), matching the Kubernetes "bash -c 'precheck && exec engine'" form
+# (SPECIFICATIONS.md §8.2). Pass the engine EDF via $ENGINE_EDF.
 #
 # This is the bandwidth that bounds multi-node TP / PP / MoE inference. If
-# busbw at 128 MiB is far below the CSCS reference for the engaged collective,
+# NCCL all_reduce busbw at 128 MiB is far below the CSCS reference (~122 GB/s),
 # the AWS OFI NCCL hook likely didn't fire — see README.md.
 
 #SBATCH --account=csstaff
@@ -24,13 +24,16 @@
 : "${NCCL_TESTS_CACHE:=/capstor/scratch/cscs/$USER/nccl-tests-cache}"
 : "${COLLECTIVES:=all_reduce all_gather alltoall}"
 : "${MSG_END:=128M}"
+: "${NVSHMEM_REQUIRED:=0}"
 : "${ENGINE_EDF:?point ENGINE_EDF at the engine EDF path, e.g. /capstor/scratch/cscs/USER/experiment/engine.toml}"
-export NCCL_TESTS_VERSION NCCL_TESTS_CACHE COLLECTIVES MSG_END
+export NCCL_TESTS_VERSION NCCL_TESTS_CACHE COLLECTIVES MSG_END NVSHMEM_REQUIRED
 
 PRECHECK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export PRECHECK_DIR
 
-srun -n 1 --environment="${ENGINE_EDF}" \
+srun --mpi=pmix --environment="${ENGINE_EDF}" bash -c '
+    set -eo pipefail
     "${PRECHECK_DIR}/build-nccl-tests.sh"
-
-srun --mpi=pmix --environment="${ENGINE_EDF}" \
     "${PRECHECK_DIR}/run-collectives.sh"
+    "${PRECHECK_DIR}/run-nvshmem.sh"
+'

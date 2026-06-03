@@ -1,0 +1,65 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: temp-example-deployment
+  namespace: ml
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: temp-example-deployment
+  template:
+    metadata:
+      labels:
+        app: temp-example-deployment
+    spec:
+      tolerations:
+      - key: hpc
+        operator: Equal
+        value: "true"
+        effect: NoSchedule
+      - key: hpc
+        operator: Equal
+        value: "true"
+        effect: NoExecute
+      containers:
+      - name: vllm
+        image: jfrog.svc.cscs.ch/docker/vllm-cxi:latest
+        args:
+        - --model
+        - swiss-ai/Apertus-8B-Instruct-2509
+        - --host
+        - "0.0.0.0"
+        - --port
+        - "8080"
+        - --tensor-parallel-size
+        - "1"
+        - --served-model-name
+        - swiss-ai/Apertus-8B-Instruct-2509
+        ports:
+        - containerPort: 8080
+          name: http
+          protocol: TCP
+        resources:
+          requests:
+            nvidia.com/gpu: 1
+            ephemeral-storage: 60Gi
+          limits:
+            nvidia.com/gpu: 1
+        startupProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 120
+          periodSeconds: 10
+          failureThreshold: 30
+        env:
+        - name: HF_HOME
+          value: /data/huggingface
+        volumeMounts:
+        - name: cache
+          mountPath: /data/huggingface
+      volumes:
+      - name: cache
+        persistentVolumeClaim:
+          claimName: temp-example-deployment-cache

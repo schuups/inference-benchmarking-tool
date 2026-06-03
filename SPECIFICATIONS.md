@@ -1,6 +1,6 @@
 # Inference Benchmarking — Specification
 
-This document enumerates all requirements captured through design and implementation.
+This document enumerates all requirements captured so far.
 
 ## Table of Contents
 
@@ -26,35 +26,34 @@ This document enumerates all requirements captured through design and implementa
 
 ## 1. Guiding Principles
 
-- **Laptop-orchestrated**: all coordination runs on the operator's laptop; no coordinator node
-  is allocated on the cluster.
+- **Laptop-orchestrated**: the Coordinator runs on the operator's laptop — submits the
+  Benchmarker job, monitors execution, collects per-run results into the centralised DB,
+  tears down. Cluster-side sequencing (engine spawn, dataset gen → load gen) is the
+  Benchmarker's job. The laptop carries orchestration and the results DB; the cluster
+  carries the work.
 - **Backend-agnostic**: vLLM, sglang, and NVIDIA Dynamo are first-class backends. Adding a new
   one requires a new EDF template, sbatch template, and K8s deployment template only.
-- **Open-loop stochastic load generation**: requests are issued by configurable arrival
-  processes (Poisson and burst-aware variants — §10.3) at mean rate λ, independent of server
-  completions. This faithfully models queuing behaviour — backlog formation, saturation,
-  latency amplification — under both steady and bursty load.
+- **Open-loop stochastic load generation**: requests arrive at mean rate λ via Poisson or
+  burst-aware processes (§10.3), independent of server completions. This captures the
+  **queuing dimension** of real load — backlog, saturation, latency amplification — but is
+  one of two axes; semantic realism (prompt content, multi-turn structure, fan-out, modality
+  mix) lives in the scenario registry (§7) and is equally necessary.
 - **Reproducible by config**: a single YAML file fully specifies a sweep. Re-running the same
   file must produce comparable results.
-- **Scenario-disclosed results**: every result carries a **scenario manifest** stating what
-  the scenario models (e.g. agentic-coding-style large prompts with follow-up turns), what
-  it explicitly does *not* model (e.g. no image inputs, no audio, no reasoning traces), and
-  the numeric assumptions baked in (e.g. follow-up turn probability, max output tokens).
-  Reports surface this manifest prominently so downstream plots cannot be read out of
-  context (§13.8, §14.1).
-- **Separation of concerns**: the inference server runs on its own (GPU) allocation. The
-  **Benchmarker** is a separate SLURM allocation hosting the **dataset generator** and the
-  **load generator** as distinct, sequential phases — prompt preparation always completes
-  before measurement begins. No benchmark CPU work competes with GPU inference, and dataset
-  generation never overlaps with load generation.
+- **Scenario-disclosed results**: no plot is published without its scenario manifest —
+  what the workload models, what it does not, and the numeric assumptions. A reader must
+  understand the experiment behind a chart without leaving the report (§13.8, §14.1).
+- **Separation of concerns**: the inference deployment runs on its own (GPU) allocation,
+  spawned by the **Benchmarker** — a separate SLURM allocation that runs the **dataset
+  generator** then the **load generator** as sequential phases. The deployment is spawned
+  only after the dataset is ready, so GPUs do not sit idle during prompt prep. No benchmark
+  CPU work competes with GPU inference.
 - **Validated foundation**: every experiment is preceded by synthetic micro-benchmarks
-  (NCCL, GPU memory, system memory, storage, network) that verify baseline hardware
-  performance against per-system reference values (§8). The pre-checks run in the
-  **exact software environment** the LLM engine will run in moments later — same image,
-  same env vars, same mounts, same NUMA pinning, same library / NCCL configuration —
-  so what is measured is the foundation the engine actually sits on, not a sibling
-  environment. A degraded foundation surfaces a warning before the LLM sweep runs and
-  offers the operator the chance to abort.
+  (NCCL / RCCL collectives, NVSHMEM, storage — §8) verifying baseline hardware against
+  per-system references. They run in the **same container session** as the engine
+  (concatenated invocation, identical libfabric / CUDA / NCCL / mounts / NUMA), so the
+  measured foundation is the one the engine sits on. A degraded foundation pauses the
+  sweep and offers the operator an abort.
 - **Observed execution**: throughout every sweep, GPU, CPU, memory, storage, and network
   telemetry is sampled on every inference-server node (§11.5). Untapped hardware headroom
   is then distinguishable from genuine saturation when interpreting latency / throughput
@@ -518,7 +517,8 @@ Pre-checks cover the two planes whose performance directly bounds LLM serving:
 | Plane | Benchmark | Validates |
 |---|---|---|
 | Collective communication | NCCL / RCCL `all_reduce`, `all_gather`, and `alltoall` (see `examples/nccl-tests/`), run at the exact rank topology the engine will use | Both **intra-node** GPU-to-GPU bandwidth (NVLink / NVLink-C2C on GH200, Infinity Fabric on MI300A) and **inter-node** fabric bandwidth (HPE Slingshot 11 on Alps). One pre-check job covers both: NCCL / RCCL exercises whichever links the rank set requires. The three-collective set is the union of what dense and MoE inference exercise — `all_reduce` for TP forward, `all_gather` for sequence-parallel and weight gather, `alltoall` for MoE expert dispatch. Add `reduce_scatter`, `sendrecv`, `broadcast`, etc. to the suite for engines using those paths (e.g. pipeline parallelism). No separate IB / Ethernet / `iperf3` test — Alps has no IB, and Slingshot is exercised end-to-end via the AWS OFI NCCL plugin. |
-| Storage | Sequential read against the model-weights mount the engine job uses (`PVC` on Kubernetes; `capstor` or `iopstor` on SLURM, whichever the engine job mounts) | Filesystem read throughput as seen by the engine. On `capstor` (Lustre) this also validates that `safetensors_load_strategy=prefetch` is taking effect (see §15.2). |
+| GPU-initiated one-sided RMA (NVSHMEM) | NVSHMEM perftest binaries shipped with the engine image — e.g. `device/coll/alltoall_latency`, `device/pt-to-pt/shmem_put_bw`, `host/coll/host_alltoall_latency` — run at the engine's rank topology | NVSHMEM put / get bandwidth and one-sided all-to-all latency. Important for MoE engines that **bypass NCCL** for expert dispatch (e.g. DeepEP, TRT-LLM MoE kernels). The path is GPU-initiated and routed through libfabric+CXI on Alps, so it can degrade independently of the NCCL plugin. Skipped with a warning (not failure) if the engine image does not include NVSHMEM; enforce with `nvshmem_required: true`. |
+| Storage | Sequential read against the model-weights mount the engine job uses | Filesystem read throughput as seen by the engine. Three filesystem classes the framework expects: `capstor` (Lustre, spinning-disk backend; **SLURM-only**), `iopstor` (Lustre, all-flash backend; **SLURM-only**), and Ceph-backed PVCs on Kubernetes. On either Lustre tier this also validates that `safetensors_load_strategy=prefetch` is taking effect (see §15.2). |
 
 GPU memory bandwidth (`bandwidthTest`) and host DRAM bandwidth (STREAM) are intentionally
 **not** in the pre-check suite — they are stable per-SKU characteristics that rarely
@@ -533,33 +533,40 @@ engine will actually sit on, and defeats the gate.
 
 ### 8.2 Execution
 
-- Pre-checks run in the **same process environment** the LLM engine will run in — same
-  image, same env, same mounts, same pinning. Concretely:
-  - **SLURM**: invoked via `srun --environment=<engine-edf>` against the same EDF file the
-    engine job uses, in the same allocation, so all `--container-mounts`, `--env`, and
-    NUMA/CPU bindings are identical.
-  - **Kubernetes**: invoked as a **pre-launch command in the engine's own pod and
-    container** (e.g. `command: ["bash", "-c", "run_prechecks && exec <engine>"]`),
-    *not* as a separate init container. The engine sidecar's env vars, volume mounts,
-    `securityContext`, and resource requests are then guaranteed to be in effect during
+- Pre-checks run in the **same container instance** the LLM engine will run in — not a
+  sibling container, not an init container. Pre-check + engine commands are **concatenated
+  into one container invocation** on both targets, so the dynamic linker has resolved the
+  exact same libfabric / CUDA / NCCL / OpenMPI build for the checks and the engine:
+  - **SLURM**: `srun --environment=<engine-edf> bash -c "run_prechecks && exec <engine>"`.
+    One container session per task, shared between the pre-check and the engine. Same
+    `--mpi`, `--container-mounts`, `--env`, and NUMA / CPU bindings apply throughout.
+  - **Kubernetes**: pre-launch command in the engine's own pod and container —
+    `command: ["bash", "-c", "run_prechecks && exec <engine>"]`. Same engine container,
+    same env vars, mounts, `securityContext`, and resource requests in effect during
     the checks.
 - The NCCL benchmark uses upstream [`NVIDIA/nccl-tests`](https://github.com/NVIDIA/nccl-tests),
   compiled inside the engine container at first use and cached on persistent storage. No
-  dedicated test image — the binaries live in the same image the engine runs in. Two
-  configuration knobs flow from the benchmark YAML / sweep:
-  - `nccl_tests_version` — the git tag to build (e.g. `2.17.1`). Pinned per experiment for
-    reproducibility; bumping it triggers a fresh build into a separate cache directory and
-    leaves earlier caches intact.
+  dedicated test image. Because binaries built against one CUDA / NCCL / OpenMPI / libfabric
+  combination are not ABI-portable to another, the cache directory is keyed by a
+  **stack fingerprint** — a hash of the versions of CUDA, NCCL, OpenMPI, libfabric, and
+  `nccl-tests` detected in the engine container. Changing the engine image lands in a new
+  cache directory; older caches survive in parallel and can be reused if the engine reverts.
+  Configuration knobs flow from the benchmark YAML / sweep:
+  - `nccl_tests_version` — git tag to build (e.g. `2.17.1`). Pinned per experiment.
   - `nccl_tests_cache_dir` — persistent path where compiled binaries live (default
-    `/capstor/scratch/cscs/$USER/nccl-tests-cache` on SLURM, a PVC mount on K8s). Shared
+    `/capstor/scratch/cscs/$USER/nccl-tests-cache` on SLURM; a PVC mount on K8s). Shared
     across experiments; safe to delete to force a rebuild.
 
-  Because the build runs inside the engine container, the engine image must carry the
-  build tools (`make`, `g++`, `libopenmpi-dev`, `openmpi-bin`, `curl`, `tar`). Pre-checks
-  abort with a clear error if any are missing.
+  The pre-check script **installs missing build tools** (`make`, `g++`, OpenMPI dev, `curl`,
+  `tar`) inside the engine container via `apt-get` / `dnf` / `yum` rather than aborting —
+  the engine image is not required to ship them. Only the rank holding the build lock
+  performs the install, so apt is not hammered by `N` ranks concurrently.
+- The NVSHMEM benchmark uses the perftest binaries that ship with the engine image's
+  NVSHMEM SDK (no separate build). If NVSHMEM is absent the row is skipped with a warning;
+  set `nvshmem_required: true` in the benchmark YAML to make absence a failure.
 - Total wall-clock budget for the full pre-check suite: ≤ 120 s on cache-hit (configurable
-  via `system_prechecks_timeout_s`); the first-time `nccl-tests` build adds ~30 s and is
-  not counted against this budget.
+  via `system_prechecks_timeout_s`). First-time `nccl-tests` build adds ~30 s and any
+  package install adds ~10–20 s; neither is counted against the suite budget.
 - Pre-check output is streamed to the structured log and persisted in the `system_prechecks`
   table (§13.6).
 
@@ -579,21 +586,33 @@ Initial table (placeholder values — populated after first characterisation run
 | `clariden` | 4× GH200, 1 node | NCCL `all_reduce` | 128 MiB | TBD GB/s busbw | -10% |
 | `clariden` | 4× GH200, 1 node | NCCL `all_gather` | 128 MiB | TBD GB/s busbw | -10% |
 | `clariden` | 4× GH200, 1 node | NCCL `alltoall` | 128 MiB | TBD GB/s busbw | -10% |
+| `clariden` | 4× GH200, 1 node | NVSHMEM `alltoall_latency` | 128 KiB | TBD µs | +20% |
+| `clariden` | 4× GH200, 1 node | NVSHMEM `shmem_put_bw` | 128 MiB | TBD GB/s | -10% |
 | `clariden` | 8× GH200, 2 nodes | NCCL `all_reduce` | 128 MiB | TBD GB/s busbw | -10% |
 | `clariden` | 8× GH200, 2 nodes | NCCL `all_gather` | 128 MiB | TBD GB/s busbw | -10% |
 | `clariden` | 8× GH200, 2 nodes | NCCL `alltoall` | 128 MiB | TBD GB/s busbw | -10% |
-| `clariden` | `capstor` weights mount | Sequential read | 1 MiB blocks | TBD GB/s | -15% |
-| `clariden` | `iopstor` weights mount | Sequential read | 1 MiB blocks | TBD GB/s | -15% |
+| `clariden` | 8× GH200, 2 nodes | NVSHMEM `alltoall_latency` | 128 KiB | TBD µs | +20% |
+| `clariden` | 8× GH200, 2 nodes | NVSHMEM `shmem_put_bw` | 128 MiB | TBD GB/s | -10% |
+| `clariden` | `capstor` weights mount (Lustre, HDD) | Sequential read | 1 MiB blocks | TBD GB/s | -15% |
+| `clariden` | `iopstor` weights mount (Lustre, flash) | Sequential read | 1 MiB blocks | TBD GB/s | -15% |
 | `beverin` | 4× MI300A, 1 node | RCCL `all_reduce` | 128 MiB | TBD GB/s busbw | -10% |
 | `beverin` | 4× MI300A, 1 node | RCCL `all_gather` | 128 MiB | TBD GB/s busbw | -10% |
 | `beverin` | 4× MI300A, 1 node | RCCL `alltoall` | 128 MiB | TBD GB/s busbw | -10% |
 | `beverin` | 8× MI300A, 2 nodes | RCCL `all_reduce` | 128 MiB | TBD GB/s busbw | -10% |
 | `beverin` | 8× MI300A, 2 nodes | RCCL `all_gather` | 128 MiB | TBD GB/s busbw | -10% |
 | `beverin` | 8× MI300A, 2 nodes | RCCL `alltoall` | 128 MiB | TBD GB/s busbw | -10% |
+| `beverin` | `capstor` weights mount (Lustre, HDD) | Sequential read | 1 MiB blocks | TBD GB/s | -15% |
+| `beverin` | `iopstor` weights mount (Lustre, flash) | Sequential read | 1 MiB blocks | TBD GB/s | -15% |
 | `breithorn` | 4× gh200, 1 pod | NCCL `all_reduce` | 128 MiB | TBD GB/s busbw | -10% |
 | `breithorn` | 4× gh200, 1 pod | NCCL `all_gather` | 128 MiB | TBD GB/s busbw | -10% |
 | `breithorn` | 4× gh200, 1 pod | NCCL `alltoall` | 128 MiB | TBD GB/s busbw | -10% |
-| `breithorn` | PVC weights mount | Sequential read | 1 MiB blocks | TBD GB/s | -15% |
+| `breithorn` | 4× gh200, 1 pod | NVSHMEM `alltoall_latency` | 128 KiB | TBD µs | +20% |
+| `breithorn` | 4× gh200, 1 pod | NVSHMEM `shmem_put_bw` | 128 MiB | TBD GB/s | -10% |
+| `breithorn` | Ceph PVC weights mount | Sequential read | 1 MiB blocks | TBD GB/s | -15% |
+
+NVSHMEM is generally absent on RCCL stacks (no NVIDIA shared-memory runtime on MI300A);
+the AMD-side equivalent (ROCm SHMEM) is not yet in scope. Beverin rows therefore omit
+NVSHMEM measurements until ROCm SHMEM coverage is added.
 
 ### 8.4 Outcome and abort flow
 
@@ -1067,11 +1086,22 @@ The executed notebook (`report.ipynb`) and its rendered plots (`ttft.png`, `itl.
 | `--safetensors-load-strategy` | ✅ Works | |
 | `--speculative-config` | ✅ Works | JSON string |
 
-### 15.2 Capstor filesystem
+### 15.2 SLURM weight-storage mounts (capstor, iopstor)
 
-- capstor is **Lustre**, not Ceph. vLLM misidentifies it and disables auto-prefetch.
-- Use `--safetensors-load-strategy=prefetch` to force Lustre-optimised parallel shard loading.
-- Expected gain: ~10–20 s on a 131 GiB checkpoint.
+Both `capstor` and `iopstor` are CSCS-managed parallel **Lustre** filesystems exposed to
+SLURM jobs (not to Kubernetes — `breithorn` uses Ceph-backed PVCs instead). They differ
+in their storage tier:
+
+| Mount | Backend | Profile | Use for |
+|---|---|---|---|
+| `capstor` | Spinning-disk Lustre | High peak sequential bandwidth; slower random I/O and metadata | Bulk model weights, large sequential reads |
+| `iopstor` | All-flash Lustre | Lower peak sequential ceiling; fast random / small I/O / metadata | Workloads dominated by many small reads (heavy fine-grained checkpoints, KV-state spills) |
+
+- vLLM misidentifies Lustre as Ceph on **both** mounts and disables auto-prefetch. Set
+  `--safetensors-load-strategy=prefetch` to force Lustre-optimised parallel shard loading.
+- Expected weight-load gain: ~10–20 s on a 131 GiB checkpoint on `capstor`. `iopstor`
+  delivers a similar or larger gain when shard files are small or many.
+- Choose `iopstor` over `capstor` when first-byte / metadata latency dominates startup.
 
 ### 15.3 GH200 KV cache capacity (70B, TP=4)
 

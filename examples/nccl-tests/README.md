@@ -1,111 +1,127 @@
-# NCCL pre-check on Alps (HPE Slingshot 11, GH200)
+# Communication-plane pre-check on Alps (HPE Slingshot 11, GH200)
 
 Validates the **collective-communication plane** for the inference benchmarker.
-One pre-check covers both:
+One pre-check job covers:
 
-- **Intra-node** GPU-to-GPU bandwidth (NVLink-C2C between the 4 GH200 on one node)
-- **Inter-node** fabric bandwidth (HPE Slingshot 11)
+- **NCCL collectives** — `all_reduce`, `all_gather`, `alltoall` (configurable).
+- **NVSHMEM perftest** — one-sided put/get bandwidth and all-to-all latency,
+  the path MoE engines (DeepEP, TRT-LLM MoE kernels) use when bypassing NCCL.
 
-The same NCCL test exercises whichever links the requested rank topology requires.
-Alps has no InfiniBand; the Slingshot 11 path is reached through the
+Both intra-node (NVLink-C2C between 4 GH200) and inter-node (Slingshot 11) cuts
+are provided; NCCL exercises whichever links the rank topology requires.
+Alps has no InfiniBand — the Slingshot 11 path reaches NCCL through the
 **AWS OFI NCCL hook**, injected at launch by the CSCS Container Engine when the
-EDF carries the right annotation.
+engine EDF carries the right annotation.
 
-## Operating model: runs in the engine container
+## Operating model: same container, concatenated commands
 
-Per `SPECIFICATIONS.md` §8.2, the pre-check runs in the **same allocation, the
-same EDF, and the same container image** as the engine launch that follows it —
-not in a separate image. The example here is a thin pair of sbatch files that
-build `nccl-tests` once (cached on persistent storage), then run a small set of
-collectives at the engine's rank topology, all using your engine's EDF.
+Per `SPECIFICATIONS.md` §8.2, the pre-check runs in the **same container instance**
+as the engine launch that follows it — not in a separate image, not in an init
+container. On both SLURM and Kubernetes the pattern is identical:
 
-There is therefore **no Containerfile in this directory**. Two prerequisites the
-engine image and engine EDF must already satisfy:
+```
+srun --environment=<edf> bash -c "precheck && exec <engine>"      # SLURM
+command: ["bash", "-c", "precheck && exec <engine>"]              # K8s
+```
 
-1. **Build tools in the engine image** — `nccl-tests` is compiled at first use
-   from inside the engine container. The image needs `make`, `g++`, `curl`,
-   `tar`, and `libopenmpi-dev` + `openmpi-bin` (or equivalent MPI dev). If
-   any are missing, `build-nccl-tests.sh` exits with a clear error. The Alps
-   engine image (`examples/docker-images-build/`) is the place to add them.
-2. **AWS OFI NCCL hook and env in the engine EDF** — without these the
-   multi-node bandwidth collapses to ~5 GB/s. Add to the EDF:
-   ```toml
-   [annotations]
-   "com.hooks.aws_ofi_nccl.enabled" = "true"
-   "com.hooks.aws_ofi_nccl.variant" = "cuda12"
+A single container session means the pre-check and the engine see exactly the
+same libfabric, CUDA, NCCL, and OpenMPI libraries — what the test measures is
+the foundation the engine actually sits on.
 
-   [env]
-   NCCL_NET                    = "AWS Libfabric"
-   NCCL_NET_GDR_LEVEL          = "PHB"
-   NCCL_CROSS_NIC              = "1"
-   NCCL_PROTO                  = "^LL128"
-   NCCL_NCHANNELS_PER_NET_PEER = "4"
-   PMIX_MCA_psec               = "native"
-   FI_CXI_DEFAULT_CQ_SIZE      = "131072"
-   FI_CXI_DEFAULT_TX_SIZE      = "16384"
-   FI_CXI_DISABLE_HOST_REGISTER = "1"
-   FI_CXI_RX_MATCH_MODE        = "software"
-   FI_MR_CACHE_MONITOR         = "userfaultfd"
-   MPICH_GPU_SUPPORT_ENABLED   = "0"
-   ```
-   **Do not** set `NCCL_NET_PLUGIN` — the hook sets it internally; setting it
-   manually disables the hook (CSCS warns explicitly).
+The example sbatch files here run the precheck only (no `exec <engine>` tail) —
+add the engine command when wiring this into a real experiment.
 
-## What gets tested
+## Cache key includes the stack
 
-The default collective set is the union of what dense and MoE LLM serving
-actually exercises:
+Tests built against one CUDA / NCCL / OpenMPI / libfabric / `nccl-tests` combo
+are not ABI-portable to another. The cache directory is therefore keyed by both
+the `nccl-tests` version **and** a fingerprint of the tool versions detected in
+the engine container at build time:
 
-| Collective | What it bounds in inference |
-|---|---|
-| `all_reduce` | Tensor-parallel forward path (every TP step). |
-| `all_gather` | TP with sequence-parallel attention; weight-gather paths. |
-| `alltoall` | MoE token-to-expert dispatch and the reverse path. **Specifically important for Kimi-K2.6, DeepSeek-V4 Pro, GLM-5.1.** |
+```
+$NCCL_TESTS_CACHE/v<version>-<fingerprint>/build/
+```
 
-Reduce-scatter, send/recv, broadcast, etc. are also built into the cache by
-`build-nccl-tests.sh` — add them to `COLLECTIVES` if your engine uses them
-(e.g. `sendrecv` for pipeline-parallel serving).
+Any change to the engine image (new CUDA, new NCCL, new MPI, new libfabric)
+lands in a fresh cache directory; older caches survive in parallel and are
+reused if you revert. See `_stack-fingerprint.sh` for the exact fingerprint
+inputs.
+
+## Install-on-missing build dependencies
+
+`build-nccl-tests.sh` installs `make`, `g++`, OpenMPI dev headers, `curl`, and
+`tar` via `apt-get` / `dnf` / `yum` if they are not in the engine image —
+**the engine image is not required to ship them**. Only the rank holding the
+build lock performs the install, so apt is not hammered by `N` concurrent
+ranks. Install is skipped on cache-hit.
 
 ## Files
 
 | File | Role |
 |---|---|
-| `build-nccl-tests.sh` | Idempotent build of `nccl-tests` `v$NCCL_TESTS_VERSION` into `$NCCL_TESTS_CACHE/v<version>/build/`. Sentinel-gated, atomic-publish. Run via `srun -n 1`. |
+| `_stack-fingerprint.sh` | Shared helper — sourced by build + run scripts to derive the cache directory from the engine container's tool versions. |
+| `build-nccl-tests.sh` | Rank-0 build of `nccl-tests` `v$NCCL_TESTS_VERSION`. Sentinel-gated, install-on-missing, atomic-publish. Other ranks wait on the sentinel. |
 | `run-collectives.sh` | Per-rank entrypoint executed under `srun --mpi=pmix`. Loops over `$COLLECTIVES`, runs each `<name>_perf -b 8 -e $MSG_END -f 2 -g 1`. |
-| `precheck-intra-node.sbatch` | 1 node × 4 GH200 (NVLink-C2C). Default `MSG_END=8G`. |
-| `precheck-inter-node.sbatch` | 2 nodes × 4 GH200 (Slingshot 11). Default `MSG_END=128M` (CSCS reference message size). |
+| `run-nvshmem.sh` | Per-rank NVSHMEM perftest. Discovers binaries shipped with the engine image's NVSHMEM SDK; skip-with-warning if NVSHMEM is absent (`NVSHMEM_REQUIRED=1` to enforce). |
+| `precheck-intra-node.sbatch` | 1 node × 4 GH200 (NVLink-C2C). `MSG_END=8G`. |
+| `precheck-inter-node.sbatch` | 2 nodes × 4 GH200 (Slingshot 11). `MSG_END=128M` (CSCS reference). |
+
+## Engine-EDF prerequisites
+
+For multi-node NCCL bandwidth to be meaningful, the engine EDF that
+`$ENGINE_EDF` points to must enable the AWS OFI NCCL hook and set the
+CSCS-published env. Add to the engine EDF:
+
+```toml
+[annotations]
+"com.hooks.aws_ofi_nccl.enabled" = "true"
+"com.hooks.aws_ofi_nccl.variant" = "cuda12"
+
+[env]
+NCCL_NET                    = "AWS Libfabric"
+NCCL_NET_GDR_LEVEL          = "PHB"
+NCCL_CROSS_NIC              = "1"
+NCCL_PROTO                  = "^LL128"
+NCCL_NCHANNELS_PER_NET_PEER = "4"
+PMIX_MCA_psec               = "native"
+FI_CXI_DEFAULT_CQ_SIZE      = "131072"
+FI_CXI_DEFAULT_TX_SIZE      = "16384"
+FI_CXI_DISABLE_HOST_REGISTER = "1"
+FI_CXI_RX_MATCH_MODE        = "software"
+FI_MR_CACHE_MONITOR         = "userfaultfd"
+MPICH_GPU_SUPPORT_ENABLED   = "0"
+```
+
+**Do not** set `NCCL_NET_PLUGIN` — the hook sets it internally; setting it
+manually disables the hook and multi-node bandwidth collapses to ~5 GB/s
+(CSCS warns explicitly).
 
 ## Sweep parameters (env vars)
 
-All four sbatch invocations honour these env vars; the benchmark coordinator
-exports them before `sbatch`. Defaults are sensible standalone values.
+The benchmark coordinator exports these before `sbatch`. Defaults are
+sensible standalone values.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `NCCL_TESTS_VERSION` | `2.17.1` | git tag of `github.com/NVIDIA/nccl-tests`. Pinned per experiment for reproducibility; bumping it triggers a re-build into a separate cache directory (old cache stays). |
-| `NCCL_TESTS_CACHE` | `/capstor/scratch/cscs/$USER/nccl-tests-cache` | Persistent dir for source + compiled binaries. Shared across all experiments by default. |
-| `COLLECTIVES` | `all_reduce all_gather alltoall` | Space-separated list of collectives to run. |
+| `NCCL_TESTS_VERSION` | `2.17.1` | git tag of `github.com/NVIDIA/nccl-tests`. Pinned per experiment. |
+| `NCCL_TESTS_CACHE` | `/capstor/scratch/cscs/$USER/nccl-tests-cache` | Persistent dir for source + compiled binaries; per-stack subdirs live underneath. |
+| `COLLECTIVES` | `all_reduce all_gather alltoall` | Space-separated list. Append `reduce_scatter`, `sendrecv`, `broadcast` as needed. |
 | `MSG_END` | `8G` (intra) / `128M` (inter) | Upper bound of the message-size sweep. |
-| `ENGINE_EDF` | *(required)* | Path to the engine's EDF. The pre-check uses this exact file — same image, mounts, env, and AWS OFI hook annotation as the engine job. |
+| `NVSHMEM_REQUIRED` | `0` | `1` makes missing NVSHMEM in the engine image a hard failure. |
+| `NVSHMEM_BIN_DIR` | *(auto-discover)* | Override path to the NVSHMEM perftest directory. |
+| `NVSHMEM_TESTS` | `device/coll/alltoall_latency device/pt-to-pt/shmem_put_bw` | Relative paths from the perftest directory. |
+| `ENGINE_EDF` | *(required)* | Path to the engine EDF. The pre-check uses this exact file — same image, mounts, env, and AWS OFI hook annotation as the engine job. |
 
 ## Running
 
 ```bash
-# Point at the engine EDF the pre-check should use (this is the file that
-# encodes the AWS OFI hook annotation + NCCL env above):
 export ENGINE_EDF=/capstor/scratch/cscs/$USER/my-experiment/engine.toml
-
-# Optional overrides:
-export NCCL_TESTS_VERSION=2.17.1
-export COLLECTIVES="all_reduce all_gather alltoall"
-
-# Submit.
 sbatch precheck-intra-node.sbatch
 sbatch precheck-inter-node.sbatch
 ```
 
-First run on a fresh cache compiles `nccl-tests` (~30 s); subsequent runs are
-build-free.
+First run on a fresh stack fingerprint compiles `nccl-tests` (~30 s) and may
+install build deps (~10–20 s); subsequent runs are cache-hit.
 
 ## Reading the output
 
@@ -115,37 +131,23 @@ Each `<collective>_perf` block prints:
        size    count    type   redop    time     algbw    busbw   #wrong
 ```
 
-The pre-check cares about **`busbw`** at large messages (≥ 128 MiB on inter-node,
-≥ 1 GiB on intra-node). CSCS publishes the following reference points for the
-`all_reduce` case; use them as a sanity gate:
+The pre-check cares about **`busbw`** at large messages (≥ 128 MiB inter-node,
+≥ 1 GiB intra-node). CSCS publishes the following reference points for the
+`all_reduce` case:
 
 | Topology | Message | Hook | Expected `busbw` (all_reduce) |
 |---|---|---|---|
 | 2 nodes × 4 GH200 | 128 MiB | **on** | ≈ 122 GB/s |
 | 2 nodes × 4 GH200 | 128 MiB | **off** (broken) | ≈ 5 GB/s |
 
-A 1-node intra-node `all_reduce` should comfortably exceed the multi-node
-number. `alltoall` busbw is typically lower than `all_reduce` because every
-rank exchanges with every rank — but the same hook-on / hook-off ratio
-applies as a degradation indicator.
-
-If a multi-node run reports ≈ 5 GB/s on `all_reduce`, the AWS OFI hook didn't
-fire. Check:
+If a multi-node run reports ≈ 5 GB/s, the AWS OFI hook didn't fire. Check:
 
 - `[annotations]` in the engine EDF carries `com.hooks.aws_ofi_nccl.enabled = "true"`.
 - You did **not** set `NCCL_NET_PLUGIN` anywhere.
-- The image the EDF references is the one you actually pushed (re-pull / re-tag
-  if unsure).
+- The image the EDF references is the one you actually pushed.
 
-## Why this replaces both `iperf3` and `bandwidthTest`
-
-NCCL exercises the same Slingshot 11 path `iperf3` would, but in the
-configuration the engine actually uses (rank-to-rank collectives over AWS OFI
-plugin, not point-to-point TCP). HBM bandwidth — what `bandwidthTest` measures —
-is a stable per-SKU characteristic that rarely degrades in isolation without
-also degrading the collectives above, so a separate test adds maintenance
-without adding signal. See
-[`SPECIFICATIONS.md` §8](../../SPECIFICATIONS.md#8-system-performance-pre-checks).
+NVSHMEM `alltoall_latency` reports microseconds; `shmem_put_bw` reports GB/s.
+Reference values are per-image and tracked in `SPECIFICATIONS.md` §8.3.
 
 ## References
 
@@ -154,5 +156,6 @@ without adding signal. See
 - [CSCS Container Engine — EDF reference](https://docs.cscs.ch/software/container-engine/edf/#edf-reference)
 - [CSCS libfabric docs](https://docs.cscs.ch/software/communication/libfabric/)
 - [NVIDIA NCCL env vars](https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/env.html)
+- [NVIDIA NVSHMEM](https://developer.nvidia.com/nvshmem)
 - [`fi_cxi(7)`](https://ofiwg.github.io/libfabric/v2.1.0/man/fi_cxi.7.html)
 - [`NVIDIA/nccl-tests`](https://github.com/NVIDIA/nccl-tests)
