@@ -51,6 +51,13 @@
 ## Metrics & Analysis
 
 - [ ] Derive and expose the number of supportable concurrent users from λ (load-to-users translation)
+- [ ] **Heavy-tailed (Pareto) arrival process** — v1 keeps only `poisson` + `burst_mmpp` in
+  `arrival_process` (SPECIFICATIONS.md §10.3). The distinctive signal Pareto adds (prefix-
+  cache aging across multi-minute idle gaps followed by a cold-cache burst) is approximated
+  by `burst_mmpp` configured with a short on-phase and a long off-phase. Promote Pareto to
+  a first-class process if a future scenario needs the heavy tail explicitly (or if MMPP
+  approximation turns out to materially mis-rank deployments for cache-aging-sensitive
+  workloads).
 
 ## Infrastructure Expansion
 

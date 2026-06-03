@@ -360,7 +360,12 @@ The tokenizer is fetched on the Benchmarker at dataset-generation time.
 ### 7.9 Multi-turn / session structure
 
 Multi-turn scenarios produce N turns per session, where N is sampled from the scenario's
-`session.turns_per_session` distribution (§7.3).
+`session.turns_per_session` distribution (§7.3). Each session is assigned a stable integer
+`session_idx ∈ [0, M-1]` (where M is the number of sessions in the prompt pool); every
+turn of that session carries the same `session_idx`, and this index is exposed to the load
+generator so session-affinity routing (§10.4) can hash on it. The `[session-NNNNNN]`
+header from §7.6 encodes the same identifier in the prompt text. Single-turn scenarios are
+the degenerate case M = `num_prompts`, with `session_idx = prompt_idx`.
 
 **Prefix strategy** is always **`append_delta`**: turn K+1's prompt = full prior
 transcript + new user turn. The engine's prefix cache reuses the shared prefix naturally
@@ -697,17 +702,22 @@ measured under are always recoverable.
 | `arrival_process` | Description |
 |---|---|
 | `poisson` (default) | Memoryless Poisson at rate λ; inter-arrivals drawn from `Exp(1/λ)`. Statistically-independent baseline. |
-| `burst_mmpp` | Two-state on/off Markov-Modulated Poisson Process at mean rate λ, with configurable burst factor (peak-to-mean ratio) and mean burst / idle durations. Models agentic and batch-API traffic patterns. |
-| `pareto` | Heavy-tailed inter-arrivals at mean rate λ, configurable Pareto shape α. Models long-tail idle gaps interleaved with bursts. |
+| `burst_mmpp` | Two-state on/off Markov-Modulated Poisson Process at mean rate λ, with configurable burst factor (peak-to-mean ratio) and mean burst / idle durations. Models agentic, tool-calling, and batch-API traffic patterns — the workloads where Poisson's coefficient of variation = 1 understates queue-depth variance and tail latency. |
+
+A third **heavy-tailed (Pareto)** process — long idle gaps interleaved with short bursts — is
+intentionally out of scope for v1. Its distinctive signal (prefix-cache aging across multi-
+minute idle gaps followed by a cold-cache burst) is approximated by `burst_mmpp` configured
+with a short on-phase and a long off-phase; the approximation is acceptable until a scenario
+demands the heavy tail explicitly. Tracked in `TODOs.md`.
 
 Each arriving request is routed to one of N server instances per `routing_strategy` (§10.4).
 
 ### 10.4 Routing strategies
 
 - `random` (default): uniformly random instance selection per request.
-- `session_affinity`: `prompt_idx % N` — same prompt always routes to the same instance.
-  Enables meaningful prefix-cache benefit across multi-turn sessions. Useful to measure
-  the effect of session affinity vs random routing in multi-instance deployments.
+- `session_affinity`: `session_idx % N` — same-session prompts always route to the same
+  instance. Enables meaningful prefix-cache benefit across multi-turn sessions. Useful to
+  measure the effect of session affinity vs random routing in multi-instance deployments.
 
 ---
 
@@ -900,6 +910,8 @@ One row per issued request — the per-request latency record.
 | `run_id` | TEXT, FK | Foreign key to `experiments.run_id`. |
 | `rate_lambda` | REAL | λ value (req/s) of the sweep step this request belongs to. |
 | `request_id` | INTEGER | Per-rate-level request index (monotonic). |
+| `session_idx` | INTEGER | Session this request belongs to (§7.9). Shared by every turn of the session; enables grouping per-session for session-affinity routing analysis (§10.4). For single-turn scenarios equals the request's underlying prompt index. |
+| `turn_idx` | INTEGER | 0-based position of this request within its session (§7.9). `0` for the first turn (and for every request in single-turn scenarios); `1` for the first follow-up; etc. Lets reports plot per-turn metrics directly (e.g. "TTFT vs turn index" to visualise prefix-cache benefit on follow-up turns) without reconstructing the order from timestamps. |
 | `ttft_ms` | REAL | Time to first token, milliseconds — authoritative SLO metric (§11.1). |
 | `tpot_ms` | REAL | Inter-token latency, mean across the request's output tokens. |
 | `e2e_ms` | REAL | End-to-end request time, milliseconds. |
