@@ -1,0 +1,63 @@
+# tools/system_prechecks_reference.yaml
+#
+# Per-system reference values for the system performance pre-checks (SPECIFICATIONS.md §7).
+# This file is the authoritative ground truth: §7.4 grades each pre-check measurement as
+# pass / warn / fail by comparing it against the matching entry below.
+#
+# Entry shape: { cluster, scope, benchmark, size, expected, tolerance_pct, source }.
+# tolerance_pct conventions:
+#   negative → warn / fail if measured BELOW expected (bandwidth, throughput)
+#   positive → warn / fail if measured ABOVE expected (latency)
+#
+# Status: all entries are placeholders until first characterisation runs on each system.
+# Until populated, the foundation gate is unenforceable — measurements log as informational.
+
+# ── clariden (NVIDIA GH200 — 4 GPUs / node) ─────────────────────────────────────
+- { cluster: clariden, scope: "4× GH200, 1 node",  benchmark: NCCL all_reduce,           size: 128 MiB, expected: TBD GB/s busbw, tolerance_pct: -10, source: TBD }
+- { cluster: clariden, scope: "4× GH200, 1 node",  benchmark: NCCL all_gather,           size: 128 MiB, expected: TBD GB/s busbw, tolerance_pct: -10, source: TBD }
+- { cluster: clariden, scope: "4× GH200, 1 node",  benchmark: NCCL alltoall,             size: 128 MiB, expected: TBD GB/s busbw, tolerance_pct: -10, source: TBD }
+- { cluster: clariden, scope: "4× GH200, 1 node",  benchmark: NVSHMEM alltoall_latency,  size: 128 KiB, expected: TBD µs,         tolerance_pct: +20, source: TBD }
+- { cluster: clariden, scope: "4× GH200, 1 node",  benchmark: NVSHMEM shmem_put_bw,      size: 128 MiB, expected: TBD GB/s,       tolerance_pct: -10, source: TBD }
+- { cluster: clariden, scope: "8× GH200, 2 nodes", benchmark: NCCL all_reduce,           size: 128 MiB, expected: TBD GB/s busbw, tolerance_pct: -10, source: TBD }
+- { cluster: clariden, scope: "8× GH200, 2 nodes", benchmark: NCCL all_gather,           size: 128 MiB, expected: TBD GB/s busbw, tolerance_pct: -10, source: TBD }
+- { cluster: clariden, scope: "8× GH200, 2 nodes", benchmark: NCCL alltoall,             size: 128 MiB, expected: TBD GB/s busbw, tolerance_pct: -10, source: TBD }
+- { cluster: clariden, scope: "8× GH200, 2 nodes", benchmark: NVSHMEM alltoall_latency,  size: 128 KiB, expected: TBD µs,         tolerance_pct: +20, source: TBD }
+- { cluster: clariden, scope: "8× GH200, 2 nodes", benchmark: NVSHMEM shmem_put_bw,      size: 128 MiB, expected: TBD GB/s,       tolerance_pct: -10, source: TBD }
+- { cluster: clariden, scope: "capstor weights mount (Lustre, HDD)",  benchmark: Sequential read, size: 1 MiB blocks, expected: TBD GB/s, tolerance_pct: -15, source: TBD }
+- { cluster: clariden, scope: "iopsstor weights mount (Lustre, flash)", benchmark: Sequential read, size: 1 MiB blocks, expected: TBD GB/s, tolerance_pct: -15, source: TBD }
+
+# ── bristen (NVIDIA A100 — 4 GPUs / node) ──────────────────────────────────────
+- { cluster: bristen, scope: "4× A100, 1 node",  benchmark: NCCL all_reduce,           size: 128 MiB, expected: TBD GB/s busbw, tolerance_pct: -10, source: TBD }
+- { cluster: bristen, scope: "4× A100, 1 node",  benchmark: NCCL all_gather,           size: 128 MiB, expected: TBD GB/s busbw, tolerance_pct: -10, source: TBD }
+- { cluster: bristen, scope: "4× A100, 1 node",  benchmark: NCCL alltoall,             size: 128 MiB, expected: TBD GB/s busbw, tolerance_pct: -10, source: TBD }
+- { cluster: bristen, scope: "4× A100, 1 node",  benchmark: NVSHMEM alltoall_latency,  size: 128 KiB, expected: TBD µs,         tolerance_pct: +20, source: TBD }
+- { cluster: bristen, scope: "4× A100, 1 node",  benchmark: NVSHMEM shmem_put_bw,      size: 128 MiB, expected: TBD GB/s,       tolerance_pct: -10, source: TBD }
+- { cluster: bristen, scope: "8× A100, 2 nodes", benchmark: NCCL all_reduce,           size: 128 MiB, expected: TBD GB/s busbw, tolerance_pct: -10, source: TBD }
+- { cluster: bristen, scope: "8× A100, 2 nodes", benchmark: NCCL all_gather,           size: 128 MiB, expected: TBD GB/s busbw, tolerance_pct: -10, source: TBD }
+- { cluster: bristen, scope: "8× A100, 2 nodes", benchmark: NCCL alltoall,             size: 128 MiB, expected: TBD GB/s busbw, tolerance_pct: -10, source: TBD }
+- { cluster: bristen, scope: "8× A100, 2 nodes", benchmark: NVSHMEM alltoall_latency,  size: 128 KiB, expected: TBD µs,         tolerance_pct: +20, source: TBD }
+- { cluster: bristen, scope: "8× A100, 2 nodes", benchmark: NVSHMEM shmem_put_bw,      size: 128 MiB, expected: TBD GB/s,       tolerance_pct: -10, source: TBD }
+- { cluster: bristen, scope: "capstor weights mount (Lustre, HDD)",  benchmark: Sequential read, size: 1 MiB blocks, expected: TBD GB/s, tolerance_pct: -15, source: TBD }
+- { cluster: bristen, scope: "iopsstor weights mount (Lustre, flash)", benchmark: Sequential read, size: 1 MiB blocks, expected: TBD GB/s, tolerance_pct: -15, source: TBD }
+
+# ── beverin (AMD MI300A — 4 GPUs / node) ───────────────────────────────────────
+- { cluster: beverin, scope: "4× MI300A, 1 node",  benchmark: RCCL all_reduce,                size: 128 MiB, expected: TBD GB/s busbw, tolerance_pct: -10, source: TBD }
+- { cluster: beverin, scope: "4× MI300A, 1 node",  benchmark: RCCL all_gather,                size: 128 MiB, expected: TBD GB/s busbw, tolerance_pct: -10, source: TBD }
+- { cluster: beverin, scope: "4× MI300A, 1 node",  benchmark: RCCL alltoall,                  size: 128 MiB, expected: TBD GB/s busbw, tolerance_pct: -10, source: TBD }
+- { cluster: beverin, scope: "4× MI300A, 1 node",  benchmark: ROCm SHMEM alltoall_latency,    size: 128 KiB, expected: TBD µs,         tolerance_pct: +20, source: TBD }
+- { cluster: beverin, scope: "4× MI300A, 1 node",  benchmark: ROCm SHMEM shmem_put_bw,        size: 128 MiB, expected: TBD GB/s,       tolerance_pct: -10, source: TBD }
+- { cluster: beverin, scope: "8× MI300A, 2 nodes", benchmark: RCCL all_reduce,                size: 128 MiB, expected: TBD GB/s busbw, tolerance_pct: -10, source: TBD }
+- { cluster: beverin, scope: "8× MI300A, 2 nodes", benchmark: RCCL all_gather,                size: 128 MiB, expected: TBD GB/s busbw, tolerance_pct: -10, source: TBD }
+- { cluster: beverin, scope: "8× MI300A, 2 nodes", benchmark: RCCL alltoall,                  size: 128 MiB, expected: TBD GB/s busbw, tolerance_pct: -10, source: TBD }
+- { cluster: beverin, scope: "8× MI300A, 2 nodes", benchmark: ROCm SHMEM alltoall_latency,    size: 128 KiB, expected: TBD µs,         tolerance_pct: +20, source: TBD }
+- { cluster: beverin, scope: "8× MI300A, 2 nodes", benchmark: ROCm SHMEM shmem_put_bw,        size: 128 MiB, expected: TBD GB/s,       tolerance_pct: -10, source: TBD }
+- { cluster: beverin, scope: "capstor weights mount (Lustre, HDD)",  benchmark: Sequential read, size: 1 MiB blocks, expected: TBD GB/s, tolerance_pct: -15, source: TBD }
+- { cluster: beverin, scope: "iopsstor weights mount (Lustre, flash)", benchmark: Sequential read, size: 1 MiB blocks, expected: TBD GB/s, tolerance_pct: -15, source: TBD }
+
+# ── breithorn (Kubernetes — GH200 pod, Ceph PVC) ───────────────────────────────
+- { cluster: breithorn, scope: "4× gh200, 1 pod", benchmark: NCCL all_reduce,          size: 128 MiB, expected: TBD GB/s busbw, tolerance_pct: -10, source: TBD }
+- { cluster: breithorn, scope: "4× gh200, 1 pod", benchmark: NCCL all_gather,          size: 128 MiB, expected: TBD GB/s busbw, tolerance_pct: -10, source: TBD }
+- { cluster: breithorn, scope: "4× gh200, 1 pod", benchmark: NCCL alltoall,            size: 128 MiB, expected: TBD GB/s busbw, tolerance_pct: -10, source: TBD }
+- { cluster: breithorn, scope: "4× gh200, 1 pod", benchmark: NVSHMEM alltoall_latency, size: 128 KiB, expected: TBD µs,         tolerance_pct: +20, source: TBD }
+- { cluster: breithorn, scope: "4× gh200, 1 pod", benchmark: NVSHMEM shmem_put_bw,     size: 128 MiB, expected: TBD GB/s,       tolerance_pct: -10, source: TBD }
+- { cluster: breithorn, scope: "Ceph PVC weights mount", benchmark: Sequential read,   size: 1 MiB blocks, expected: TBD GB/s, tolerance_pct: -15, source: TBD }

@@ -11,6 +11,56 @@
 - [ ] Run NCCL benchmarks (using the same Docker images) before inference benchmarks
 - [ ] Support testing endpoints provided via URL (not only SLURM and Kubernetes deployments)
 
+### Cold-start optimisation experiment groups
+
+- [ ] **Model loading + Inductor compile-time optimisation** — characterise and reduce
+  cold-start cost on each cluster (SPECIFICATIONS.md §9.3): collect measured per-component
+  timings (weight load, graph capture, Inductor compile) and identify reductions via
+  weight-load strategy, CUDA-graph capture sizes, eager-vs-compile trade-offs.
+- [ ] **Inductor compilation cache persistence** — explore persisting Inductor compilation
+  artifacts across restarts to skip the cold-compile cost on every fresh start (vLLM:
+  `--compilation-config '{"local_cache_dir": "..."}'`; equivalents on other backends). When
+  supported, expose the path as a `BackendConfig` field in SPECIFICATIONS.md §15.2.
+  Validate that restored caches produce identical runtime behaviour to fresh compiles.
+- [ ] **Trim CUDA graph capture sizes** to match actual concurrency ceiling (~28 slots
+  for GH200 70B at 25K context); the current default capture range 1–512 is wasteful,
+  ~32 suffices.
+
+### Backend feature experiments
+
+- [ ] **Test `--kv-offloading-size 400`** for GH200 KV extension via Grace DRAM
+  (§15.2, §16.1). Implementation complete; not yet run.
+- [ ] **Session affinity experiment** (§11.4, §13.3 `session_idx`) — compare random vs
+  `session_affinity` routing for multi-instance deployments to quantify prefix-cache
+  benefit in production. Now first-class: §13.3 carries `session_idx` and `turn_idx`.
+- [ ] **NIXL disaggregated prefill/decode** — vLLM v1 startup logs show *"NIXL is
+  available"*; configuration via `--kv-transfer-config` (BackendConfig field
+  `kv_transfer_config`, JSON string) not yet implemented or run. When wired up,
+  re-add the field to §15.2 as the configuration surface.
+- [ ] **LMCache KV-offloading backend** — evaluate `--kv-offloading-backend=lmcache` as
+  an alternative to the v1 default `native` (§15.2 `kv_offloading_backend`). Goal: quantify
+  bandwidth + concurrency trade-offs vs `native` on Grace DRAM. When wired up, re-add
+  `"lmcache"` to the §15.2 `kv_offloading_backend` notes.
+- [ ] **DeepSeek `thinking_mode` as BackendConfig knob** — DeepSeek-V4-Pro exposes
+  three reasoning-effort modes (Non-think / Think High / Think Max) via the
+  `thinking_mode` runtime parameter. Wire it as a sweepable BackendConfig field
+  (SPECIFICATIONS.md §15.2 vLLM and SGLang subsections — DeepSeek-V4-Pro runs on both)
+  so an experiment can compare TTFT / decode / cost across modes on the same model.
+  Note: *Think Max* requires `max_model_len ≥ 384K`; the sweep must clamp combinations
+  accordingly. See §8.2 *Models under test*.
+- [ ] **Hardware elasticity / auto-scaling experiments** — measure time-to-scale-up,
+  in-flight request loss during scale events, and pre-warmed-pool sizing trade-offs
+  ("Elasticity requirements for CSCS vClusters"). Needs: auto-scale-injection mechanism
+  during a sweep, scale-event observation hooks, pre-warmed-pool semantics. When wired
+  up, re-add the row to §15 *Features Under Test*.
+
+### Characterisation
+
+- [ ] **Characterise pre-check reference values** for `tools/system_prechecks_reference.yaml`
+  on each cluster (clariden GH200, bristen A100, beverin MI300A, breithorn gh200) — the
+  TBD placeholders in §7.3 must be replaced with measured medians plus tolerances before
+  the foundation gate (§7.4) becomes enforceable.
+
 ## Docker Image Builds
 
 - [ ] Support building Docker images via SLURM jobs
@@ -18,41 +68,69 @@
 
 ## Prompt / Dataset Generation
 
-- [ ] Support multi-modal prompt length distributions in the dataset generator
-- [ ] **Audio and video modalities** — v1 covers text and image only (SPECIFICATIONS.md
-  §7.5, §7.11); add `audio` and `video` as additional modalities, with `audio_corpus` /
-  `video_corpus` source kinds, per-second / per-clip token-cost accounting, and
-  registry-load-time acceptance of `modalities: [audio]` / `modalities: [video]`.
-- [ ] **Confirm scenario-registry replaces `dataset_source`** (SPECIFICATIONS.md §7) — the
+- [ ] **Multimodality** — v1 is text-only (SPECIFICATIONS.md §10.5). Add modalities in
+  order: **image** first (fixed corpus paired with text prompts, per-image token-cost
+  accounting, `image_corpus` source kind), then **audio** and **video** (paired corpora,
+  per-second / per-clip token-cost accounting, `audio_corpus` / `video_corpus` source
+  kinds). Each step also requires per-modality length distributions in the dataset
+  generator and registry-load-time acceptance of the corresponding `modalities: [...]`
+  declaration. A per-model per-image token-cost fallback table (probably alongside the
+  tokenizer ID in a model-info registry) needs a structured home before image lands.
+- [ ] **Confirm scenario-registry replaces `dataset_source`** (SPECIFICATIONS.md §10) — the
   previous design had a top-level `dataset_source` knob; the current spec embeds source
   choice inside the scenario registry. Confirm this is the intended end state (no separate
   `dataset_source` at the benchmark-YAML level beyond `source_overrides`).
-- [ ] **`source_overrides` schema per source kind** (§7.4) — enumerate the keys each source
+- [ ] **`source_overrides` schema per source kind** (§10.4) — enumerate the keys each source
   accepts (e.g. LongBench task subset, COCO split, reasoning-trace dataset name). The
   field is declared but its per-source schema is not specified.
-- [ ] **Fan-out template DSL for agentic scenarios** (§7.10) — specify the grammar of the
-  fan-out template (turn types, allowed transitions, cycle-count distribution). Options:
-  inline YAML state-machine in the scenario entry, a small Python DSL, or replay-only
-  from recorded agent traces (SWE-Bench Verified, τ-bench, …).
-- [ ] **Image token-cost fallback table** (§7.11) — the per-model per-image token estimate
-  needs a structured home (probably alongside the tokenizer ID in a model-info registry).
-  Numbers are not in the registry yet.
-- [ ] **Think-time distribution defaults** (§7.3) — recommend a default range per scenario
+- [ ] **Alternative chat corpora** (§10.5) — add `lmsys_chat` (lmsys/lmsys-chat-1m) and
+  `oasst1` (OpenAssistant/oasst1) as additional real-chat source kinds alongside
+  `wildchat`. LMSYS-Chat-1M brings per-message source-model identity (Vicuna / Llama /
+  GPT family) — useful for splitting chat scenarios by source-model family. OASST1
+  brings a smaller, fully-open (Apache-2.0) tree-structured conversation corpus.
+- [ ] **Think-time distribution defaults** (§10.3) — recommend a default range per scenario
   for the sequential-session `think_time_ms` field (chat short, agentic-coding longer, …).
   Currently no defaults are specified.
-- [ ] **Scenario-registry revision pinning for reproducibility** (§7.14) — define how the
+- [ ] **Scenario-registry revision pinning for reproducibility** (§10.1) — define how the
   scenario-registry revision is "recorded alongside" the dataset: git SHA on the
   experiment row? content hash of the YAML file? Pick a storage location and mechanism.
-- [ ] **Per-tool `result_content_source` synthesis** (§7.10) — specify how a tool-result
-  body of a sampled token length is produced from each `result_content_source.kind`
-  (`synthetic` / `longbench` / `static`). The enum exists; the synthesis mechanics do
-  not.
+- [ ] **Precise agentic / tool-calling measurement** — v1 approximates agentic workloads
+  as multi-turn sessions with bursty fan-out (high `turns_per_session`, mixed output
+  sizes) so that the operator can derive supportable-user-count from λ + an SLO. The
+  precise approach was specified in earlier drafts of §10.7 / §12.4 / §13.3 / §13.7 and
+  is kept here so the work can resume from the current thinking. When picked up,
+  re-introduce:
+  - **Tool registry** (`tools/tools/<tool-name>.yaml`) — per-tool JSON schema,
+    `result_size` distribution, `result_content_source` for synthesis (`synthetic` /
+    `longbench` / `static`).
+  - **`tool_registry` source kind** in §10.5 — drives agentic scenarios from the
+    catalog + task templates.
+  - **Fan-out template DSL** — per-scenario state machine declaring turn types
+    (`think`, `tool_call`, `tool_result`), allowed transitions, and cycle-count
+    distribution. Open question on grammar: inline YAML state-machine in the scenario
+    entry, a small Python DSL, or replay-only from recorded agent traces (SWE-Bench
+    Verified, τ-bench, …).
+  - **Schema-constrained decoding** — load generator requests structured output
+    against the tool's JSON schema when the model emits a tool call; per-request
+    `structured_output_valid` recorded.
+  - **`agent_tasks` table** — first-class task-level metrics distinct from session
+    metrics: `task_invocations`, `task_tool_calls_emitted`, `task_tool_calls_valid`,
+    `task_input_tokens_total`, `task_output_tokens_total`, `task_success`,
+    `task_e2e_ms`. Linked from `requests.agent_task_id`.
+  - **Bimodal output distribution as first-class** — distinct tiny-tool-call vs
+    large-think output sampling, per-tool result-content synthesis. Currently v1
+    approximates by widening the output_length distribution.
+  - **Per-tool `result_content_source` synthesis mechanics** — how a tool-result body
+    of a sampled token length is produced from each source kind.
+  - **`agent_task_id` + `structured_output_valid` columns** in `requests` (§13.3).
+  - **§15 *Features Under Test*** — re-add the "Schema-constrained decoding (JSON / XML)"
+    row.
 
 ## Metrics & Analysis
 
 - [ ] Derive and expose the number of supportable concurrent users from λ (load-to-users translation)
 - [ ] **Heavy-tailed (Pareto) arrival process** — v1 keeps only `poisson` + `burst_mmpp` in
-  `arrival_process` (SPECIFICATIONS.md §10.3). The distinctive signal Pareto adds (prefix-
+  `arrival_process` (SPECIFICATIONS.md §11.3). The distinctive signal Pareto adds (prefix-
   cache aging across multi-minute idle gaps followed by a cold-cache burst) is approximated
   by `burst_mmpp` configured with a short on-phase and a long off-phase. Promote Pareto to
   a first-class process if a future scenario needs the heavy tail explicitly (or if MMPP

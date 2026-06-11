@@ -1,0 +1,55 @@
+# tools/scenarios/chat-short-turns.yaml
+#
+# Conversational chat with short multi-turn turns from a thinking model. The
+# operator types a follow-up after reading the model's reply, so the session
+# runs in `sequential` mode with a `think_time_ms` delay between turns.
+#
+# Real chat material is drawn from WildChat (allenai/WildChat-1M) so prefix-cache
+# locality and speculative-decoding acceptance reflect production chat structure
+# rather than the near-zero rates synthetic filler would give.
+#
+# `thinking: true` widens the output distribution per SPECIFICATIONS.md §10.6,
+# approximating the combined think-trace-plus-answer the model emits per turn.
+
+name: chat-short-turns
+summary: Short-turn conversational chat against a thinking model, with operator think-time between turns. Real chat material from WildChat.
+maturity: established
+
+source:
+  kind: wildchat                     # see §10.5
+  config:
+    languages: [en]                  # ISO codes; expand to include other languages as needed
+    min_turns: 2                     # drop single-turn conversations — chat-short-turns is multi-turn
+
+input_length:
+  distribution: lognormal
+  params: { mean: 200, sigma: 0.5, min: 20, max: 2000 }
+
+output_length:
+  distribution: lognormal
+  params: { mean: 250, sigma: 0.4, min: 32, max: 2048 }
+
+thinking: true                       # widens output_length per §10.6
+
+session:
+  mode: sequential                   # follow-up waits for the previous turn's response
+  turns_per_session:
+    distribution: lognormal
+    params: { mean: 6, sigma: 0.4, min: 2, max: 30 }
+  prefix_strategy: append_delta
+  think_time_ms:
+    distribution: lognormal
+    params: { mean: 1500, sigma: 0.5 }   # operator's reading-and-typing delay
+
+manifest:
+  modelled:
+    - "short conversational chat turns with sequential follow-ups (operator types after reading the model's reply)"
+    - "real chat material from WildChat — system-prompt prefixes, common opening phrases, language priors, follow-up patterns the prefix cache actually exploits in production"
+    - "thinking traces approximated by widened output-length distribution per §10.6"
+    - "multi-turn prefix-cache benefit via append_delta prefix strategy"
+    - "operator think-time between turns sampled from a lognormal distribution"
+  not_modelled:
+    - "no image / audio / video inputs (v1 is text-only; see TODOs.md *Multimodality*)"
+    - "no bimodal output sampler distinguishing short direct answers from long deep-thinking outputs (v1 widens a single lognormal instead; see TODOs.md *Bimodal output distribution as first-class*)"
+    - "non-English conversations excluded by `source.config.languages` for this v1 instance — broader language coverage is a config knob, not a scenario change"
+    - "no explicit tool-call schemas or schema-constrained decoding (out of scope for this chat scenario; see TODOs.md *Precise agentic / tool-calling measurement*)"

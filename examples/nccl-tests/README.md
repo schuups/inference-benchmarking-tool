@@ -15,7 +15,7 @@ engine EDF carries the right annotation.
 
 ## Operating model: same container, concatenated commands
 
-Per `SPECIFICATIONS.md` §8.2, the pre-check runs in the **same container instance**
+Per `SPECIFICATIONS.md` §7.2, the pre-check runs in the **same container instance**
 as the engine launch that follows it — not in a separate image, not in an init
 container. On both SLURM and Kubernetes the pattern is identical:
 
@@ -147,7 +147,7 @@ If a multi-node run reports ≈ 5 GB/s, the AWS OFI hook didn't fire. Check:
 - The image the EDF references is the one you actually pushed.
 
 NVSHMEM `alltoall_latency` reports microseconds; `shmem_put_bw` reports GB/s.
-Reference values are per-image and tracked in `SPECIFICATIONS.md` §8.3.
+Reference values are per-image and tracked in `SPECIFICATIONS.md` §7.3.
 
 ## References
 

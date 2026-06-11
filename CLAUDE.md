@@ -7,7 +7,7 @@ Systematic measurement of LLM inference deployments across multiple dimensions:
 - **Token efficiency**: tokens consumed per task for a given model + config (system prompts, templates).
 - **Cost efficiency**: cost per completed task at a given SLO — for buy-vs-scale decisions.
 - **Reliability**: request error rates across load levels.
-- **Model loading times**: time-to-ready per configuration (SPECIFICATIONS.md §10.2) — supports auto-scaling decisions.
+- **Model loading times**: time-to-ready per configuration (SPECIFICATIONS.md §9.2) — supports auto-scaling decisions.
 - **Hardware elasticity**: benefit of dynamically adding compute under load.
 
 ## Architecture
@@ -18,25 +18,26 @@ A LLM deployment can use different engines (vLLM, SGLang, Nvidia Dynamo), span a
 
 Laptop-side (run by the operator, not allocated on any cluster):
 
-- **Pre-flight checker** — verifies cluster accessibility and required configuration before running experiments.
-- **Planner** — prepares experiments from Claude-based interactions (rendering Jinja2 templates, deployment scripts).
-- **Coordinator** — drives a single experiment end-to-end: submits the Benchmarker job, monitors it (and the inference deployment(s) it spawns), downloads the per-run SQLite DB into the centralized results DB on the laptop, and tears down the resources **it created for that run** on both success and failure paths (cancel the Benchmarker job — which in turn cancels its inference deployment(s) — delete K8s objects, remove the run's capstor scratch dir; §4). SLURM via FirecREST MCP, K8s via kubectl. (§2, §4, §11)
-- **Reports generator** — generates and executes a Jupyter notebook producing tables and plots from the centralized results DB. (§12)
-- **Cleaner** — periodic, cluster-wide garbage collection for state that escaped the Coordinator's per-run teardown (e.g. coordinator killed mid-run, network failure during teardown, or older runs predating a teardown fix): orphaned JFrog images, leftover K8s Ingress/PV/Services, stale SLURM scratch dirs. Discovers resources via the labels in §3 — scoped to *all* benchmark-managed resources older than a threshold, not to one specific run. (§4)
+- **Pre-flight checker** — runs at the start of every session to verify credentials, cluster reachability, and K8s capacity. Distinct from the in-engine-container hardware gate in §7. (§3)
+- **Planner** — renders Jinja2 templates into the experiment's deployment artifacts (EDF / K8s manifests / sbatch / benchmark YAML). Driven via Claude Code or CLI. (§4)
+- **Coordinator** — drives one experiment end-to-end: submits the Benchmarker job, monitors progress, downloads the per-run SQLite DB into the centralized results DB, tears down on both success and failure paths. SLURM via FirecREST MCP, K8s via kubectl. (§6)
+- **Reports generator** — generates and executes a Jupyter notebook producing tables and plots from the centralized results DB. (§14)
+- **Cleaner** — manual, operator-approved cleanup of state that escaped the Coordinator's per-run teardown (orphaned JFrog images, leftover K8s objects, stale capstor dirs). Two stages: identification (always) + pruning (manual approval). Claude periodically reminds the operator to run it; never executes itself. (§6.7)
 
 Cluster-side (allocated on the cluster under test):
 
-- **Benchmarker** — Coordinator-submitted SLURM allocation, one per experiment, separate from the inference deployment's. Runs three sequential phases — dataset prep → engine spawn → load generation. Spawns the inference deployment(s) under test **only after the dataset generator has completed** (so GPUs stay out of idle during CPU-bound prompt prep); polls readiness, records model-load times into `instances`, tears down at end-of-experiment. Hosts:
-  - **Dataset generator** — produces the prompt dataset (synthetic with unique headers, or real-text e.g. LongBench). (§7)
-  - **Load generator** — awaits LLM readiness, sends requests at Poisson rate λ, collects per-request metrics. (§7, §8, §9, §10)
-- **Inference deployment(s) under test** — the actual subject of measurement: one or more LLM serving stacks (engine + replicas + ingress/auth/accounting where applicable), spawned by the Benchmarker as separate SLURM jobs (SLURM target) or K8s manifests (K8s target). A single experiment may deploy multiple instances of the same configuration for multi-replica / routing studies — each instance is recorded as a row in the `instances` table. (§2, §5, §13.2)
+- **Benchmarker** — Coordinator-submitted SLURM allocation, one per experiment. Runs three sequential phases (dataset prep → engine spawn → load generation); spawns the inference deployment **only after the dataset generator has completed** so GPUs do not sit idle during CPU-bound prompt prep. Hosts:
+  - **Dataset generator** — produces the prompt dataset (synthetic with unique headers, or real-text e.g. LongBench). (§10)
+  - **Load generator** — awaits LLM readiness, issues requests at Poisson rate λ, collects per-request metrics. (§9.3, §11)
+- **Inference deployment(s) under test** — the LLM serving stack(s) being measured (engine + replicas + ingress/auth/accounting). Spawned by the Benchmarker as SLURM jobs or K8s manifests; multi-instance deployments map to rows in the `instances` table. (§15.2, §13.2)
 
 ## Targeted Infrastructures
 
 | Name | Type | Access | Notes |
 |---|---|---|---|
-| `clariden` | SLURM | FirecREST MCP (ML Platform) | Grace-Hopper (GH200) nodes |
-| `beverin` | SLURM | FirecREST MCP (HPC Platform) | AMD MI300A nodes |
+| `clariden` | SLURM | FirecREST MCP (ML Platform) | Grace-Hopper (GH200), 4 GPUs/node |
+| `bristen` | SLURM | FirecREST MCP (ML Platform) | A100, 4 GPUs/node |
+| `beverin` | SLURM | FirecREST MCP (HPC Platform) | AMD MI300A, 4 GPUs/node |
 | `breithorn` | Kubernetes | kubectl | L1/L2 cluster |
 
 Additional targets may be added (e.g. systems outside CSCS).
@@ -44,9 +45,9 @@ Additional targets may be added (e.g. systems outside CSCS).
 ## Project files and folders structure
 
 - `.venv` — uv-based Python 3.14 virtualenv (`source .venv/bin/activate`).
-- `tool/` — implementation of the components above (includes `pre-flight-checks.py`).
+- `tools/` — implementation of the components above (includes `pre-flight-checks.py`).
 - `experiments/` — per-experiment folders (`YYYY-MM-DD_description/`) with config, deployment artifacts (Dockerfiles, sbatch, K8s YAML), and raw results.
-- `reports/` — generated notebooks and rendered outputs (tables, plots).
+- `reports/` — curated, audience-facing reports synthesised from one or many `experiments/` runs. Distinct from the per-experiment notebook (which lives under `experiments/<run>/`). See §14.3.
 - `examples/` — image build via SLURM, vLLM deployment on K8s and SLURM.
 - `firecrest-mcp/` — FirecREST MCP server registered in Claude Code. Do not modify; use via its registered tools.
 - `SPECIFICATIONS.md` — authoritative reference for detailed requirements, schema, known constraints, and cluster-specific workarounds. Read it before making changes to the tool.
@@ -69,3 +70,29 @@ Behavioural constraints for assisting on this project. This list grows over time
 
 - **No unverified ceilings.** Do not conclude that an extractable metric (throughput, latency headroom, memory utilisation, acceptance rate, …) has reached its ceiling unless you can ground that claim in analytical proof — hardware limits (peak HBM bandwidth, NVLink throughput, FLOPs roofline, …) or algorithmic ones (theoretical concurrency cap from KV-cache budget, scheduling lower bounds, …). On a plateau, the default hypothesis is *more is extractable* — degraded foundation, suboptimal config, or a missing optimisation — not "this is the limit".
 - **Defer with a TODO, not silence.** When the verification or follow-up another point demands cannot be done in the current iteration (no time, out-of-scope, requires a separate run), record it in `TODOs.md` as a deferred activity rather than dropping it. The TODO entry is the trace that the question is still open, not closed.
+- **Flexible sequential process.** Tool development and experiment design + execution follow a soft sequential process — the suggested path from intent to outcome:
+  1. **Goal definition** (including the envisioned results report)
+  2. **Literature and research**
+  3. **Options analysis and decisions**
+  4. **Strategy alignment** with the broader effort
+  5. **Planning and design**
+  6. **Adversarial review** (of the plan)
+  7. **Implementation** of the changes
+  8. **Adversarial review** (of the implementation)
+  9. **Audit**
+  10. **Pre-execution assessment** (go / no-go on readiness)
+  11. **Execution**
+  12. **Monitoring + error-recovery loop** during execution
+  13. **Results collection**
+  14. **Results review and statistical analysis**
+  15. **Results assessment** (does the data answer the goal? validity, limitations)
+  16. **Adversarial review** (of the results)
+  17. **Conclusions write-up** (synthesise findings, link back to the goal)
+  18. **Report generation**
+  19. **User validation** of the results
+
+  Each phase may draw on different roles, skills, and expertises relevant to the work and to the specific experiment. The process is **soft**: skips require explicit user approval, and the user may rewind to any earlier phase and restart from there.
+
+  Across all phases, Claude is responsible for two cross-cutting duties:
+  - **Surfacing ambiguity through clarifying questions** at every step — preventing assumptions, vetting every possibility, and pausing to ask when something is unclear rather than guessing.
+  - **Calling in the right roles, skills, and expertises** as the situation and the specific experiment demand — not pretending generalist coverage when a specialist is required.

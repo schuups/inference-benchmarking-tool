@@ -1,0 +1,46 @@
+# tools/scenarios/agentic-coding.yaml
+#
+# AI-assisted coding combined with the v1 agentic fan-out approximation: a large
+# initial code prompt followed by many short follow-up turns scheduled by the
+# open-loop arrival process (per SPECIFICATIONS.md §10.7). Exercises prefix-cache
+# reuse on the heavy turn-1 context plus the bursty multi-turn pattern that real
+# agentic clients drive.
+
+name: agentic-coding
+summary: AI-assisted coding session with large initial prompt and bursty multi-turn fan-out.
+maturity: established                # established | emerging | exploratory
+
+source:
+  kind: longbench                    # see §10.5
+  config: { tasks: [lcc, repobench-p] }
+
+input_length:
+  distribution: lognormal            # lognormal | normal | fixed
+  params: { mean: 15000, sigma: 0.5, min: 4000, max: 64000 }
+
+output_length:
+  distribution: lognormal
+  params: { mean: 800, sigma: 0.7, min: 32, max: 8192 }
+
+thinking: false                      # see §10.6 for widening semantics when set
+
+session:
+  mode: open_loop                    # sequential | open_loop  (see §10.7)
+  turns_per_session:
+    distribution: lognormal
+    params: { mean: 6, sigma: 0.5, min: 2, max: 24 }
+  prefix_strategy: append_delta      # only supported strategy (see §10.7)
+
+manifest:
+  modelled:
+    - "AI-assisted coding workload with large initial code prompts and multi-turn follow-ups"
+    - "real code context drawn from LongBench (lcc, repobench-p)"
+    - "agentic fan-out approximated as bursty multi-turn sessions per §10.7"
+    - "wide output distribution capturing mixed short tool-call-like outputs and longer think-like outputs"
+    - "open_loop session scheduling so each turn fires on its own arrival schedule independent of the previous turn's completion"
+    - "prefix-cache reuse on the shared session prefix via append_delta"
+  not_modelled:
+    - "no explicit tool-call schemas or schema-constrained decoding (v1 approximation; see TODOs.md *Precise agentic / tool-calling measurement*)"
+    - "no per-tool result-content synthesis; tool results approximated as plain text in the next turn's prompt"
+    - "no bimodal output sampler distinguishing tiny tool-call outputs from long deep-thinking outputs (v1 widens a single lognormal instead; see TODOs.md *Bimodal output distribution as first-class*)"
+    - "no image / audio / video inputs (v1 is text-only; see TODOs.md *Multimodality*)"

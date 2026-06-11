@@ -1,0 +1,50 @@
+# tools/scenarios/long-context-followup.yaml
+#
+# Returning-user follow-up sessions over a large initial context (long code
+# context from LongBench), with a thinking model. Captures the temporal-locality
+# pattern characteristic of AI-assisted coding and RAG-style workflows: turn 1
+# loads a heavy context, then a small number of short follow-ups reuse the
+# shared prefix via append_delta. Operator think-time between turns is longer
+# than for vanilla chat (they are reading the long answer before following up).
+#
+# `thinking: true` widens the output distribution per SPECIFICATIONS.md §10.6.
+
+name: long-context-followup
+summary: Returning-user follow-up sessions over a large initial context with a thinking model.
+maturity: established
+
+source:
+  kind: longbench                    # see §10.5
+  config: { tasks: [lcc, repobench-p] }
+
+input_length:
+  distribution: lognormal
+  params: { mean: 25000, sigma: 0.4, min: 8000, max: 80000 }
+
+output_length:
+  distribution: lognormal
+  params: { mean: 500, sigma: 0.5, min: 32, max: 4096 }
+
+thinking: true                       # widens output_length per §10.6
+
+session:
+  mode: sequential                   # operator reads the long answer before following up
+  turns_per_session:
+    distribution: lognormal
+    params: { mean: 3, sigma: 0.3, min: 2, max: 8 }
+  prefix_strategy: append_delta
+  think_time_ms:
+    distribution: lognormal
+    params: { mean: 4000, sigma: 0.5 }   # longer than chat — operator reads the long answer
+
+manifest:
+  modelled:
+    - "large initial context (LongBench code) with a small number of short follow-up turns"
+    - "returning-user temporal locality — turn K+1 reuses the heavy turn-1 prefix via append_delta"
+    - "longer operator think-time between turns (reading the long answer before following up)"
+    - "thinking traces approximated by widened output-length distribution per §10.6"
+  not_modelled:
+    - "no image / audio / video inputs (v1 is text-only; see TODOs.md *Multimodality*)"
+    - "no explicit document-retrieval mechanism — the long context is drawn directly from LongBench rather than assembled from retrieved chunks"
+    - "no bimodal output sampler distinguishing short direct answers from long deep-thinking outputs (v1 widens a single lognormal instead; see TODOs.md *Bimodal output distribution as first-class*)"
+    - "no explicit tool-call schemas or schema-constrained decoding (out of scope for this scenario; see TODOs.md *Precise agentic / tool-calling measurement*)"
