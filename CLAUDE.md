@@ -21,14 +21,14 @@ Laptop-side (run by the operator, not allocated on any cluster):
 - **Pre-flight checker** — runs at the start of every session to verify credentials, cluster reachability, and K8s capacity. Distinct from the in-engine-container hardware gate in §7. (§3)
 - **Planner** — renders Jinja2 templates into the experiment's deployment artifacts (EDF / K8s manifests / sbatch / benchmark YAML). Driven via Claude Code or CLI. (§4)
 - **Coordinator** — drives one experiment end-to-end: submits the Benchmarker job, monitors progress, downloads the per-run SQLite DB into the centralized results DB, tears down on both success and failure paths. SLURM via FirecREST MCP, K8s via kubectl. (§6)
-- **Reports generator** — generates and executes a Jupyter notebook producing tables and plots from the centralized results DB. (§14)
+- **Reports generator** — generates and executes a Jupyter notebook producing tables, plots, per-class SLO attainment (λ*), and the supportable-users estimate from the centralized results DB. (§12.4, §14)
 - **Cleaner** — manual, operator-approved cleanup of state that escaped the Coordinator's per-run teardown (orphaned JFrog images, leftover K8s objects, stale capstor dirs). Two stages: identification (always) + pruning (manual approval). Claude periodically reminds the operator to run it; never executes itself. (§6.7)
 
 Cluster-side (allocated on the cluster under test):
 
 - **Benchmarker** — Coordinator-submitted SLURM allocation, one per experiment. Runs three sequential phases (dataset prep → engine spawn → load generation); spawns the inference deployment **only after the dataset generator has completed** so GPUs do not sit idle during CPU-bound prompt prep. Hosts:
-  - **Dataset generator** — produces the prompt dataset (synthetic with unique headers, or real-text e.g. LongBench). (§10)
-  - **Load generator** — awaits LLM readiness, issues requests at Poisson rate λ, collects per-request metrics. (§9.3, §11)
+  - **Dataset generator** — produces the prompt dataset from the experiment's weighted `scenario_mix` (synthetic with unique headers, or real-text e.g. LongBench / WildChat). (§10)
+  - **Load generator** — awaits LLM readiness, issues requests at rate λ via the configured arrival process (Poisson or burst-aware), collects per-request metrics. (§9.3, §11)
 - **Inference deployment(s) under test** — the LLM serving stack(s) being measured (engine + replicas + ingress/auth/accounting). Spawned by the Benchmarker as SLURM jobs or K8s manifests; multi-instance deployments map to rows in the `instances` table. (§15.2, §13.2)
 
 ## Targeted Infrastructures

@@ -39,6 +39,12 @@ This document enumerates all requirements captured so far.
   one of two axes of realism. The other — semantic realism: prompt content, multi-turn
   structure, fan-out, modality mix — lives in the scenario registry (§10) and is equally
   necessary.
+- **Mixed workloads by default**: an experiment's traffic is a weighted blend of
+  scenarios declared in `scenario_mix` (§10.4) — e.g. 80% agentic-coding + 20% chat —
+  so cross-class interference (long agentic prefills inflating chat TTFT on a shared
+  instance) is part of every measurement rather than an afterthought. Per-class SLOs
+  (§12.4) and per-class report panels (§14.1) keep each class's experience separately
+  visible. A single-scenario run is the degenerate mix with one entry.
 - **Reproducible by config**: a single YAML file fully specifies the experiment and its
   parameter sweep. Re-running the same file must produce comparable results.
 - **Scenario-disclosed results**: every plot is published with its scenario manifest,
@@ -126,7 +132,7 @@ takes the operator's intent and produces a self-contained experiment directory:
 - The Benchmarker sbatch (SLURM) or pod spec (K8s), with the concatenated pre-check →
   dataset prep → engine spawn → load gen chain (§7.2) wired up.
 - The benchmark YAML's `dataset_config` block (§10.4), including the resolved scenario
-  reference.
+  references (one per `scenario_mix` entry).
 
 The Planner runs entirely on the laptop, against Jinja2 templates checked into the repo,
 and does not touch the cluster — its output is config; nothing is submitted. The operator
@@ -507,8 +513,8 @@ active measurement.
   has a dedicated thinking mode (§10.6). When the model under test is **not** a thinking
   model (e.g. Apertus-70B), `thinking: true` simulates "what happens if this model
   were forced to emit thinking-length outputs" — a useful stress-test of decode capacity,
-  but the manifest's `not_modelled` should disclose that the model's own emissions would
-  ordinarily be shorter.
+  but the class's `not_modelled` (§13.7) should disclose that the model's own emissions
+  would ordinarily be shorter.
 - Speculative-decoding experiments require a draft/target pair from this table. Only
   the **Apertus-8B → Apertus-70B** pairing is in scope for v1 (same-family, identical
   tokenizer). Kimi-K2.6 and DeepSeek-V4-Pro have no in-scope draft; cross-family
@@ -619,8 +625,9 @@ Three artefacts cooperate to produce a benchmark dataset:
   explicitly represents and what it deliberately does not, so any reader of a report
   knows in what context the numbers should be interpreted; copied verbatim into the
   scenario manifest (§10.8, §13.7).
-- **`dataset_config`** in the benchmark YAML — the per-run knobs: which scenario to run,
-  the master seed, `num_prompts`, and any per-run overrides to registry defaults.
+- **`dataset_config`** in the benchmark YAML — the per-run knobs: the `scenario_mix`
+  (workload classes and their weights), the master seed, `num_prompts`, and any
+  per-class overrides to registry defaults.
 - **Dataset generator** — reads both, materializes the prompt pool on capstor scratch,
   and emits the scenario manifest as a structured side-effect for the experiment row
   (§13.1).
@@ -636,7 +643,7 @@ scenario are omitted (e.g. `session.think_time_ms` only applies in `sequential` 
 
 | Field | Notes |
 |---|---|
-| `name` | Slug, matches the filename. Used as `experiments.scenario`. |
+| `name` | Slug, matches the filename. Used as the class slug in `experiments.scenario_mix`, `requests.scenario`, and the manifest (§13.7). |
 | `summary` | One-line human description. |
 | `maturity` | `established` \| `emerging` \| `exploratory`. |
 | `source` | `kind` (§10.5) + per-source `config`. |
@@ -654,22 +661,41 @@ See `tools/scenarios/agentic-coding.yaml` for a worked example. `assumptions` is
 stored in the registry — it is computed at runtime from the actual `dataset_config`
 consumed (§10.8).
 
+Registry entries are always **single-scenario**. Workload blending happens exclusively
+in `dataset_config.scenario_mix` (§10.4): a mix references N registry entries; the
+registry itself never encodes a mix.
+
 ### 10.4 dataset_config schema
 
 The benchmark YAML's `dataset_config` block:
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
-| `scenario` | string | yes | Must match a registered scenario name. |
-| `num_prompts` | integer | yes | Size of the generated prompt pool. The load generator's request stream draws from this pool — must be set sufficiently large that prompts are not exhausted before the experiment's request budget is consumed (accounting for `turns_per_session` in multi-turn scenarios), so that prompt uniqueness (§10.6) holds for every request actually issued. |
-| `seed` | integer | yes | Master seed; sub-seeds derived deterministically (§10.8). |
-| `input_length` | object | no | Per-run override of the registry's `input_length` distribution. |
-| `output_length` | object | no | Per-run override of the registry's `output_length` distribution. |
-| `session` | object | no | Per-run override of session fields. |
-| `tokenizer_id` | string | no | Override the tokenizer (defaults to the target model's; see §10.6). |
-| `source_overrides` | object | no | Source-specific overrides (e.g. LongBench task subset). |
+| `scenario_mix` | list | yes | One entry per workload class. A single-scenario run is the degenerate mix with one entry at `weight: 1.0`. Weights must sum to 1.0; the Coordinator aborts otherwise (§13.7). |
+| `scenario_mix[].scenario` | string | yes | Must match a registered scenario name (§10.3). |
+| `scenario_mix[].weight` | float | yes | Fraction of **session starts** assigned to this class (§11.3). The per-request share then follows from each class's `turns_per_session` and is disclosed in the manifest (§10.8). |
+| `scenario_mix[].input_length` | object | no | Per-class override of the registry's `input_length` distribution. |
+| `scenario_mix[].output_length` | object | no | Per-class override of the registry's `output_length` distribution. |
+| `scenario_mix[].session` | object | no | Per-class override of session fields. |
+| `scenario_mix[].source_overrides` | object | no | Per-class source-specific overrides (e.g. LongBench task subset). |
+| `num_prompts` | integer | yes | Total size of the generated prompt pool, split across classes proportionally to `weight × E[turns_per_session]` so no class exhausts its sub-pool early. Must be set sufficiently large that prompts are not exhausted before the experiment's request budget is consumed, so that prompt uniqueness (§10.6) holds for every request actually issued. |
+| `seed` | integer | yes | Master seed; per-class sub-seeds derived deterministically (§10.8). |
+| `tokenizer_id` | string | no | Override the tokenizer (defaults to the target model's; see §10.6). Shared by every class in the mix — all lengths are measured with one tokenizer. |
 
-Any field absent from `dataset_config` is inherited from the scenario registry.
+Example — the canonical mixed workload (80% agentic coding, 20% chat):
+
+```yaml
+dataset_config:
+  scenario_mix:
+    - scenario: agentic-coding
+      weight: 0.8
+    - scenario: chat-short-turns
+      weight: 0.2
+  num_prompts: 20000
+  seed: 1234
+```
+
+Any field absent from a mix entry is inherited from that class's scenario registry entry.
 
 ### 10.5 Dataset sources
 
@@ -700,6 +726,8 @@ engine's prefix cache does not serve synthetic cache hits — which would collap
 begin with a unique `[prompt-NNNNNN]` header; multi-turn sessions begin with a unique
 `[session-NNNNNN]` header reused across the session's turns, so the prefix cache *does*
 hit on the shared session prefix — the locality the benchmark is meant to expose (§10.7).
+Header counters are allocated globally across all classes of the mix, so uniqueness
+holds pool-wide, not merely within one class.
 
 **Length distributions.** `input_length` shape is per-scenario, declared in the registry
 (§10.3). Supported: `lognormal` (truncated), `normal` (truncated), `fixed`. Heavy-tailed
@@ -719,8 +747,8 @@ think-trace-plus-answer length: `params.mean × 2.5`, `params.sigma` (or `stdev`
 `fixed` values multiplied by 2.5. `params.min` / `params.max` are preserved as clamps
 (not rescaled). A precise bimodal sampler (tiny direct answers vs long deep-thinking
 outputs) is deferred — see TODOs.md *Bimodal output distribution as first-class*. The
-flag's effect is recorded in the manifest's `modelled` list and the simplification
-disclosed in `not_modelled`.
+flag's effect is recorded in the class's `modelled` list and the simplification
+disclosed in its `not_modelled` (§13.7).
 
 **Tokenization.** Length filtering, length-distribution sampling, and the `input_tokens`
 field all use the **target model's tokenizer**, loaded by HuggingFace ID on the
@@ -745,6 +773,12 @@ real chat / agentic clients do. (A `regenerate` strategy was considered but reje
 defeats the prefix cache and is better expressed as a separate ablation by disabling
 prefix caching at the backend.)
 
+**Class membership.** In a mixed run (§10.4) every session belongs to exactly one
+workload class — its `scenario_mix` entry, assigned at session start (§11.3). The class
+determines the session's source, length distributions, turn structure, and session mode;
+every request of the session carries the class slug in `requests.scenario` (§13.3),
+which is the key report-time per-class group-bys operate on (§12.2, §12.4, §14.1).
+
 **Session mode** governs how follow-up turns interact with the load generator's open-loop
 arrival process (§11.3):
 
@@ -758,7 +792,8 @@ model invocations (think → tool call → tool result → …) — are approxim
 sessions with bursty fan-out**: each session = one agentic task; each turn = one model
 invocation; tool results synthesised as injected text in the next turn's prompt. No tool
 catalog, no fan-out DSL, no per-tool JSON schemas. This is enough to derive supportable
-agentic-user count from λ + an SLO. The precise mechanism (distinct `think` / `tool_call`
+agentic-user count from the SLO-attained rate λ* (§12.4) via the report notebook's
+supportable-users estimate (§14.1). The precise mechanism (distinct `think` / `tool_call`
 / `tool_result` roles, per-tool schemas, schema-constrained-decoding validity, a
 dedicated `agent_tasks` table, first-class bimodal output, per-tool result-content
 synthesis) is deferred to TODOs.md *Precise agentic / tool-calling measurement*. Routing:
@@ -767,9 +802,11 @@ instance so the prefix cache exposes the locality the workload depends on.
 
 ### 10.8 Reproducibility surface
 
-**Seeding.** `dataset_config.seed` is a single integer. Per-axis sub-seeds derived as
-`blake2b(f"{seed}:{axis}", digest_size=8)` over axes: `header`, `length_input`,
-`length_output`, `selection`, `turns`, `thinktime`.
+**Seeding.** `dataset_config.seed` is a single integer. Per-class, per-axis sub-seeds
+derived as `blake2b(f"{seed}:{scenario}:{axis}", digest_size=8)` over axes: `header`,
+`length_input`, `length_output`, `selection`, `turns`, `thinktime`. One run-level axis,
+`mix` (`blake2b(f"{seed}:mix", digest_size=8)`), seeds the categorical assignment of
+session starts to classes (§11.3).
 
 **Contract.** Same `dataset_config` + same scenario-registry revision + same target
 tokenizer → identical prompt pool (byte-for-byte). Changing the target model triggers
@@ -781,8 +818,10 @@ side-effect of running:
 
 | Manifest field(s) | Source |
 |---|---|
-| `name`, `summary`, `maturity`, `modelled`, `not_modelled` | Copied verbatim from the scenario registry entry. |
-| `assumptions` | Auto-filled from the `dataset_config` actually consumed: input / output length distributions; turns-per-session distribution; session mode; prefix strategy; source `kind` + relevant source config; master seed; tokenizer ID. |
+| `mix` | The `scenario_mix` actually consumed: `[{scenario, weight}, …]`, plus the resulting expected per-request share per class (derived from `weight × E[turns_per_session]`). |
+| Per-class `name`, `summary`, `maturity`, `modelled`, `not_modelled` | Copied verbatim from each class's scenario registry entry. |
+| Per-class `assumptions` | Auto-filled from the per-class config actually consumed: input / output length distributions; turns-per-session distribution; session mode; prefix strategy; source `kind` + relevant source config. |
+| `run_assumptions` | Auto-filled run-level facts: arrival process + parameters (§11.3); routing strategy (§11.4); master seed; tokenizer ID. |
 
 Together these are sufficient to reconstruct what the run measured without re-reading the
 registry at a specific revision.
@@ -834,8 +873,8 @@ The sweep begins only once **all** instances are ready, profiled, and primed.
 
 The load generator supports **configurable arrival processes**, selected per sweep step via
 `arrival_process` in the benchmark YAML. The chosen process and its parameters are serialized
-into `experiments.scenario_manifest.assumptions` (§13.7) so the conditions a result was
-measured under are always recoverable.
+into `experiments.scenario_manifest.run_assumptions` (§13.7) so the conditions a result
+was measured under are always recoverable.
 
 | `arrival_process` | Description and intuition |
 |---|---|
@@ -845,7 +884,9 @@ measured under are always recoverable.
 A heavy-tailed (Pareto) arrival process is intentionally out of scope for v1 — tracked in
 `TODOs.md`.
 
-Each arriving request is routed to one of N server instances per `routing_strategy` (§11.4).
+Each session start is assigned a workload class by a seeded categorical draw over the
+`scenario_mix` weights (axis `mix`, §10.8); all turns of the session inherit the class.
+Each arriving request is then routed to one of N server instances per `routing_strategy` (§11.4).
 
 ### 11.4 Routing strategies
 
@@ -881,7 +922,10 @@ from server-side failure (`http_5xx` / `connection`).
 
 Every multi-turn scenario — conversational chat, long-context follow-ups, the v1 agentic
 approximation, … — produces sessions whose turns share a `session_idx`. Session-level
-metrics are derived at report time by grouping the `requests` table (§13.3) on that key:
+metrics are derived at report time by the report notebook grouping the `requests` table
+(§13.3) on that key — in mixed runs (§10.4) grouped per class first
+(`GROUP BY scenario, session_idx`) and only then aggregated, so one class's sessions
+never dilute another's statistics (§14.1):
 
 | Per-session metric | Derivation |
 |---|---|
@@ -945,6 +989,41 @@ Signals a platform cannot expose are stored `NULL`. Reports (§14) overlay these
 against λ so that the "p95 TTFT meets SLO but GPU SM-active is 35%" case (untapped headroom)
 is immediately visible to the reader.
 
+### 12.4 Service-level objectives (SLOs)
+
+The benchmark YAML's `slos` block declares the latency / reliability objectives the
+experiment's results are judged against. Objectives are declared **per workload class**
+(§10.4) because classes differ in what their users feel: chat is TTFT-sensitive, while
+agentic-coding sessions are dominated by decode pace (`tpot_ms`) and total task time
+(`session_e2e_ms`). The block is persisted verbatim to `experiments.slos` (§13.1) and
+**evaluated at report time only** (§14.1) — the load generator neither enforces
+admission control nor sheds load based on it.
+
+| Field | Type | Notes |
+|---|---|---|
+| `slos[].scenario` | string | Class slug from `scenario_mix`, or `all` to apply the objective to every class. |
+| `slos[].metric` | string | `ttft_ms` \| `tpot_ms` \| `e2e_ms` \| `session_e2e_ms` \| `error_rate_pct`. Session-level metrics per §12.2. |
+| `slos[].percentile` | string | `p50` \| `p90` \| `p95` \| `p99`. Omitted for `error_rate_pct` (evaluated as the per-class failure fraction over the measurement phase). |
+| `slos[].threshold` | number | Upper bound — milliseconds for latency metrics, percent for `error_rate_pct`. |
+
+Example:
+
+```yaml
+slos:
+  - { scenario: chat-short-turns, metric: ttft_ms,        percentile: p95, threshold: 800 }
+  - { scenario: chat-short-turns, metric: tpot_ms,        percentile: p95, threshold: 80 }
+  - { scenario: agentic-coding,   metric: session_e2e_ms, percentile: p90, threshold: 600000 }
+  - { scenario: all,              metric: error_rate_pct,                  threshold: 1.0 }
+```
+
+**SLO-attained rate (λ\*).** For each sweep step, every objective is evaluated over the
+measurement-phase requests of its class (warmup and drain excluded, §11.2). **λ\*** is
+the highest swept λ at which **all** declared objectives hold simultaneously — the
+experiment's goodput operating point, and the anchor for the supportable-users estimate
+(§14.1). If no swept λ satisfies all objectives, λ\* is undefined and the report flags
+it prominently (the sweep should be extended toward lower rates). λ\* is a **derived,
+report-time quantity** — nothing cluster-side computes or persists it.
+
 ---
 
 
@@ -969,8 +1048,9 @@ One row per sweep — the configuration and overall outcome of the run.
 | `backend` | TEXT | Inference engine (`vllm`, `sglang`, `dynamo`). |
 | `backend_config` | TEXT (JSON) | Serialized `BackendConfig` — all fields from §15.2. |
 | `dataset_config` | TEXT (JSON) | Serialized dataset configuration (§10). |
-| `scenario` | TEXT | Scenario slug (e.g. `agentic-coding`, `chat-short-turns`, `long-context-followup`). See §13.7. |
-| `scenario_manifest` | TEXT (JSON) | Structured disclosure of what the scenario models, what it omits, and the numeric assumptions baked in. See §13.7. |
+| `scenario_mix` | TEXT (JSON) | The workload mix: `[{scenario, weight}, …]` (§10.4). Single-scenario runs carry one entry with `weight = 1.0`. |
+| `scenario_manifest` | TEXT (JSON) | Structured disclosure of what each class models, omits, and assumes, plus run-level assumptions. See §13.7. |
+| `slos` | TEXT (JSON) | Serialized `slos` block (§12.4); `NULL` when the experiment declares none. |
 | `rate_levels` | TEXT (JSON) | List of λ values (req/s) swept in this run. |
 | `warmup_s` | INTEGER | Warmup phase duration in seconds (metrics excluded; see §11.2). |
 | `measurement_s` | INTEGER | Measurement phase duration in seconds. |
@@ -1006,6 +1086,7 @@ One row per issued request — the per-request latency record.
 | `rate_lambda` | REAL | λ value (req/s) of the sweep step this request belongs to. |
 | `request_id` | INTEGER | Per-rate-level request index (monotonic). |
 | `session_idx` | INTEGER | Session this request belongs to (§10.7). Shared by every turn of the session; enables grouping per-session for session-affinity routing analysis (§11.4). For single-turn scenarios equals the request's underlying prompt index. |
+| `scenario` | TEXT | Workload-class slug of the session this request belongs to (§10.4, §10.7). Constant across a session's turns; the key for per-class group-bys (§12.2, §12.4, §14.1). |
 | `turn_idx` | INTEGER | 0-based position of this request within its session (§10.7). `0` for the first turn (and for every request in single-turn scenarios); `1` for the first follow-up; etc. Lets reports plot per-turn metrics directly (e.g. "TTFT vs turn index" to visualise prefix-cache benefit on follow-up turns) without reconstructing the order from timestamps. |
 | `ttft_ms` | REAL | Time to first token, milliseconds — authoritative SLO metric. |
 | `tpot_ms` | REAL | Inter-token latency, mean across the request's output tokens. |
@@ -1080,29 +1161,33 @@ a degraded foundation and for later correlation with anomalous sweep results.
 ### 13.7 Scenario manifest
 
 Every result carries a structured **scenario manifest** that discloses what the benchmarked
-scenario models, what it explicitly does *not* model, and the numeric assumptions baked in.
-Without this, a reader looking at a plot has no principled way to know whether the result
-applies to *their* workload — e.g. a Pareto frontier built from text-only large-prompt
-agentic-coding traffic may be wildly off for a chat workload dominated by short turns and
-image inputs.
+workload mix models, what it explicitly does *not* model, and the numeric assumptions baked
+in — per class and run-wide. Without this, a reader looking at a plot has no principled way
+to know whether the result applies to *their* workload — e.g. a Pareto frontier built from
+text-only large-prompt agentic-coding traffic may be wildly off for a chat workload
+dominated by short turns and image inputs.
 
 The manifest is stored in `experiments.scenario_manifest` as a JSON object with the
 following required keys:
 
 | Field | Type | Semantic |
 |---|---|---|
-| `name` | string | Same value as `experiments.scenario`; included for self-containment. |
-| `summary` | string | One- to two-sentence human description of the scenario. |
-| `maturity` | string | One of `established` (validated against real-workload telemetry), `emerging` (early-signal, partially validated), `exploratory` (anticipated future pattern with no validation yet). Reports must visually flag `emerging` and `exploratory` Pareto frontiers as forward-looking so procurement readers can distinguish validated patterns from early signals. |
-| `modelled` | list[string] | Aspects of real workload that the scenario *does* exercise — e.g. `"large multi-turn prompts (16K–32K input tokens)"`, `"follow-up turns reusing the initial context"`. |
-| `not_modelled` | list[string] | Aspects the scenario explicitly does *not* cover — e.g. `"no image inputs"`, `"no audio inputs"`, `"no reasoning / thinking traces"`, `"no tool-call interleaving"`. |
-| `assumptions` | list[string] | Numeric or structural assumptions baked in — e.g. `"follow-up turn probability = 0.4"`, `"max output tokens = 4096"`, `"input length distribution: lognormal, mean=20K, σ=0.3"`, `"system prompt length: 1.2K tokens, identical across sessions"`. |
+| `mix` | list[object] | `[{scenario, weight, expected_request_share}, …]` — the workload classes, their session-start weights (§10.4), and the per-request share that follows from each class's turn structure. |
+| `classes` | list[object] | One object per mix entry, carrying the per-class disclosure fields below. |
+| `classes[].name` | string | Class slug; matches the corresponding `mix` entry. |
+| `classes[].summary` | string | One- to two-sentence human description of the class. |
+| `classes[].maturity` | string | One of `established` (validated against real-workload telemetry), `emerging` (early-signal, partially validated), `exploratory` (anticipated future pattern with no validation yet). Reports must visually flag `emerging` and `exploratory` Pareto frontiers as forward-looking so procurement readers can distinguish validated patterns from early signals. |
+| `classes[].modelled` | list[string] | Aspects of real workload that the class *does* exercise — e.g. `"large multi-turn prompts (16K–32K input tokens)"`, `"follow-up turns reusing the initial context"`. |
+| `classes[].not_modelled` | list[string] | Aspects the class explicitly does *not* cover — e.g. `"no image inputs"`, `"no audio inputs"`, `"no reasoning / thinking traces"`, `"no tool-call interleaving"`. |
+| `classes[].assumptions` | list[string] | Numeric or structural assumptions baked into the class — e.g. `"follow-up turn probability = 0.4"`, `"max output tokens = 4096"`, `"input length distribution: lognormal, mean=20K, σ=0.3"`, `"system prompt length: 1.2K tokens, identical across sessions"`. |
+| `run_assumptions` | list[string] | Run-level assumptions shared by all classes: arrival process + parameters (§11.3), routing strategy (§11.4), master seed, tokenizer ID. |
 
-Validation: the Coordinator aborts **before submission** if the benchmark YAML's `scenario`
-field is missing or names an unregistered scenario (§10.3). The dataset generator on the
-Benchmarker aborts **before load-generation begins** if any required field of the emitted
-`scenario_manifest` is missing or fails schema validation (matching §10.8). There is no
-implicit default — every benchmark must declare what it is and is not.
+Validation: the Coordinator aborts **before submission** if the benchmark YAML's
+`scenario_mix` is missing or empty, names an unregistered scenario (§10.3), or carries
+weights that do not sum to 1.0. The dataset generator on the Benchmarker aborts **before
+load-generation begins** if any required field of the emitted `scenario_manifest` is
+missing or fails schema validation (matching §10.8). There is no implicit default —
+every benchmark must declare what it is and is not.
 
 ### 13.8 Experiment directories
 
@@ -1125,13 +1210,14 @@ and writes it back into the experiment directory.
 Every experiment report must include:
 
 - Experiment title and description
-- **Scenario & assumptions panel** (from `experiments.scenario` and
-  `experiments.scenario_manifest`, §13.7): scenario name, one-line summary, the
-  `modelled` list, the `not_modelled` list, and the `assumptions` list — surfaced
-  near the top of the report, before any plot, so every downstream chart is read in
-  the context of what the scenario actually does and does not cover. Items in
-  `not_modelled` must be visually distinguished (e.g. struck-through or in a
-  warning-coloured panel) so a reader cannot miss them.
+- **Scenario & assumptions panel** (from `experiments.scenario_mix` and
+  `experiments.scenario_manifest`, §13.7): the mix table (class, session-start weight,
+  expected request share), then per class: name, one-line summary, the `modelled`
+  list, the `not_modelled` list, and the `assumptions` list, plus the run-level
+  `run_assumptions` — surfaced near the top of the report, before any plot, so every
+  downstream chart is read in the context of what each class actually does and does
+  not cover. Items in `not_modelled` must be visually distinguished (e.g.
+  struck-through or in a warning-coloured panel) so a reader cannot miss them.
 - Configuration summary table (model, TP, KV dtype, spec dec, SLO, etc.)
 - **System pre-checks** (from `system_prechecks`, §13.6): table of pre-check metrics with
   measured / expected / status — warns and fails flagged prominently at the top of the
@@ -1141,9 +1227,26 @@ Every experiment report must include:
   `model_load_total_s` plus the per-component breakdown (`model_load_weights_s`,
   `model_load_engine_init_s`, `model_load_cuda_graph_capture_s`,
   `model_load_inductor_compile_s`) — see §9.2.
-- TTFT p50/p95/p99 vs λ plot (log scale) with SLO line
+- TTFT p50/p95/p99 vs λ plot (log scale) with per-class SLO lines (§12.4)
 - ITL p50/p95/p99 vs λ plot
 - Failure rate bar chart (bottom panel of each plot)
+- **Per-class breakdowns** (mixed runs, §10.4): every latency and failure-rate panel is
+  rendered both aggregate and grouped by `requests.scenario`, and the §12.2
+  session-level metrics are derived per class (`GROUP BY scenario, session_idx`) — so
+  cross-class interference (e.g. long agentic prefills inflating chat TTFT on the
+  shared instance) is directly visible rather than averaged away.
+- **SLO attainment** (from `experiments.slos`, §12.4): a per-objective pass/fail table
+  per λ level, the derived λ\* highlighted, and each class's SLO thresholds drawn on
+  its respective panels.
+- **Supportable-users estimate** — the λ→users translation, computed **only here** (and
+  in curated reports built on top, §14.3); nothing cluster-side computes it. The
+  notebook exposes editable per-class parameters (`sessions_per_user_per_hour`) and
+  combines them with quantities measured at λ\*: per-class session throughput (sessions
+  started per second during the measurement phase) and mean session wall-time (§12.2).
+  It reports, per class, (a) the **supportable user population** = session throughput ÷
+  per-user session rate, and (b) **concurrent active sessions** via Little's law =
+  session throughput × mean session wall-time. Always presented as an estimate, with
+  the parameters disclosed alongside the result. Undefined when λ\* is undefined.
 - **Hardware utilization** (from `hardware_stats`, §13.5), per λ level, overlaid against
   TTFT/ITL so untapped headroom is visible at a glance:
   - GPU SM-active and tensor-active vs λ (the key headroom indicator — SLO met with these
@@ -1252,7 +1355,8 @@ target** (SLURM vs Kubernetes — frequently a sweep dimension in its own right,
 CSCS-fork vs upstream — comparing two versions of the same backend is a first-class
 experiment shape), the BackendConfig knobs that vary across deployments within the
 experiment (§15.2), and the model(s) under test (§8.2). The benchmark YAML specifies
-all five. An experiment thus has two nested sweeps: the **deployment sweep** over
+all five, plus the workload mix the deployment is loaded with (`scenario_mix`, §10.4)
+and the SLOs the results are judged against (`slos`, §12.4). An experiment thus has two nested sweeps: the **deployment sweep** over
 deployment-target × backend-version × BackendConfig × model combinations (one engine
 launch per combination), and inside each deployment the **rate-level sweep** over λ
 values (each λ being one "sweep step" in the sense used by the `requests` /

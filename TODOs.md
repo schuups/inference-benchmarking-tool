@@ -79,7 +79,7 @@
 - [ ] **Confirm scenario-registry replaces `dataset_source`** (SPECIFICATIONS.md §10) — the
   previous design had a top-level `dataset_source` knob; the current spec embeds source
   choice inside the scenario registry. Confirm this is the intended end state (no separate
-  `dataset_source` at the benchmark-YAML level beyond `source_overrides`).
+  `dataset_source` at the benchmark-YAML level beyond `scenario_mix[].source_overrides`).
 - [ ] **`source_overrides` schema per source kind** (§10.4) — enumerate the keys each source
   accepts (e.g. LongBench task subset, COCO split, reasoning-trace dataset name). The
   field is declared but its per-source schema is not specified.
@@ -96,7 +96,8 @@
   experiment row? content hash of the YAML file? Pick a storage location and mechanism.
 - [ ] **Precise agentic / tool-calling measurement** — v1 approximates agentic workloads
   as multi-turn sessions with bursty fan-out (high `turns_per_session`, mixed output
-  sizes) so that the operator can derive supportable-user-count from λ + an SLO. The
+  sizes) so that the operator can derive supportable-user-count from the SLO-attained
+  rate λ* (SPECIFICATIONS.md §12.4, §14.1). The
   precise approach was specified in earlier drafts of §10.7 / §12.4 / §13.3 / §13.7 and
   is kept here so the work can resume from the current thinking. When picked up,
   re-introduce:
@@ -128,7 +129,10 @@
 
 ## Metrics & Analysis
 
-- [ ] Derive and expose the number of supportable concurrent users from λ (load-to-users translation)
+- [ ] **Per-class `sessions_per_user_per_hour` defaults** — the supportable-users
+  estimate (SPECIFICATIONS.md §14.1) needs a defensible default per scenario class
+  (agentic-coding tasks/dev/hour, chat sessions/user/hour); currently the notebook
+  parameters have no recommended values.
 - [ ] **Heavy-tailed (Pareto) arrival process** — v1 keeps only `poisson` + `burst_mmpp` in
   `arrival_process` (SPECIFICATIONS.md §11.3). The distinctive signal Pareto adds (prefix-
   cache aging across multi-minute idle gaps followed by a cold-cache burst) is approximated

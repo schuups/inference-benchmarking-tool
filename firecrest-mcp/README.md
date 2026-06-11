@@ -18,5 +18,5 @@ claude mcp add firecrest http://localhost:8888/mcp --transport http
 4. Test
 ```sh
 source .venv/bin/activate
-python pre-flight-checks.py
+python tools/pre-flight-checks.py
 ```
