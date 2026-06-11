@@ -88,9 +88,11 @@
   `wildchat`. LMSYS-Chat-1M brings per-message source-model identity (Vicuna / Llama /
   GPT family) — useful for splitting chat scenarios by source-model family. OASST1
   brings a smaller, fully-open (Apache-2.0) tree-structured conversation corpus.
-- [ ] **Think-time distribution defaults** (§10.3) — recommend a default range per scenario
-  for the sequential-session `think_time_ms` field (chat short, agentic-coding longer, …).
-  Currently no defaults are specified.
+- [ ] **Think-time distribution defaults** (§10.3) — validate the provisional
+  `think_time_ms` values now in the registry (`chat-short-turns` ~1.5 s reading delay,
+  `long-context-followup` ~4 s, `agentic-coding` ~3 s heavy-tailed tool-execution gap —
+  marked PROVISIONAL in the YAML) against real telemetry, and document the validated
+  ranges per scenario.
 - [ ] **Scenario-registry revision pinning for reproducibility** (§10.1) — define how the
   scenario-registry revision is "recorded alongside" the dataset: git SHA on the
   experiment row? content hash of the YAML file? Pick a storage location and mechanism.

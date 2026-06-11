@@ -51,6 +51,7 @@ Additional targets may be added (e.g. systems outside CSCS).
 - `examples/` — image build via SLURM, vLLM deployment on K8s and SLURM.
 - `firecrest-mcp/` — FirecREST MCP server registered in Claude Code. Do not modify; use via its registered tools.
 - `SPECIFICATIONS.md` — authoritative reference for detailed requirements, schema, known constraints, and cluster-specific workarounds. Read it before making changes to the tool.
+- `IMPLEMENTATION_PLAN.md` — build order: component milestones (M0–M10), experiments track (E1–E5), dependencies, definitions of done, open decisions, review log. Living document; consult and update it when starting or finishing implementation work.
 - `TODOs.md` — tracked future work; deferred activities per the working agreement (see "How we work together" below).
 
 ## Constants

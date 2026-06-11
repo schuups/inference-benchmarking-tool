@@ -1,0 +1,41 @@
+# tools/scenarios/smoke-synthetic.yaml
+#
+# Pipeline-validation smoke scenario: single-turn synthetic prompts, no network
+# dependencies, small token counts. Exists so end-to-end pipeline shakeout runs
+# (e.g. experiment E1 in IMPLEMENTATION_PLAN.md) have a spec-legal scenario that
+# is cheap on any model. Exempt from the §8.2 model/scenario pairings; results
+# from this scenario are never published as findings (see §8.2 notes).
+
+name: smoke-synthetic
+summary: Single-turn synthetic smoke workload for pipeline validation only — results are not findings.
+maturity: exploratory                # never validated against telemetry, by design
+
+source:
+  kind: synthetic                    # filler text with unique [prompt-NNNNNN] headers; no network
+
+input_length:
+  distribution: lognormal
+  params: { mean: 1000, sigma: 0.5, min: 100, max: 8000 }
+
+output_length:
+  distribution: lognormal
+  params: { mean: 200, sigma: 0.5, min: 16, max: 1024 }
+
+thinking: false
+
+session:
+  mode: open_loop                    # single-turn: session ≡ request (§10.7 degenerate case)
+  turns_per_session:
+    distribution: fixed
+    params: { value: 1 }
+  prefix_strategy: append_delta
+
+manifest:
+  modelled:
+    - "end-to-end pipeline mechanics only: dataset generation, arrival process, request issuance, metric collection, DB persistence, report rendering"
+    - "unique per-prompt headers so the prefix cache cannot serve synthetic hits"
+  not_modelled:
+    - "NOT a workload model — synthetic filler text carries no semantic realism whatsoever"
+    - "near-zero speculative-decoding acceptance and no meaningful prefix-cache locality (§10.9)"
+    - "no multi-turn structure, no sessions, no think-time"
+    - "results from this scenario must never be used for capacity, Pareto, or procurement claims"

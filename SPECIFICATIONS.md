@@ -33,8 +33,9 @@ This document enumerates all requirements captured so far.
   carries the work.
 - **Backend-agnostic**: vLLM, sglang, and NVIDIA Dynamo are first-class backends. Others
   can be added later by providing blueprint / example files.
-- **Open-loop stochastic load generation**: requests arrive at mean rate λ via Poisson or
-  burst-aware processes (§11.3), independent of server completions. This captures the
+- **Open-loop stochastic load generation**: sessions arrive at mean rate λ via Poisson or
+  burst-aware processes (§11.3), independent of server completions (λ counts **session
+  starts** — see §11.3 *What λ counts*). This captures the
   **queuing dimension** of real load — backlog, saturation, latency amplification. It is
   one of two axes of realism. The other — semantic realism: prompt content, multi-turn
   structure, fan-out, modality mix — lives in the scenario registry (§10) and is equally
@@ -84,7 +85,7 @@ This document enumerates all requirements captured so far.
 | `experiments/` | Per-experiment folders (`YYYY-MM-DD_description/`) with config, deployment artifacts, raw results. See §6.2 for the run-ID format and §13.8 for the directory contents. |
 | `reports/` | Curated, audience-facing reports synthesised from one or many `experiments/` runs (§14.3). |
 
-The repository root also carries `SPECIFICATIONS.md`, `CLAUDE.md`, `TODOs.md`, and `README.md` as the four authoritative documents.
+The repository root also carries `SPECIFICATIONS.md`, `CLAUDE.md`, `TODOs.md`, `README.md`, and `IMPLEMENTATION_PLAN.md` as the five authoritative documents.
 
 ### 2.2 Remote (cluster scratch)
 
@@ -524,6 +525,11 @@ active measurement.
 - Adding a new model to this set is a planner-template + benchmark-YAML change; no spec
   edit is required unless the model introduces a new capability dimension (e.g. native
   thinking mode toggle, new MoE topology) that the framework should sweep over.
+- **Pipeline-validation smoke runs are exempt from these pairings.** The
+  `smoke-synthetic` scenario (single-turn, synthetic source, `exploratory`) may be run
+  against any model purely to validate the pipeline end-to-end (e.g. experiment E1 in
+  `IMPLEMENTATION_PLAN.md`); its results are never published as findings or used for
+  capacity / Pareto / procurement claims.
 
 ---
 
@@ -639,7 +645,8 @@ generator. Registry entries are versioned with the repo; changes to a scenario's
 ### 10.3 Scenario registry
 
 Each registry entry is a YAML file with the schema below. Fields not relevant to a given
-scenario are omitted (e.g. `session.think_time_ms` only applies in `sequential` mode).
+scenario are omitted (e.g. `session.think_time_ms` does not apply to single-turn
+scenarios).
 
 | Field | Notes |
 |---|---|
@@ -653,7 +660,7 @@ scenario are omitted (e.g. `session.think_time_ms` only applies in `sequential` 
 | `session.mode` | `open_loop` \| `sequential` (§10.7). |
 | `session.turns_per_session` | Distribution (same shapes as `input_length`). |
 | `session.prefix_strategy` | `append_delta` (only supported value; §10.7). |
-| `session.think_time_ms` | Distribution; `sequential` mode only (§10.7). |
+| `session.think_time_ms` | Distribution; paces follow-up turns in **both** session modes — anchored at the previous turn's send time (`open_loop`) or response time (`sequential`); see §10.7. Required for multi-turn scenarios. |
 | `manifest.modelled` | Human-authored list of what the scenario explicitly represents. |
 | `manifest.not_modelled` | Human-authored list of what the scenario deliberately omits. |
 
@@ -784,8 +791,11 @@ arrival process (§11.3):
 
 | `session.mode` | Follow-up behaviour | Use for |
 |---|---|---|
-| `open_loop` (default) | All turns scheduled by the arrival process; turn K+1 fires on its own schedule regardless of when turn K completed. Preserves open-loop queueing semantics throughout. | RAG-style queries against a shared long-lived prefix; reasoning workloads; any scenario where turn ordering is incidental. |
-| `sequential` | Turn K+1 is sent only after turn K's response, plus a `think_time_ms` delay. Closed-loop coupling *within a session*; cross-session arrivals remain open-loop (session starts are still Poisson per §11.3). | Conversational chat; agentic-coding follow-ups; any scenario where a follow-up cannot meaningfully precede its predecessor's response. |
+| `open_loop` (default) | Turn K+1 is sent at turn K's **send time** plus a `think_time_ms` sample — independent of when (or whether) turn K completed. Preserves open-loop queueing semantics within the session: a saturated server does not slow the turn stream. | RAG-style queries against a shared long-lived prefix; reasoning workloads; any scenario where turn ordering is incidental. |
+| `sequential` | Turn K+1 is sent at turn K's **response time** plus a `think_time_ms` sample. Closed-loop coupling *within a session*; cross-session arrivals remain open-loop (session starts keep arriving per §11.3 regardless of server state, so backlog growth is preserved). | Conversational chat; agentic-coding follow-ups; any scenario where a follow-up cannot meaningfully precede its predecessor's response. |
+
+The two modes are exact mirrors — both pace follow-ups with `think_time_ms`, anchored at
+the previous turn's send time (`open_loop`) or response time (`sequential`).
 
 **Agentic approximation (v1).** Agentic workloads — a user prompt fanning out to many
 model invocations (think → tool call → tool result → …) — are approximated as **multi-turn
@@ -864,9 +874,18 @@ The sweep begins only once **all** instances are ready, profiled, and primed.
 - **Warmup phase**: requests sent but metrics excluded. Long enough for:
   - Inductor JIT compilation to complete after primer (≥ 1 full round of compilation per model)
   - KV cache and queue to reach steady state
+  - The **session population** to reach steady state: at step start only first turns
+    arrive, and the request rate ramps from λ toward λ × E[turns_per_session] (§11.3
+    *What λ counts*) as sessions accumulate — warmup must cover at least a mean session
+    wall-time (turns × (latency + think time)) so the measured window sees the full
+    follow-up load.
 - **Measurement phase**: TTFT, ITL, E2E recorded per request.
-- **Drain phase**: in-flight requests after measurement window are allowed to complete up to
-  `drain_timeout_s`.
+- **Drain phase**: **no new session starts** after measurement ends; in-flight sessions
+  and requests are allowed to complete up to `drain_timeout_s`. Sessions still
+  unfinished at drain end are truncated: their issued requests are kept in `requests`,
+  but the session is **incomplete** for session-level metrics (§12.2). Sessions never
+  span sweep steps — every request inherits the `rate_lambda` of the step its session
+  started in.
 - `request_timeout_s`: client-side TTFT hard cutoff; exceeded requests recorded as `success=0`.
 
 ### 11.3 Open-loop stochastic arrivals
@@ -880,6 +899,20 @@ was measured under are always recoverable.
 |---|---|
 | `poisson` (default) | **Mathematical**: memoryless Poisson at rate λ; inter-arrivals drawn from `Exp(1/λ)`. **Intuition**: a sterile lab baseline where every request is independent of every other — picture users hitting "send" at random moments with no clustering, no batching, no feedback between them. Useful as the cleanest characterisation of pure queue behaviour, but produces optimistic tail latencies because real traffic always clusters more than this. |
 | `burst_mmpp` | **Mathematical**: two-state on/off Markov-Modulated Poisson Process at mean rate λ, with configurable burst factor (peak-to-mean ratio) and mean burst / idle durations. **Intuition**: traffic alternates between a high-arrival burst phase and a quiet phase, modelling production patterns where a tool-calling cycle fans out several requests at once, batch-API submissions flush queues at intervals, or cohorts of users arrive in waves. Reveals tail-latency amplification and queueing collapse that Poisson hides because real traffic's coefficient of variation is well above Poisson's 1. |
+
+**What λ counts.** λ is the **session-start rate** (sessions/s). For single-turn
+scenarios a session is one request, so λ reduces to the familiar request rate. For
+multi-turn classes the arrival process schedules **session starts**; the session's
+follow-up turns are then paced by the class's session mode and `think_time_ms` (§10.7)
+— `open_loop` turns anchored at the previous turn's send time, `sequential` turns at
+its response time. Follow-up arrivals are therefore deterministic offspring of the
+session-start process, not a separate stream: the steady-state request rate observed by
+the server is **λ × Σ weight × E[turns_per_session]**, which the dataset generator
+derives per class and disclosed in the manifest's `run_assumptions` (§13.7). This gives
+one coherent λ definition across a mixed run regardless of each class's mode, aligned
+with the session-start semantics of `scenario_mix` weights (§10.4). Under saturation,
+`sequential` classes self-throttle their in-flight turns (realistic user behaviour)
+while session starts keep arriving — so queue growth remains observable.
 
 A heavy-tailed (Pareto) arrival process is intentionally out of scope for v1 — tracked in
 `TODOs.md`.
@@ -937,6 +970,13 @@ never dilute another's statistics (§14.1):
 
 Single-turn scenarios are the degenerate case (session = single request, §10.7), where
 these metrics collapse to the underlying per-request values.
+
+**Boundary rule.** Session-level metrics are computed only over sessions **fully
+contained in the sweep step** — started during warmup or measurement and completed by
+drain end (§11.2). Truncated sessions are excluded from the session-level aggregates
+(their per-request rows still count toward request-level metrics), and the report
+discloses the excluded count per λ level; a high truncation share at a given λ is
+itself a saturation signal.
 
 For **agentic scenarios** under the v1 approximation (per §10.7, where one task ≡ one
 session), these session metrics also serve as task-level metrics — `session_e2e_ms` is
@@ -1051,7 +1091,7 @@ One row per sweep — the configuration and overall outcome of the run.
 | `scenario_mix` | TEXT (JSON) | The workload mix: `[{scenario, weight}, …]` (§10.4). Single-scenario runs carry one entry with `weight = 1.0`. |
 | `scenario_manifest` | TEXT (JSON) | Structured disclosure of what each class models, omits, and assumes, plus run-level assumptions. See §13.7. |
 | `slos` | TEXT (JSON) | Serialized `slos` block (§12.4); `NULL` when the experiment declares none. |
-| `rate_levels` | TEXT (JSON) | List of λ values (req/s) swept in this run. |
+| `rate_levels` | TEXT (JSON) | List of λ values (session starts/s; §11.3 *What λ counts*) swept in this run. |
 | `warmup_s` | INTEGER | Warmup phase duration in seconds (metrics excluded; see §11.2). |
 | `measurement_s` | INTEGER | Measurement phase duration in seconds. |
 | `created_at` | TEXT (ISO 8601) | Experiment start timestamp. |
@@ -1083,7 +1123,7 @@ One row per issued request — the per-request latency record.
 | Column | Type | Semantic |
 |---|---|---|
 | `run_id` | TEXT, FK | Foreign key to `experiments.run_id`. |
-| `rate_lambda` | REAL | λ value (req/s) of the sweep step this request belongs to. |
+| `rate_lambda` | REAL | λ value (session starts/s; §11.3) of the sweep step this request belongs to. |
 | `request_id` | INTEGER | Per-rate-level request index (monotonic). |
 | `session_idx` | INTEGER | Session this request belongs to (§10.7). Shared by every turn of the session; enables grouping per-session for session-affinity routing analysis (§11.4). For single-turn scenarios equals the request's underlying prompt index. |
 | `scenario` | TEXT | Workload-class slug of the session this request belongs to (§10.4, §10.7). Constant across a session's turns; the key for per-class group-bys (§12.2, §12.4, §14.1). |
@@ -1108,7 +1148,7 @@ another.
 |---|---|---|
 | `run_id` | TEXT, FK | Foreign key to `experiments.run_id`. |
 | `instance_id` | TEXT | Instance the sample was scraped from. Composite key with `run_id` + `ts` + `rate_lambda`. Matches §13.2 / §13.5 / §13.6. |
-| `rate_lambda` | REAL | λ value (req/s) of the sweep step being sampled. |
+| `rate_lambda` | REAL | λ value (session starts/s; §11.3) of the sweep step being sampled. |
 | `ts` | TEXT (ISO 8601) | Sample timestamp. |
 | `requests_running` | INTEGER | Requests currently executing on the server. |
 | `requests_waiting` | INTEGER | Requests queued on the server. |
@@ -1125,7 +1165,7 @@ a non-`NULL` `gpu_index`; node-scoped rows carry `gpu_index = NULL`.
 |---|---|---|
 | `run_id` | TEXT, FK | Foreign key to `experiments.run_id`. |
 | `instance_id` | TEXT | Instance whose host this sample belongs to. |
-| `rate_lambda` | REAL | λ value (req/s) of the sweep step being sampled. |
+| `rate_lambda` | REAL | λ value (session starts/s; §11.3) of the sweep step being sampled. |
 | `ts` | TEXT (ISO 8601) | Sample timestamp. |
 | `gpu_index` | INTEGER | GPU device index for GPU rows; `NULL` for node-wide rows. |
 | `gpu_util_pct` | REAL | Coarse GPU activity (§12.3). |
@@ -1176,7 +1216,7 @@ following required keys:
 | `classes` | list[object] | One object per mix entry, carrying the per-class disclosure fields below. |
 | `classes[].name` | string | Class slug; matches the corresponding `mix` entry. |
 | `classes[].summary` | string | One- to two-sentence human description of the class. |
-| `classes[].maturity` | string | One of `established` (validated against real-workload telemetry), `emerging` (early-signal, partially validated), `exploratory` (anticipated future pattern with no validation yet). Reports must visually flag `emerging` and `exploratory` Pareto frontiers as forward-looking so procurement readers can distinguish validated patterns from early signals. |
+| `classes[].maturity` | string | One of `established` (validated against real-workload telemetry), `emerging` (early-signal, partially validated), `exploratory` (anticipated future pattern with no validation yet). The tag describes the maturity of the **workload pattern**; the fidelity of this scenario's *approximation* of that pattern is disclosed separately via `not_modelled` (e.g. `agentic-coding` is an `established` pattern modelled through the v1 fan-out approximation). Reports must visually flag `emerging` and `exploratory` Pareto frontiers as forward-looking so procurement readers can distinguish validated patterns from early signals. |
 | `classes[].modelled` | list[string] | Aspects of real workload that the class *does* exercise — e.g. `"large multi-turn prompts (16K–32K input tokens)"`, `"follow-up turns reusing the initial context"`. |
 | `classes[].not_modelled` | list[string] | Aspects the class explicitly does *not* cover — e.g. `"no image inputs"`, `"no audio inputs"`, `"no reasoning / thinking traces"`, `"no tool-call interleaving"`. |
 | `classes[].assumptions` | list[string] | Numeric or structural assumptions baked into the class — e.g. `"follow-up turn probability = 0.4"`, `"max output tokens = 4096"`, `"input length distribution: lognormal, mean=20K, σ=0.3"`, `"system prompt length: 1.2K tokens, identical across sessions"`. |

@@ -1,10 +1,13 @@
 # tools/scenarios/agentic-coding.yaml
 #
 # AI-assisted coding combined with the v1 agentic fan-out approximation: a large
-# initial code prompt followed by many short follow-up turns scheduled by the
-# open-loop arrival process (per SPECIFICATIONS.md §10.7). Exercises prefix-cache
-# reuse on the heavy turn-1 context plus the bursty multi-turn pattern that real
-# agentic clients drive.
+# initial code prompt followed by many follow-up turns, each gated on the previous
+# turn's completion (`sequential`, per SPECIFICATIONS.md §10.7 — a tool result
+# cannot precede the model invocation that requested it). `think_time_ms` models
+# the agent-side gap between turns: tool execution plus orchestration. Exercises
+# prefix-cache reuse on the heavy turn-1 context plus the multi-turn pattern that
+# real agentic clients drive, and keeps session_e2e_ms a real task latency for the
+# §12.4 SLOs and the §14.1 supportable-users estimate.
 
 name: agentic-coding
 summary: AI-assisted coding session with large initial prompt and bursty multi-turn fan-out.
@@ -25,11 +28,17 @@ output_length:
 thinking: false                      # see §10.6 for widening semantics when set
 
 session:
-  mode: open_loop                    # sequential | open_loop  (see §10.7)
+  mode: sequential                   # turn K+1 waits for turn K's response (see §10.7)
   turns_per_session:
     distribution: lognormal
     params: { mean: 6, sigma: 0.5, min: 2, max: 24 }
   prefix_strategy: append_delta      # only supported strategy (see §10.7)
+  think_time_ms:
+    distribution: lognormal
+    # PROVISIONAL default — tool execution + agent orchestration between turns
+    # (file edits ~100ms–2s, test/build runs up to minutes). Validate against
+    # telemetry; see TODOs.md *Think-time distribution defaults*.
+    params: { mean: 3000, sigma: 1.2, min: 50, max: 120000 }
 
 manifest:
   modelled:
@@ -37,7 +46,8 @@ manifest:
     - "real code context drawn from LongBench (lcc, repobench-p)"
     - "agentic fan-out approximated as bursty multi-turn sessions per §10.7"
     - "wide output distribution capturing mixed short tool-call-like outputs and longer think-like outputs"
-    - "open_loop session scheduling so each turn fires on its own arrival schedule independent of the previous turn's completion"
+    - "sequential session scheduling — each turn waits for the previous turn's completion plus a tool-execution think-time, so session_e2e_ms is a real task latency"
+    - "agent-side tool-execution latency between turns via a heavy-tailed think_time_ms distribution (provisional values)"
     - "prefix-cache reuse on the shared session prefix via append_delta"
   not_modelled:
     - "no explicit tool-call schemas or schema-constrained decoding (v1 approximation; see TODOs.md *Precise agentic / tool-calling measurement*)"

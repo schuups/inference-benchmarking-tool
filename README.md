@@ -60,6 +60,7 @@ MLPerf Inference: Datacenter is a valuable, fair, reproducible cross-platform be
 
 - [`CLAUDE.md`](CLAUDE.md) — architecture (components and their boundaries), targeted clusters, repo layout, environment constants, working agreement.
 - [`SPECIFICATIONS.md`](SPECIFICATIONS.md) — authoritative requirements, schema definitions, cluster-specific constraints, and known workarounds.
+- [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) — build order: component milestones, experiments track, dependencies, definitions of done.
 - [`TODOs.md`](TODOs.md) — tracked future work.
 
 ## Current models of interest
