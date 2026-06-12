@@ -227,11 +227,49 @@ def test_manifest_schema(tmp_path, registry_dir):
 # ------------------------------------------------------------------ §10.1/§10.5
 
 
-def test_unimplemented_source_aborts(tmp_path, registry_dir):
-    entry = _synthetic_scenario("synth-traces", source={"kind": "reasoning_trace_replay", "config": {"dataset": "gsm8k-cot"}})
+FAKE_TRACES = [
+    ("What is 2+2 plus 3?", "First 2+2=4. Then 4+3=7. #### 7"),
+    ("A train travels 60km in 1h, how far in 3h?", " ".join(["step"] * 40) + " #### 180"),
+]
+
+
+@pytest.fixture()
+def trace_registry(registry_dir, monkeypatch):
+    entry = _synthetic_scenario(
+        "synth-traces",
+        source={"kind": "reasoning_trace_replay", "config": {"dataset": "gsm8k"}},
+        session={
+            "mode": "open_loop",
+            "turns_per_session": {"distribution": "fixed", "params": {"value": 1}},
+            "prefix_strategy": "append_delta",
+        },
+    )
     (registry_dir / "synth-traces.yaml").write_text(yaml.safe_dump(entry))
-    cfg = _config([{"scenario": "synth-traces", "weight": 1.0}])
-    with pytest.raises(DatasetSourceError, match="not implemented"):
+    monkeypatch.setattr(sources, "_load_reasoning_traces", lambda name: FAKE_TRACES)
+    return registry_dir
+
+
+def test_trace_replay_overrides_output_length(tmp_path, trace_registry):
+    cfg = _config([{"scenario": "synth-traces", "weight": 1.0}], num_prompts=100)
+    manifest = generate(cfg, WordTokenizer(), tmp_path / "o", trace_registry)
+    records = _records(tmp_path / "o")
+    tok = WordTokenizer()
+    recorded = {tok.count(answer) for _, answer in FAKE_TRACES}
+    assert {r["max_tokens"] for r in records} <= recorded  # replayed, not sampled
+    assert all(
+        any(q.split()[0] in r["prompt_text"] for q, _ in FAKE_TRACES) for r in records
+    )
+    assert any("recorded reasoning traces" in a for a in manifest["classes"][0]["assumptions"])
+
+
+def test_unsupported_trace_dataset_aborts(tmp_path, registry_dir):
+    entry = _synthetic_scenario(
+        "synth-traces-bad",
+        source={"kind": "reasoning_trace_replay", "config": {"dataset": "aime"}},
+    )
+    (registry_dir / "synth-traces-bad.yaml").write_text(yaml.safe_dump(entry))
+    cfg = _config([{"scenario": "synth-traces-bad", "weight": 1.0}])
+    with pytest.raises(DatasetSourceError, match="not supported"):
         generate(cfg, WordTokenizer(), tmp_path / "o", registry_dir)
 
 

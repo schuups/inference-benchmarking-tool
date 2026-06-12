@@ -10,11 +10,14 @@ v1 status (IMPLEMENTATION_PLAN.md M1 source order):
 - wildchat                — implemented (conversation-driven: real turn
                             boundaries shape the session per §10.5; per-turn
                             lengths clamped to the scenario's bounds).
-- reasoning_trace_replay  — NOT YET IMPLEMENTED: aborts with a clear error.
+- reasoning_trace_replay  — implemented for gsm8k; other trace datasets abort
+                            with a clear error until their loaders are added.
 
-Two source shapes exist: body sources (synthetic, longbench) produce text of a
-target length and the generator drives session structure; conversation sources
-(wildchat) return whole user-turn sequences and drive the structure themselves.
+Three source shapes exist: body sources (synthetic, longbench) produce text of
+a target length and the generator drives session structure; conversation
+sources (wildchat) return whole user-turn sequences and drive the structure
+themselves; trace sources (reasoning_trace_replay) return recorded
+(question, answer) pairs whose answer length **overrides** `output_length`.
 """
 
 from __future__ import annotations
@@ -77,20 +80,40 @@ class LongBenchSource:
 
 
 def _load_longbench_items(tasks: list[str]) -> list[str]:
+    # THUDM/LongBench is a script-based dataset, unsupported by `datasets` >= 3;
+    # read the repo's data.zip (<task>.jsonl files, "context" field) directly.
+    import io
+    import json
+    import zipfile
+
     try:
-        from datasets import load_dataset  # lazy: only needed for HF-backed sources
+        from huggingface_hub import hf_hub_download  # lazy: HF-backed sources only
     except ImportError as exc:
         raise DatasetSourceError(
-            "longbench source requires the `datasets` package "
+            "longbench source requires the `huggingface_hub` package "
             "(uv pip install datasets) and pre-staged/cached data (§10.1)"
         ) from exc
+    try:
+        zip_path = hf_hub_download(repo_id="THUDM/LongBench", filename="data.zip", repo_type="dataset")
+    except Exception as exc:
+        raise DatasetSourceError(f"longbench: failed to fetch THUDM/LongBench data.zip: {exc}") from exc
     items: list[str] = []
-    for task in tasks:
-        try:
-            ds = load_dataset("THUDM/LongBench", task, split="test")
-        except Exception as exc:
-            raise DatasetSourceError(f"longbench: failed to load task '{task}': {exc}") from exc
-        items.extend(row["context"] for row in ds if row.get("context"))
+    with zipfile.ZipFile(zip_path) as zf:
+        names = set(zf.namelist())
+        for task in tasks:
+            member = next(
+                (c for c in (f"data/{task}.jsonl", f"{task}.jsonl") if c in names), None
+            )
+            if member is None:
+                raise DatasetSourceError(
+                    f"longbench: task '{task}' not found in data.zip "
+                    f"(available: {sorted(n for n in names if n.endswith('.jsonl'))[:10]} …)"
+                )
+            with zf.open(member) as f:
+                for line in io.TextIOWrapper(f, encoding="utf-8"):
+                    row = json.loads(line)
+                    if row.get("context"):
+                        items.append(row["context"])
     return items
 
 
@@ -141,30 +164,101 @@ class WildChatSource(ConversationSource):
 def _load_wildchat_conversations(
     language_labels: set[str], min_turns: int, cap: int
 ) -> list[list[str]]:
+    # Whole-shard downloads via hf_hub_download (cached, resumable) beat
+    # unauthenticated streaming, which rate-limits to a crawl on this 3.4 GB
+    # dataset. Shards are read in order until `cap` matches are collected.
+    # NOTE: order is fixed per dataset revision — pin the revision for strict
+    # cross-machine reproducibility (§10.8).
     try:
-        from datasets import load_dataset  # lazy: only needed for HF-backed sources
+        from huggingface_hub import hf_hub_download, list_repo_files
+        import pyarrow.parquet as pq
     except ImportError as exc:
         raise DatasetSourceError(
-            "wildchat source requires the `datasets` package "
+            "wildchat source requires `huggingface_hub` and `pyarrow` "
+            "(uv pip install datasets) and pre-staged/cached data (§10.1)"
+        ) from exc
+    repo = "allenai/WildChat-1M"
+    try:
+        shards = sorted(
+            f for f in list_repo_files(repo, repo_type="dataset") if f.endswith(".parquet")
+        )
+    except Exception as exc:
+        raise DatasetSourceError(f"wildchat: failed to list {repo}: {exc}") from exc
+    if not shards:
+        raise DatasetSourceError(f"wildchat: no parquet shards found in {repo}")
+
+    conversations: list[list[str]] = []
+    for shard in shards:
+        if len(conversations) >= cap:
+            break
+        try:
+            path = hf_hub_download(repo_id=repo, filename=shard, repo_type="dataset")
+        except Exception as exc:
+            raise DatasetSourceError(f"wildchat: failed to fetch shard {shard}: {exc}") from exc
+        parquet = pq.ParquetFile(path)
+        for batch in parquet.iter_batches(columns=["language", "conversation"], batch_size=512):
+            for row in batch.to_pylist():
+                if not _wildchat_row_matches(row, language_labels, min_turns):
+                    continue
+                conversations.append(
+                    [m["content"] for m in row["conversation"] if m.get("role") == "user"]
+                )
+                if len(conversations) >= cap:
+                    break
+            if len(conversations) >= cap:
+                break
+    return conversations
+
+
+class TraceSource:
+    """Marker base for sources replaying recorded (prompt, output) pairs (§10.5)."""
+
+
+# dataset name (registry config) -> (HF repo, config, split, question field, answer field)
+_REASONING_TRACE_DATASETS = {
+    "gsm8k": ("openai/gsm8k", "main", "test", "question", "answer"),
+}
+
+
+class ReasoningTraceSource(TraceSource):
+    """Recorded reasoning traces; the answer's token count overrides output_length."""
+
+    def __init__(self, source: Source, tokenizer: Tokenizer):
+        self._tokenizer = tokenizer
+        name = source.config.get("dataset")
+        if not name:
+            raise DatasetSourceError(
+                "reasoning_trace_replay needs config.dataset (e.g. gsm8k)"
+            )
+        self._pairs = _load_reasoning_traces(name)
+        if not self._pairs:
+            raise DatasetSourceError(f"reasoning_trace_replay: dataset '{name}' yielded no pairs")
+
+    def trace(self, rng: random.Random) -> tuple[str, str]:
+        return self._pairs[rng.randrange(len(self._pairs))]
+
+
+def _load_reasoning_traces(name: str) -> list[tuple[str, str]]:
+    spec = _REASONING_TRACE_DATASETS.get(name)
+    if spec is None:
+        raise DatasetSourceError(
+            f"reasoning_trace_replay dataset '{name}' not supported "
+            f"(supported: {sorted(_REASONING_TRACE_DATASETS)}); extending the "
+            "dataset table in sources.py is a small change"
+        )
+    repo, config, split, q_field, a_field = spec
+    try:
+        from datasets import load_dataset
+    except ImportError as exc:
+        raise DatasetSourceError(
+            "reasoning_trace_replay requires the `datasets` package "
             "(uv pip install datasets) and pre-staged/cached data (§10.1)"
         ) from exc
     try:
-        # Streaming stops shard downloads once `cap` matches are collected.
-        # NOTE: iteration order is fixed per dataset revision — pin the revision
-        # for strict cross-machine reproducibility (§10.8).
-        rows = load_dataset("allenai/WildChat-1M", split="train", streaming=True)
+        ds = load_dataset(repo, config, split=split)
     except Exception as exc:
-        raise DatasetSourceError(f"wildchat: failed to load allenai/WildChat-1M: {exc}") from exc
-    conversations: list[list[str]] = []
-    for row in rows:
-        if not _wildchat_row_matches(row, language_labels, min_turns):
-            continue
-        conversations.append(
-            [m["content"] for m in row["conversation"] if m.get("role") == "user"]
-        )
-        if len(conversations) >= cap:
-            break
-    return conversations
+        raise DatasetSourceError(f"reasoning_trace_replay: failed to load '{name}': {exc}") from exc
+    return [(row[q_field], row[a_field]) for row in ds if row.get(q_field) and row.get(a_field)]
 
 
 def trim_to_tokens(text: str, max_tokens: int, tokenizer: Tokenizer) -> str:
@@ -199,8 +293,8 @@ def make_source(source: Source, tokenizer: Tokenizer):
         return LongBenchSource(source, tokenizer)
     if source.kind == "wildchat":
         return WildChatSource(source, tokenizer)
-    raise DatasetSourceError(
-        f"source kind '{source.kind}' is not implemented yet "
-        "(IMPLEMENTATION_PLAN.md M1 source order: synthetic → longbench → "
-        "wildchat → reasoning_trace_replay); aborting per §10.1 — no silent fallback"
+    if source.kind == "reasoning_trace_replay":
+        return ReasoningTraceSource(source, tokenizer)
+    raise DatasetSourceError(  # unreachable for registry-validated kinds; defensive
+        f"source kind '{source.kind}' has no implementation; aborting per §10.1"
     )

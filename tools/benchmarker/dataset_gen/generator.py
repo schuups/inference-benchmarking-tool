@@ -16,7 +16,7 @@ from tools.common.config import BenchmarkConfig, MixEntry
 
 from .registry import Distribution, Scenario, Session, load_scenario
 from .sampling import class_rng, expected_mean, sample, sample_int, widen_for_thinking
-from .sources import ConversationSource, make_source, trim_to_tokens
+from .sources import ConversationSource, TraceSource, make_source, trim_to_tokens
 from .tokenizers import Tokenizer
 
 POOL_FILENAME = "prompts.jsonl"
@@ -105,6 +105,7 @@ def generate(
         rng_think = class_rng(dc.seed, slug, "thinktime")
 
         conversational = isinstance(source, ConversationSource)
+        trace_based = isinstance(source, TraceSource)
         max_turns = plan.session.turns_per_session.params.get("max")
 
         for _ in range(plan.num_sessions):
@@ -122,6 +123,7 @@ def generate(
             header = _header(plan.session, session_idx)
             for turn_idx in range(n_turns):
                 length_dist = plan.input_length if turn_idx == 0 else plan.followup_input_length
+                recorded_output: int | None = None
                 if conversational:
                     # real content, clamped to the distribution's max bound (§10.5)
                     bound = length_dist.params.get("max")
@@ -129,6 +131,16 @@ def generate(
                     if bound is not None:
                         budget = int(bound) - (tokenizer.count(header) if turn_idx == 0 else 0)
                         body = trim_to_tokens(body, max(1, budget), tokenizer)
+                elif trace_based:
+                    # recorded trace: question is the prompt; the answer's token
+                    # count overrides output_length sampling (§10.5)
+                    question, answer = source.trace(rng_sel)
+                    bound = length_dist.params.get("max")
+                    body = question
+                    if bound is not None:
+                        budget = int(bound) - (tokenizer.count(header) if turn_idx == 0 else 0)
+                        body = trim_to_tokens(body, max(1, budget), tokenizer)
+                    recorded_output = max(1, tokenizer.count(answer))
                 else:
                     target = sample_int(length_dist, rng_in)
                     body = source.body(
@@ -148,7 +160,11 @@ def generate(
                         "turn_idx": turn_idx,
                         "prompt_text": text,
                         "text_tokens": tokenizer.count(text),
-                        "max_tokens": sample_int(plan.output_length, rng_out),
+                        "max_tokens": (
+                            recorded_output
+                            if recorded_output is not None
+                            else sample_int(plan.output_length, rng_out)
+                        ),
                         "think_time_ms": think_time_ms,
                     }
                 )
@@ -192,6 +208,11 @@ def _class_assumptions(plan: _ClassPlan) -> list[str]:
         out.append(
             "session structure and per-turn lengths driven by real conversation "
             "content; lengths clamped to the declared distribution max bounds (§10.5)"
+        )
+    if s.source.kind == "reasoning_trace_replay":
+        out.append(
+            "output lengths replayed from recorded reasoning traces — overrides "
+            "the declared output_length distribution (§10.5)"
         )
     return out
 

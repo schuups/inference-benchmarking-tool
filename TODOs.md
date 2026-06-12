@@ -99,6 +99,12 @@
 - [ ] **Scenario-registry revision pinning for reproducibility** (§10.1) — define how the
   scenario-registry revision is "recorded alongside" the dataset: git SHA on the
   experiment row? content hash of the YAML file? Pick a storage location and mechanism.
+- [ ] **Pin HF dataset revisions** (§10.8) — the WildChat / LongBench / gsm8k loaders
+  read the dataset repos at HEAD; pin a `revision=` per experiment (recorded with the
+  manifest) so pools regenerate identically across time and machines.
+- [ ] **Additional reasoning-trace datasets** (§10.5) — `_REASONING_TRACE_DATASETS`
+  supports gsm8k; add MATH, AIME, and R1-distill traces (field mapping + licence check
+  each).
 - [ ] **Precise agentic / tool-calling measurement** — v1 approximates agentic workloads
   as multi-turn sessions with bursty fan-out (high `turns_per_session`, mixed output
   sizes) so that the operator can derive supportable-user-count from the SLO-attained

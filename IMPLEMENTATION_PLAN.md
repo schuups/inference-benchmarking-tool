@@ -41,7 +41,8 @@ None are descoped.
 | `examples/k8s-deployment/` (deployment/service/ingress/PVC) | Done — seed for M6 templates |
 | `examples/docker-images-build/` (Dockerfile) | Partial — seed for M5 |
 | `tools/common/` (global.yaml §2.3, benchmark-YAML schema + CLI, run-ID §6.2) + `examples/benchmark-configs/mixed-80-20.yaml` + `tools/tests/` (20 tests) | Done (M0, 2026-06-12) |
-| Planner, Coordinator, Cleaner, Reports generator, Benchmarker (orchestrator, dataset gen, load gen, prechecks runner, hw sampler, results DB) | **Not implemented** |
+| `tools/benchmarker/dataset_gen/` (registry loader, seeded sampling, all four §10.5 sources, manifest emitter, offline CLI) — validated against real LongBench / WildChat / gsm8k downloads | Done (M1, 2026-06-12) |
+| Planner, Coordinator, Cleaner, Reports generator, Benchmarker (orchestrator, load gen, prechecks runner, hw sampler, results DB) | **Not implemented** |
 
 ## 3. Build strategy
 
@@ -79,7 +80,7 @@ Sizes are relative complexity (S < M < L), not time promises.
 - **DoD**: pytest green; `python -m tools.common.config <yaml>` accepts the canonical
   example and rejects each violation class with a one-line error.
 
-### M1 — Dataset generator (L) — 🚧 in progress (2026-06-12: core + synthetic + longbench + wildchat landed; reasoning_trace_replay and real-HF-download validation outstanding)
+### M1 — Dataset generator (L) — ✅ done 2026-06-12 (all four sources; traces support gsm8k, further trace datasets + HF revision pinning tracked in TODOs)
 
 - **Deliverables**: `tools/benchmarker/dataset_gen/` — registry loader (rejects
   non-`[text]` modalities at load time, §10.5), mix planner (per-class sub-pools,

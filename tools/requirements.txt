@@ -2,3 +2,4 @@
 pydantic>=2.11
 pytest>=8
 pyyaml>=6
+datasets>=3        # HF-backed dataset sources (brings huggingface_hub + pyarrow)
