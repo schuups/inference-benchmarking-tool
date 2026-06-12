@@ -159,6 +159,29 @@ async def test_smoke_mode_persists_nothing_and_warns(tmp_path, caplog):
 
 
 @pytest.mark.asyncio
+async def test_dead_engine_fast_fails_with_gate_grace(tmp_path, monkeypatch):
+    """The branch attempt #2 shipped broken: engine dies, no results.json."""
+    from tools.benchmarker import orchestrator as orch
+
+    monkeypatch.setattr(orch, "DEAD_ENGINE_GRACE_S", 0.1)
+    cfg, registry = _config(tmp_path)
+
+    class DeadEngineLauncher(MockLauncher):
+        async def launch(self, run_dir):
+            self.pool_existed_at_launch = (run_dir / POOL_FILENAME).exists()
+            return [("i0", f"http://127.0.0.1:{PORT + 9}")]  # nothing listens
+
+        def is_alive(self):
+            return False
+
+    launcher = DeadEngineLauncher(PORT + 9)
+    with pytest.raises(orch.RunAborted, match="engine job died"):
+        await run_experiment(cfg, cfg.deployments[0], "r", tmp_path / "run",
+                             WordTokenizer(), launcher, registry)
+    assert launcher.torn_down is True
+
+
+@pytest.mark.asyncio
 async def test_quality_hooks_invoked_when_provided(tmp_path):
     cfg, registry = _config(tmp_path)
     calls = []

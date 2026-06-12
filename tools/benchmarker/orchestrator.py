@@ -165,7 +165,7 @@ async def run_experiment(
         # first: the results file (gate ran) or a healthy endpoint (gate was
         # skipped via §7.5). The smoke flag must be known before the DB opens.
         gate = await _await_precheck_results(
-            run_dir, endpoints, cfg.phases.server_ready_timeout_s
+            run_dir, endpoints, cfg.phases.server_ready_timeout_s, launcher
         )
         if gate is not None:
             summary.precheck_gate_exit = gate.get("gate_exit_code")
@@ -260,8 +260,14 @@ async def _quality_stage(hook, stage: str, skipped: bool, endpoints, db, run_id,
     await hook(endpoints, db, run_id)
 
 
+DEAD_ENGINE_GRACE_S = 10.0  # let Lustre surface results.json after a §7.4 abort
+
+
 async def _await_precheck_results(
-    run_dir: Path, endpoints: list[tuple[str, str]], timeout_s: float
+    run_dir: Path,
+    endpoints: list[tuple[str, str]],
+    timeout_s: float,
+    launcher: EngineLauncher,
 ) -> dict | None:
     path = run_dir / "prechecks" / "results.json"
     deadline = time.monotonic() + timeout_s
@@ -278,7 +284,7 @@ async def _await_precheck_results(
             if not launcher.is_alive():
                 # the gate may have aborted the engine job (§7.4) after writing
                 # its results — give the shared filesystem a moment, then read
-                await asyncio.sleep(10)
+                await asyncio.sleep(DEAD_ENGINE_GRACE_S)
                 if path.exists():
                     return json.loads(path.read_text())
                 raise RunAborted(
