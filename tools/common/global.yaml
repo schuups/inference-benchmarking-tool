@@ -31,4 +31,4 @@ scratch_base: /capstor/scratch/cscs/stefschu          # run dirs, prompt pools, 
 collective_tests_cache_dir: /capstor/scratch/cscs/stefschu/collective-tests-cache  # §7.2
 
 registry:
-  jfrog_base: TBD                  # open decision 2 (IMPLEMENTATION_PLAN.md §9) — set before M5 push
+  jfrog_base: https://jfrog.svc.cscs.ch/artifactory/ml/inference   # image publish base (§8.1); jf server-id cscs-jfrog

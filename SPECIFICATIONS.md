@@ -112,7 +112,7 @@ experiment:
 | `slurm.account` | The only permitted account (§5.1). |
 | `scratch_base` | Capstor scratch base (§2.2) under which run directories, prompt pools, and caches live. |
 | `collective_tests_cache_dir` | Persistent compiled-binaries cache for §7.2. |
-| `registry.jfrog_base` | JFrog publish base for built images (§8.1); `TBD` until defined. |
+| `registry.jfrog_base` | JFrog publish base for built images (§8.1): `https://jfrog.svc.cscs.ch/artifactory/ml/inference`. |
 
 What deliberately does **not** belong here: anything swept or experiment-specific —
 model, BackendConfig, `scenario_mix`, SLOs, `quality_eval`, rate levels, image tags.
@@ -146,6 +146,7 @@ failing check):
 | K8s capacity (`breithorn` only) | At least one node has all GPUs free | Schedulability. If free GPUs are fragmented (scattered across nodes with none aggregated per-node), the operator defrags via external K8s tools before retrying. |
 | Filesystem | The capstor scratch dir (`/capstor/scratch/cscs/$USER/`) exists and is writable | The dataset generator can write the prompt pool to capstor scratch. |
 | Podman storage config | `~/.config/containers/storage.conf` is present (or `$XDG_CONFIG_HOME/containers/storage.conf` if `XDG_CONFIG_HOME` is set) | Required for podman container operations on Alps (image build, EDF import). Contents per the [CSCS container docs](https://docs.cscs.ch/build-install/containers/). |
+| Auth — JFrog | `jf rt ping` succeeds against the configured `cscs-jfrog` server | Credentials and a correct Artifactory URL for image push/pull (§8.1, §2.3). Catches the doubled-URL misconfiguration observed 2026-06-12. |
 
 Implementation: `tools/pre-flight-checks.py`.
 

@@ -70,7 +70,6 @@
 ## Docker Image Builds
 
 - [ ] Support building Docker images via SLURM jobs
-- [ ] Define and configure JFrog folder/path for publishing built images
 
 ## Prompt / Dataset Generation
 

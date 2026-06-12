@@ -319,7 +319,10 @@ DBs alongside M2/M3.
 1. **Global configuration location** — **resolved 2026-06-12**: `tools/common/global.yaml`
    (SPECIFICATIONS.md §2.3), implemented in M0. JFrog base remains `TBD` inside it
    (decision 2).
-2. **JFrog publish path** (TODOs) — blocks the M5 push step only.
+2. **JFrog publish path** — **resolved 2026-06-12**:
+   `https://jfrog.svc.cscs.ch/artifactory/ml/inference` (in `global.yaml`). Operator
+   action open: fix the local `jf` server config (doubled `/artifactory` in the stored
+   Artifactory URL); a §3 pre-flight row now guards this.
 3. **Code-to-cluster delivery** — proposal: baked into the benchmarker image (M5), git
    clone as fallback.
 4. **Centralized results DB shape** — proposal: `experiments/results.db`, per-run DBs
