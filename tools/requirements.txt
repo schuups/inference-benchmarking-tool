@@ -3,3 +3,5 @@ pydantic>=2.11
 pytest>=8
 pyyaml>=6
 datasets>=3        # HF-backed dataset sources (brings huggingface_hub + pyarrow)
+aiohttp>=3.12      # load generator client + mock server
+pytest-asyncio>=1  # async tests (mock server, load gen)

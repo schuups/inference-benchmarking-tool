@@ -97,7 +97,7 @@ Sizes are relative complexity (S < M < L), not time promises.
   manifest schema-validates; runs on laptop with no cluster access (synthetic + cached
   HF datasets).
 
-### M2 — Load generator (L)
+### M2 — Load generator (L) — 🚧 in progress (2026-06-12: arrival processes + mock server landed; client/session-scheduler/phases, server_stats scraper, readiness/model-load/primer outstanding)
 
 - **Deliverables**: `tools/benchmarker/load_gen/` — asyncio streaming client
   (forced/natural `output_length_mode` per §10.6, sampled `max_tokens`); arrival
