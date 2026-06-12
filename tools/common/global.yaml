@@ -1,0 +1,34 @@
+# Global configuration — environmental constants shared by every experiment.
+# See SPECIFICATIONS.md §2.3 for what belongs here (and what must stay in the
+# per-experiment benchmark YAML instead). Loaded by tools/common/config.py.
+
+clusters:
+  clariden:
+    type: slurm
+    platform: mlp                  # FirecREST MCP "ML Platform"
+    partition: normal
+    gpus_per_node: 4               # NVIDIA GH200
+  bristen:
+    type: slurm
+    platform: mlp
+    partition: normal
+    gpus_per_node: 4               # NVIDIA A100 (sm_80 — see §5.1 portability note)
+  beverin:
+    type: slurm
+    platform: hpc                  # FirecREST MCP "HPC Platform"
+    partition: mi300
+    gpus_per_node: 4               # AMD MI300A
+  breithorn:
+    type: k8s
+    namespace: ml
+    node_type: gh200               # nodeSelector beta.kubernetes.io/instance-type
+    gpus_per_node: 4
+
+slurm:
+  account: csstaff                 # never use other accounts (§5.1)
+
+scratch_base: /capstor/scratch/cscs/stefschu          # run dirs, prompt pools, caches (§2.2)
+collective_tests_cache_dir: /capstor/scratch/cscs/stefschu/collective-tests-cache  # §7.2
+
+registry:
+  jfrog_base: TBD                  # open decision 2 (IMPLEMENTATION_PLAN.md §9) — set before M5 push

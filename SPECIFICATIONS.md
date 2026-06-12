@@ -100,6 +100,29 @@ On Kubernetes (`breithorn`), the equivalent layout lives under Ceph-backed PVCs 
 
 Remote scratch is **transient** for a given run: per-run subdirectories are reclaimed by the cleanup phases in §6.
 
+### 2.3 Global configuration (`tools/common/global.yaml`)
+
+A single version-controlled YAML holding the **environmental constants shared by every
+experiment** — values that are properties of the operating environment, not of any one
+experiment:
+
+| Key | Content |
+|---|---|
+| `clusters` | Cluster catalogue: type (`slurm` / `k8s`), FirecREST platform, partition / namespace, `gpus_per_node`. Drives per-cluster validation (e.g. the §5.1 TP ≤ `gpus_per_node` rule). |
+| `slurm.account` | The only permitted account (§5.1). |
+| `scratch_base` | Capstor scratch base (§2.2) under which run directories, prompt pools, and caches live. |
+| `collective_tests_cache_dir` | Persistent compiled-binaries cache for §7.2. |
+| `registry.jfrog_base` | JFrog publish base for built images (§8.1); `TBD` until defined. |
+
+What deliberately does **not** belong here: anything swept or experiment-specific —
+model, BackendConfig, `scenario_mix`, SLOs, `quality_eval`, rate levels, image tags.
+Those live in each experiment's benchmark YAML so a run stays fully reproducible from
+that one file. The global values consumed by a run are copied into the experiment
+directory (§13.8) for provenance.
+
+Loaded and validated by `tools/common/config.py`; every component (Planner, Coordinator,
+Cleaner, pre-flight checks) reads constants from it rather than duplicating literals.
+
 ---
 
 ## 3. Pre-flight checks
@@ -166,8 +189,9 @@ Applies to all three SLURM clusters (`clariden`, `bristen`, `beverin`).
 - **Time-limit alignment**: every SLURM job in a single experiment — inference deployment
   and Benchmarker — must be configured with the **same** time limit, set conservatively
   enough to cover (chronologically): dataset generation + model load + CUDA graph capture +
-  inductor compilation primer + full sweep + results finalisation (writing the per-run DB
-  and staging outputs into the experiment directory). Coordinator-driven cleanup runs
+  inductor compilation primer + quality gate (§12.5 Stage A) + full sweep + quality
+  comparison (§12.5 Stage B) + results finalisation (writing the per-run DB and staging
+  outputs into the experiment directory). Coordinator-driven cleanup runs
   *after* the SLURM job exits and is outside the time limit (§6).
 - **Multi-node support via Ray.** Total GPUs = `tensor_parallel_size` × `pipeline_parallel_size`
   × `data_parallel_size` (× `expert_parallel_size` for MoE); node count = total GPUs /

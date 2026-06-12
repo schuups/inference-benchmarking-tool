@@ -1,0 +1,4 @@
+# Laptop-side tool dependencies — install with: uv pip install -r tools/requirements.txt
+pydantic>=2.11
+pytest>=8
+pyyaml>=6

@@ -1,0 +1,68 @@
+# Canonical mixed-workload experiment (IMPLEMENTATION_PLAN.md M0 / E3 shape):
+# 80% agentic-assisted coding + 20% short-turn chat on Kimi-K2.6, clariden.
+# Validate with: .venv/bin/python -m tools.common.config examples/benchmark-configs/mixed-80-20.yaml
+
+name: mixed-80-20-kimi-clariden
+description: >
+  Supportable-user capacity under the canonical 80/20 agentic-coding/chat mix
+  (SPECIFICATIONS.md §10.4), with per-class SLOs (§12.4) and the two-stage
+  quality evaluation (§12.5).
+
+deployments:
+  - target: clariden
+    backend: vllm
+    backend_version: vllm-cxi-0.20.x
+    model: moonshotai/Kimi-K2.6
+    backend_config:
+      tensor_parallel_size: 4          # §5.1: must not exceed gpus_per_node (4)
+      pipeline_parallel_size: 4        # cross-node scale-out via PP
+      max_model_len: 131072
+      max_num_batched_tokens: 131072   # equal to max_model_len for long-context (§15.2)
+      gpu_memory_utilization: 0.90
+      enable_prefix_caching: true
+      safetensors_load_strategy: prefetch   # Lustre (§5.1)
+
+dataset_config:
+  scenario_mix:
+    - scenario: agentic-coding
+      weight: 0.8
+    - scenario: chat-short-turns
+      weight: 0.2
+  num_prompts: 20000
+  seed: 1234
+  output_length_mode: forced           # §10.6 — sweep traffic stays reproducible
+
+rate_levels: [0.05, 0.1, 0.2, 0.4, 0.8]   # session starts/s (§11.3 "What λ counts")
+
+arrival_process:
+  kind: poisson
+
+routing_strategy: random
+
+phases:
+  warmup_s: 600                        # must cover session-population ramp-up (§11.2)
+  measurement_s: 1200
+  drain_timeout_s: 600
+  request_timeout_s: 300
+  server_ready_timeout_s: 3600
+
+slos:
+  - { scenario: chat-short-turns, metric: ttft_ms,        percentile: p95, threshold: 800 }
+  - { scenario: chat-short-turns, metric: tpot_ms,        percentile: p95, threshold: 80 }
+  - { scenario: agentic-coding,   metric: session_e2e_ms, percentile: p90, threshold: 600000 }
+  - { scenario: all,              metric: error_rate_pct,                  threshold: 1.0 }
+
+quality_eval:                          # §12.5 defaults spelled out for visibility
+  gate:
+    suite: gsm8k
+    sample_size: 100
+    floor: 0.5
+    on_fail: abort
+  compare:
+    suites: [gsm8k, gpqa_diamond]
+    eval_concurrency: [1, 32]
+
+system_prechecks:
+  collective_tests_version: "2.17.1"   # pinned per experiment (§7.2)
+
+server_time_limit: "04:00:00"          # shared by all jobs of the experiment (§5.1)

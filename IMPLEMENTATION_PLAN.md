@@ -40,6 +40,7 @@ None are descoped.
 | `examples/slurm-deployment/` (Apertus-8B vLLM sbatch + EDF) | Done — seed for M6 templates |
 | `examples/k8s-deployment/` (deployment/service/ingress/PVC) | Done — seed for M6 templates |
 | `examples/docker-images-build/` (Dockerfile) | Partial — seed for M5 |
+| `tools/common/` (global.yaml §2.3, benchmark-YAML schema + CLI, run-ID §6.2) + `examples/benchmark-configs/mixed-80-20.yaml` + `tools/tests/` (20 tests) | Done (M0, 2026-06-12) |
 | Planner, Coordinator, Cleaner, Reports generator, Benchmarker (orchestrator, dataset gen, load gen, prechecks runner, hw sampler, results DB) | **Not implemented** |
 
 ## 3. Build strategy
@@ -62,7 +63,7 @@ None are descoped.
 
 Sizes are relative complexity (S < M < L), not time promises.
 
-### M0 — Scaffolding and benchmark YAML schema (S–M)
+### M0 — Scaffolding and benchmark YAML schema (S–M) — ✅ done 2026-06-12
 
 - **Deliverables**: `tools/common/config.py` (typed schema + validation for the full
   benchmark YAML: `deployment_target`, `backend` + version, model, `BackendConfig`
@@ -111,8 +112,10 @@ Sizes are relative complexity (S < M < L), not time promises.
   wait + per-instance model-load parsing (vLLM logs/API first, §9.2/§11.1); inductor
   primer (§9.3) including the primer-missed-target warning.
 - **Test harness**: `tools/testing/mock_openai_server.py` — OpenAI-compatible SSE server
-  with configurable TTFT/TPOT delays, a mock metrics endpoint, and fault injection, so
-  latency math, scraping, and error classification are verified against ground truth.
+  with configurable TTFT/TPOT delays, a mock metrics endpoint, fault injection, and a
+  **deterministic canned-answer mode** (fixed responses per prompt pattern — required by
+  M11's eval-logic tests), so latency math, scraping, error classification, and grading
+  are all verified against ground truth.
 - **DoD**: inter-arrival statistical tests pass under fixed seeds (Poisson CV≈1, MMPP
   burst factor as configured); sequential sessions never overlap turns; measured
   TTFT/TPOT against the mock match its configured delays; `server_stats` rows captured
@@ -156,7 +159,8 @@ Sizes are relative complexity (S < M < L), not time promises.
   per §8.1); SLURM-based build workflow (from `examples/docker-images-build/`,
   TODOs *Support building Docker images via SLURM jobs*); JFrog push with canonical
   tags + provenance record; a lightweight `tools/images/benchmarker/` image (Python +
-  tokenizers/datasets/aiohttp) for the Benchmarker phases. The hardware sampler needs
+  tokenizers/datasets/aiohttp/lm-eval-harness — the latter for M11's quality stages)
+  for the Benchmarker phases. The hardware sampler needs
   **no** image support — it is stdlib-only by design (M3) and runs in the engine image
   as-is.
 - **DoD**: vLLM image builds reproducibly via SLURM job and pushes to JFrog; EDF
@@ -309,8 +313,9 @@ DBs alongside M2/M3.
 
 ## 9. Open decisions (operator input needed)
 
-1. **Global configuration location** (TODOs) — proposal: `tools/common/global.yaml`
-   (capstor base, JFrog path, SLURM account). Partially blocks M0.
+1. **Global configuration location** — **resolved 2026-06-12**: `tools/common/global.yaml`
+   (SPECIFICATIONS.md §2.3), implemented in M0. JFrog base remains `TBD` inside it
+   (decision 2).
 2. **JFrog publish path** (TODOs) — blocks the M5 push step only.
 3. **Code-to-cluster delivery** — proposal: baked into the benchmarker image (M5), git
    clone as fallback.

@@ -65,7 +65,7 @@ Literal values to quote exactly when running project commands. Using anything el
 - **Package installs** — `uv pip install <pkg>` (system `uv`, 0.8.22). The venv intentionally does **not** ship a `pip` binary; `pip install ...` from a non-activated shell will fail with "command not found", and even after activation `pip` is absent. Use `uv pip` instead.
 - **Running a one-off Python command** — prefer `.venv/bin/python -c '...'` over activating the shell first; it is one fewer step and avoids leaking the activation into subsequent commands.
 
-Cluster-side constants (capstor scratch base, JFrog publish path, default SLURM account, …) are deferred until populated; see `TODOs.md` ("Establish a global configuration location for shared values").
+Cluster-side constants (cluster catalogue, capstor scratch base, SLURM account, collective-tests cache dir, JFrog base) live in **`tools/common/global.yaml`** (SPECIFICATIONS.md §2.3), loaded by `tools/common/config.py` — read them from there instead of hardcoding literals. Per-experiment values stay in the benchmark YAML.
 
 ## How we work together
 

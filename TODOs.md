@@ -3,7 +3,6 @@
 ## Architecture & Engine
 
 - [ ] Define which files and folders are immutable (cannot be modified when running experiments)
-- [ ] Establish a global configuration location for shared values (e.g. Python binary path, file paths like `/capstor/.../stefschu`)
 - [ ] Structure the tool modularly so the core engine is rarely (ideally never) modified; new capabilities added as modules
 
 ## Experiment Execution
