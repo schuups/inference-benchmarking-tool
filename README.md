@@ -67,14 +67,16 @@ MLPerf Inference: Datacenter is a valuable, fair, reproducible cross-platform be
 
 ## Current models of interest
 
-Capability columns indicate whether the model natively supports each modality/feature.
+The operational set under active measurement — kept aligned with the authoritative table in [`SPECIFICATIONS.md`](SPECIFICATIONS.md) §8.2 (HF IDs, tokenizers, context lengths, scenario pairings). Capability columns indicate whether the model natively supports each modality/feature.
 
-| Model | Text | Reasoning / Thinking | Multimodal | Tools |
-|---|---|---|---|---|
-| **Apertus 70B** (Swiss AI / EPFL / ETHZ / CSCS) | Yes — multilingual (1000+ languages, incl. Swiss German, Romansh) | No dedicated thinking mode (base model) | Yes — image input | Yes — tool-use |
-| **Kimi-K2.6** (Moonshot AI) | Yes | Yes — deeper reasoning and planning; strong on agentic, multi-step workflows | Yes — text + image + video (MoonViT encoder; multimodal performance comparatively weak) | Yes — strong tool-use reliability; leads open weights on HLE-with-tools |
-| **DeepSeek-V4-Pro** | Yes — 1M-token context | Yes — three modes: Non-think / Think High / Think Max; toggled via `thinking_mode` runtime parameter; `<think>` / `</think>` delimiters in output | No — text only | Yes — tool-use supported via the model's custom encoding (`encoding_dsv4`); 1.6T MoE / 49B activated |
-| **GLM-5.1** (Zhipu AI) | Yes — 202K context | Yes — "rumination" multi-iteration self-revision; long autonomous loops (up to 8 h) | Yes — images + documents + text in unified pipeline | Yes — agentic planning + tool use (multi-step) |
+| Model | Role (§8.2) | Text | Reasoning / Thinking | Multimodal | Tools |
+|---|---|---|---|---|---|
+| **Apertus-70B** (Swiss AI / EPFL / ETHZ / CSCS) | target | Yes — multilingual (1000+ languages, incl. Swiss German, Romansh) | No dedicated thinking mode (base model) | Yes — image input | Yes — tool-use |
+| **Apertus-8B** (Swiss AI / EPFL / ETHZ / CSCS) | draft — paired with Apertus-70B for speculative decoding (same family, identical tokenizer) | Yes — multilingual | No | — | — |
+| **Kimi-K2.6** (Moonshot AI) | target | Yes | Yes — deeper reasoning and planning; strong on agentic, multi-step workflows | Yes — text + image + video (MoonViT encoder; multimodal performance comparatively weak) | Yes — strong tool-use reliability; leads open weights on HLE-with-tools |
+| **DeepSeek-V4-Pro** | target | Yes — 1M-token context | Yes — three modes: Non-think / Think High / Think Max; toggled via `thinking_mode` runtime parameter; `<think>` / `</think>` delimiters in output | No — text only | Yes — tool-use supported via the model's custom encoding (`encoding_dsv4`); 1.6T MoE / 49B activated |
+
+**Forward-looking additions** (per §8.2, the forward-looking taxonomy lives here; entries are promoted into the §8.2 operational table when they come under active measurement): **GLM-5.1** (Zhipu AI — 202K context, "rumination" multi-iteration self-revision, long autonomous loops up to 8 h, unified multimodal pipeline, multi-step agentic tool use) and further frontier families as they emerge.
 
 ## Future roadmap
 

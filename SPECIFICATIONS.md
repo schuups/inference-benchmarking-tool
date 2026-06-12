@@ -525,9 +525,9 @@ information the Planner needs to render an engine launch (HuggingFace ID, tokeni
 context length) plus the experiment-design information the operator needs to pick
 scenarios and BackendConfig combinations (role, thinking mode, MoE structure).
 
-The forward-looking model taxonomy (additional families to add later — DeepSeek-V4 Pro,
-GLM-5.1, etc.) lives in the README; this section is the **operational subset** under
-active measurement.
+The forward-looking model taxonomy (additional families to add later — GLM-5.1, etc.)
+lives in the README; this section is the **operational subset** under active
+measurement.
 
 | Model | Role | HuggingFace ID | Tokenizer | Context | Thinking mode | MoE | Scenarios |
 |---|---|---|---|---|---|---|---|
