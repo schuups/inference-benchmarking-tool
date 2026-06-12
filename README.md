@@ -55,12 +55,14 @@ MLPerf Inference: Datacenter is a valuable, fair, reproducible cross-platform be
 5. **Service-oriented evaluation.** Captures schedulers, batching, routing, distributed runtimes, heterogeneous accelerators, interconnects, autoscaling, and orchestration overhead — not just kernel execution.
 6. **Modern LLM and multimodal workloads.** Long-context, reasoning-heavy, multimodal, and heterogeneous request mixes (mixed prefill/decode pressure, mixed latency sensitivity) — exposing memory-hierarchy, scheduling, and interconnect bottlenecks rather than peak FLOPs.
 7. **Forward-looking scenario taxonomy.** Workload taxonomy reviewed on cadence against leading indicators; scenarios carry maturity tags so procurement evidence distinguishes validated patterns from emerging trends.
+8. **Quality-disclosed capacity.** Capacity gains from quality-impacting configurations (quantization, KV dtype) are paired in the same report with measured response-quality deltas — graded evals against the deployed endpoint (SPECIFICATIONS.md §12.5) — and a pre-sweep sanity gate protects every sweep from measuring a corrupted deployment.
 
 ## Reference documentation
 
 - [`CLAUDE.md`](CLAUDE.md) — architecture (components and their boundaries), targeted clusters, repo layout, environment constants, working agreement.
 - [`SPECIFICATIONS.md`](SPECIFICATIONS.md) — authoritative requirements, schema definitions, cluster-specific constraints, and known workarounds.
 - [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) — build order: component milestones, experiments track, dependencies, definitions of done.
+- [`COMPARATIVE_REVIEW.md`](COMPARATIVE_REVIEW.md) — methodology comparison against SemiAnalysis InferenceMAX / InferenceX (strengths, weaknesses, quality-measurement gap).
 - [`TODOs.md`](TODOs.md) — tracked future work.
 
 ## Current models of interest
@@ -78,7 +80,7 @@ Capability columns indicate whether the model natively supports each modality/fe
 
 - Support **geo-redundancy scenarios**: load-test multi-site deployments to characterise failover latency (time from primary-site failure to standby serving traffic), in-flight request loss during failover, and the steady-state cost of cross-site routing — making availability and disaster-recovery posture testable by this tool.
 - Cover **resource elasticity**: auto-scaling latency (time from load-spike detection to an additional replica ready and serving), request-loss during scale-up / scale-down events, and pre-warmed-pool sizing trade-offs. Results feed directly into the requirements definition for the elasticity feature of CSCS vClusters.
-- Extend this benchmarking tool beyond infrastructure-centric metrics (e.g. TTFT and ITL) toward task efficiency evaluation — measuring how effectively a deployment configuration completes real tasks under realistic agentic workflows. This includes studying how deployment-time controls such as system prompts, decoding policies, tool availability, and context-management strategies influence token efficiency, task completion quality, and overall operational cost.
+- Extend the v1 response-quality evaluation (graded QnA suites per SPECIFICATIONS.md §12.5) toward task efficiency evaluation — measuring how effectively a deployment configuration completes real tasks under realistic agentic workflows. This includes harder suites (MATH-500, HLE, SWE-bench-style) and studying how deployment-time controls such as system prompts, decoding policies, tool availability, and context-management strategies influence token efficiency, task completion quality, and overall operational cost.
 - Extend **modality coverage** beyond text: v1 of the dataset generator handles text-only scenarios; **image** is the next planned modality, followed by **audio** and **video** (paired corpora, per-second / per-clip token-cost accounting, registry-load-time acceptance of `modalities: [image]` / `[audio]` / `[video]`) — all tracked in [`TODOs.md`](TODOs.md).
 
 ## References
@@ -87,3 +89,6 @@ Resources consulted to develop the methodology in this tool.
 
 - *MLPerf Inference Benchmark* — Reddi et al., 2019 — [arXiv:1911.02549](https://arxiv.org/abs/1911.02549). The MLPerf Inference: Datacenter scenario definitions (Server / Offline) and metric conventions.
 - *InferenceMAX: open-source inference benchmarking* — SemiAnalysis newsletter — [newsletter post](https://newsletter.semianalysis.com/p/inferencemax-open-source-inference) and [project site](https://inferencex.semianalysis.com/).
+- *InferenceX v2: NVIDIA Blackwell vs AMD* — SemiAnalysis newsletter — [newsletter post](https://newsletter.semianalysis.com/p/inferencex-v2-nvidia-blackwell-vs). Source of the endpoint-eval quality-gate architecture adapted in SPECIFICATIONS.md §12.5; see [`COMPARATIVE_REVIEW.md`](COMPARATIVE_REVIEW.md).
+- *DeepSeek-V4 1.6T: Day 0 to Day 43 performance* — SemiAnalysis newsletter — [newsletter post](https://newsletter.semianalysis.com/p/deepseekv4-16t-day-0-to-day-43-performance). Software-maturity-over-time methodology and day-0 kernel-correctness case studies.
+- *InferenceX repository* — [SemiAnalysisAI/InferenceX](https://github.com/SemiAnalysisAI/InferenceX). Reference implementation of lm-eval-based quality gates (`utils/evals/`) and closed-loop concurrency benchmarking.

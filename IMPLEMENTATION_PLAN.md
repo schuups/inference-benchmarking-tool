@@ -67,8 +67,8 @@ Sizes are relative complexity (S < M < L), not time promises.
 - **Deliverables**: `tools/common/config.py` (typed schema + validation for the full
   benchmark YAML: `deployment_target`, `backend` + version, model, `BackendConfig`
   §15.2, `dataset_config` with `scenario_mix` §10.4, `slos` §12.4, `rate_levels`,
-  `arrival_process` §11.3, `routing_strategy` §11.4, timeouts, and the §7 pre-check
-  surface: `skip_system_prechecks`, `system_prechecks_on_warn` / `_on_fail`,
+  `arrival_process` §11.3, `routing_strategy` §11.4, timeouts, `output_length_mode`
+  §10.6, the `quality_eval` block §12.5, and the §7 pre-check surface: `skip_system_prechecks`, `system_prechecks_on_warn` / `_on_fail`,
   `system_prechecks_timeout_s`, `collective_tests_version`,
   `collective_tests_cache_dir`, `shmem_required`); `tools/common/runid.py` (§6.2); a
   committed canonical example `examples/benchmark-configs/mixed-80-20.yaml`.
@@ -98,7 +98,8 @@ Sizes are relative complexity (S < M < L), not time promises.
 ### M2 — Load generator (L)
 
 - **Deliverables**: `tools/benchmarker/load_gen/` — asyncio streaming client
-  (`ignore_eos`, sampled `max_tokens`); arrival processes `poisson` + `burst_mmpp`
+  (forced/natural `output_length_mode` per §10.6, sampled `max_tokens`); arrival
+  processes `poisson` + `burst_mmpp`
   scheduling **session starts** (λ semantics per §11.3 *What λ counts*); session modes
   `open_loop` / `sequential` with `think_time_ms` (§10.7); class inheritance per
   session; routing `random` / `session_affinity` (§11.4); warmup / measurement / drain
@@ -181,9 +182,10 @@ Sizes are relative complexity (S < M < L), not time promises.
 - **Deliverables**: `tools/benchmarker/main.py` — the cluster-side driver that owns the
   §1 phase sequencing: run dataset generation → **submit the inference deployment(s)
   from within the Benchmarker allocation** (sbatch on SLURM, kubectl on K8s) only after
-  the dataset is ready → wait for readiness (§11.1) → run load generation → finalise the
-  per-run DB (ingest sampler NDJSON into `hardware_stats`, §13.5; stage outputs per
-  §5.1). Owns warn/fail propagation from pre-checks to the Coordinator (§7.4 pause +
+  the dataset is ready → wait for readiness + primer (§11.1) → **Stage-A quality gate**
+  (§12.5, via M11) → run load generation → **Stage-B quality comparison** (§12.5, via
+  M11) → finalise the per-run DB (ingest sampler NDJSON into `hardware_stats`, §13.5;
+  stage outputs per §5.1). Owns warn/fail propagation from pre-checks to the Coordinator (§7.4 pause +
   `system_prechecks_on_warn` default for non-interactive runs) and smoke-test-mode
   propagation (suppress persistence pipeline-wide, warn at launch and termination,
   §7.2).
@@ -213,11 +215,14 @@ Sizes are relative complexity (S < M < L), not time promises.
   with per-class SLO lines, failure rates, **per-class group-bys**
   (`GROUP BY scenario, session_idx`), **SLO-attainment table + λ\***, **supportable-users
   estimate** (editable `sessions_per_user_per_hour`, Little's-law concurrent sessions),
+  **response-quality panel + capacity-vs-quality table** (§12.5/§14.1: per-config users
+  at λ\* paired with quality scores and inter-config deltas; quality-flagged banner),
   hardware-headroom overlays, raw table; headless executor in `tools/reports/`.
 - **Bootstrap**: `reports/STYLE.md` created with the first styling decisions; first
   curated report authored after E3 (§14.3).
-- **DoD**: notebook executes headless against a synthetic fixture DB with a known λ\*
-  and user count (asserted), then against the real E1 DB.
+- **DoD**: notebook executes headless against a synthetic fixture DB with a known λ\*,
+  user count, and quality rows (asserted, including the capacity-vs-quality deltas),
+  then against the real E1 DB.
 
 ### M10 — Cleaner (S–M)
 
@@ -229,16 +234,31 @@ Sizes are relative complexity (S < M < L), not time promises.
 - **DoD**: identification correctly lists deliberately-orphaned test resources on both
   platforms; pruning removes exactly the approved list; model-cache PVCs skipped.
 
+### M11 — Quality eval runner (M)
+
+- **Deliverables**: `tools/benchmarker/quality_eval/` — lm-eval-harness wrapper
+  targeting the deployed OpenAI-compatible endpoint(s); **Stage A** sanity gate
+  (configurable suite/subset/floor, abort signalling through the M7 orchestrator,
+  `skip_quality_gate` honoured) and **Stage B** comparison (full suites × configured
+  eval-concurrency levels, natural decoding, suite-defined sampling); rows persisted to
+  `quality_evals` (§13.9); eval datasets pre-staged by M8 alongside the workload
+  datasets; no standing reference — deltas computed in-report across the experiment's
+  deployment configs.
+- **DoD**: against the mock server with deterministic canned answers, Stage-A pass/fail
+  logic and Stage-B score collection are verified; the gate-abort path is exercised in
+  M7's integration test; GPQA-Diamond gated-access setup documented (open decision 8);
+  thinking-model answer parsing tracked in TODOs, not blocking.
+
 ## 5. Experiments track
 
 | ID | Experiment | Needs | Definition of done |
 |---|---|---|---|
-| **E1** | **Walking skeleton**: Apertus-8B, 1× GH200 node (`clariden`), single-entry mix of `smoke-synthetic` (§8.2 smoke-run exemption — results are pipeline validation, never findings), 3 λ levels | M0–M7 (manual drive acceptable), M9 for the notebook DoD; M8 to re-run automated | Full pipeline executes: pre-checks → engine → primer → sweep (incl. `server_stats` + `hardware_stats` capture) → DB → notebook renders all panels. Teardown leaves zero orphans. |
+| **E1** | **Walking skeleton**: Apertus-8B, 1× GH200 node (`clariden`), single-entry mix of `smoke-synthetic` (§8.2 smoke-run exemption — results are pipeline validation, never findings), 3 λ levels | M0–M7 (manual drive acceptable), M9 for the notebook DoD; M8 to re-run automated | Full pipeline executes: pre-checks → engine → primer → §12.5 Stage-A gate → sweep (incl. `server_stats` + `hardware_stats` capture) → Stage-B eval → DB → notebook renders all panels. Teardown leaves zero orphans. |
 | **E2a** | **Single-node characterisation** (`clariden`): populate `tools/system_prechecks_reference.yaml` 1-node rows from repeated E1-class deployments | M4, M5; piggybacks on E1 | 1-node TBD placeholders replaced with measured medians + tolerances; §7.4 gate enforceable at single-node scope. |
 | **E2b** | **Multi-node characterisation** (`clariden`): reference rows at E3's exact rank topology (inter-node collectives + NVSHMEM over Slingshot), gathered during E3 bring-up smokes, *before* graded E3 measurement | E2a; E3's multi-node deployment templates | Inter-node reference rows populated; E3's foundation gate enforceable on the cross-node fabric it actually depends on. |
 | **E2c** | **`breithorn` characterisation**: reference rows on the K8s GH200 nodes | M6 K8s templates, M7 K8s path | `breithorn` rows populated; prerequisite for E5. |
 | **E3** | **The capacity run (primary goal)**: Kimi-K2.6 on `clariden`, `scenario_mix` 0.8 `agentic-coding` (longbench, `sequential` sessions) + 0.2 `chat-short-turns` (wildchat), `slos` declared, λ sweep. **Prerequisites**: (a) verify Kimi-K2.6 architecture support in the pinned vllm-cxi — a forced version bump triggers §15.2 flag-compat work + image rebuild; (b) MoE bring-up ladder: Apertus-70B PP=2 smoke (dense, cross-node PP), then a small open MoE at EP>1 (exercises expert all-to-all + the §7 NVSHMEM plane) before Kimi-scale (≈1 TB weights → ≥3–4 GH200 nodes, TP4 × PP≥3, §5.1) | E1, E2a/E2b, M8, M9; Kimi image (M5) | Report shows λ\*, per-class SLO attainment, supportable-users estimate; results pass adversarial review (phase 16). |
-| **E4** | **Feature-effect sweeps** on the E3 workload: `enable_prefix_caching` on/off, `kv_offloading_size`, `kv_cache_dtype`, `session_affinity` vs `random` (multi-instance); speculative decoding on Apertus-70B chat/long-context (§8.2 pairing, §16.2 placements; `spec_accept_rate` captured via the M2 scraper) | E3 baseline | Marginal effect of each feature on λ\*/users quantified per §15.1; findings recorded in §16. |
+| **E4** | **Feature-effect sweeps** on the E3 workload: `enable_prefix_caching` on/off, `kv_offloading_size`, `kv_cache_dtype`, `session_affinity` vs `random` (multi-instance); speculative decoding on Apertus-70B chat/long-context (§8.2 pairing, §16.2 placements; `spec_accept_rate` captured via the M2 scraper) | E3 baseline | Marginal effect of each feature on λ\*/users quantified per §15.1, **with the §12.5 capacity-vs-quality pairing for quality-impacting knobs** (quantization / KV dtype) — the flagship *"N× more users at −M pts"* report; findings recorded in §16. |
 | **E5** | **Platform comparison**: E3 workload, SLURM (`clariden`) vs K8s (`breithorn`), same GH200 hardware, engine, config; Benchmarker-as-pod (M6/M7 K8s path) | E3; E2c | Per-platform overlay report isolating the platform contribution (§15.1); "is K8s slower than it could be?" answered with telemetry-backed evidence. |
 
 ## 6. Dependency sketch
@@ -252,6 +272,7 @@ M5 (images) ── M4 (prechecks) ──────┘                │      
 M8 (coordinator: after M3+M6+M7) ────────────────────┘ (automated re-run; required for E3)
 M9 (reports: fixture-testable after M3; required for E1 DoD)
 M10 (cleaner: any time after M0; required before E3 leaves debris at scale)
+M11 (quality eval: after M0, mock-testable with M2's server; Stage-A gate in E1, capacity-vs-quality required for E4)
 ```
 
 Parallelizable from day one: M5 (images) alongside M0–M3; M9 notebook against fixture
@@ -302,6 +323,9 @@ DBs alongside M2/M3.
    report narrative is meaningful; literature/telemetry research task.
 7. **Small open MoE for the E3 bring-up ladder** — pick a model the pinned backend
    supports (candidate class: Mixtral-/Qwen-MoE-sized) purely as an EP smoke vehicle.
+8. **GPQA-Diamond gated access** — the dataset is HF-gated (license click-through +
+   auth token on the Benchmarker). Needed before Stage-B defaults run; fallback: swap
+   in an ungated hard suite.
 
 ## 10. Review log
 
@@ -323,6 +347,16 @@ and later milestones renumbered (M8–M10); `server_stats` scraper assigned to M
 hardware sampler redesigned as stdlib-only and placed on the engine nodes (M3/M6/M7);
 E2 split into E2a/E2b/E2c so the foundation gate is enforceable at E3's actual
 multi-node topology; FirecREST staged-transfer + Coordinator resumability added to M8.
+
+**Quality-evaluation extension — 2026-06-12** (follow-up to the comparative review
+against SemiAnalysis InferenceMAX/InferenceX, see `COMPARATIVE_REVIEW.md`). Operator
+decisions: **no standing quality anchor** — deltas are experiment-internal across the
+experiment's deployment configs; **Stage-A sanity gate default-on** in every experiment,
+skippable (`skip_quality_gate`); **Stage-B comparison** pairs capacity gains and quality
+deltas in the same report (the "N× users at −M pts" claim); `ignore_eos` parameterized
+as `output_length_mode: forced | natural` (§10.6). Structural outcomes: new **M11
+Quality eval runner**; M0/M2/M7/M9 amended; E1 exercises the gate; E4's DoD now requires
+the capacity-vs-quality pairing; spec gained §12.5 + §13.9 (`quality_evals` table).
 
 ## 11. Process gates
 

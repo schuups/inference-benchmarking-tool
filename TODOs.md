@@ -143,6 +143,21 @@
   approximation turns out to materially mis-rank deployments for cache-aging-sensitive
   workloads).
 
+## Quality Evaluation
+
+- [ ] **Harder eval suites** (SPECIFICATIONS.md §12.5) — extend Stage B beyond
+  GSM8K / GPQA-Diamond (both approach saturation on frontier models): MATH-500, HLE,
+  SWE-bench-style task suites. Converges with the README roadmap item on
+  task-efficiency evaluation.
+- [ ] **Quality under load at λ\*** — v1 Stage B uses eval-concurrency as the load
+  proxy; replaying background sweep traffic at exactly λ\* while grading would measure
+  quality at the SLO operating point proper.
+- [ ] **Thinking-model answer parsing** (§12.5) — lm-eval needs reasoning-delimiter
+  handling (e.g. DeepSeek `<think>` / `</think>`) before Stage B grades thinking modes
+  correctly; InferenceX carries an equivalent patch.
+- [ ] **Per-model Stage-A floor tuning** (§12.5) — the default 0.5 GSM8K floor is a
+  blunt rubbish detector; tune per model once first gate runs land.
+
 ## Infrastructure Expansion
 
 - [ ] Add `beverin` (AMD MI300A nodes) as a deployment target

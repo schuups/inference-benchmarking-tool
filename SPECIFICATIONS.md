@@ -51,6 +51,11 @@ This document enumerates all requirements captured so far.
 - **Scenario-disclosed results**: every plot is published with its scenario manifest,
   which describes the experimental context — including the assumptions made — so the
   reader can readily interpret the results (§13.7, §14.1).
+- **Quality-disclosed capacity**: capacity gains from quality-impacting configurations
+  (weight quantization, KV dtype, …) are published alongside the measured
+  response-quality change **in the same report** — a faster deployment whose answers
+  degraded is not an improvement. A pre-sweep sanity gate also protects every sweep
+  from measuring a corrupted deployment (§12.5, §14.1).
 - **Separation of concerns**: the **Benchmarker** runs as its own SLURM allocation,
   sequencing three phases — **dataset generation**, then spawning the **inference
   deployment** on a separate GPU allocation, then **load generation**. GPUs are not
@@ -688,6 +693,7 @@ The benchmark YAML's `dataset_config` block:
 | `num_prompts` | integer | yes | Total size of the generated prompt pool, split across classes proportionally to `weight × E[turns_per_session]` so no class exhausts its sub-pool early. Must be set sufficiently large that prompts are not exhausted before the experiment's request budget is consumed, so that prompt uniqueness (§10.6) holds for every request actually issued. |
 | `seed` | integer | yes | Master seed; per-class sub-seeds derived deterministically (§10.8). |
 | `tokenizer_id` | string | no | Override the tokenizer (defaults to the target model's; see §10.6). Shared by every class in the mix — all lengths are measured with one tokenizer. |
+| `output_length_mode` | string | no | `forced` (default) or `natural` — governs `ignore_eos` on sweep traffic; see §10.6. Disclosed in `run_assumptions`; results are not comparable across modes. |
 
 Example — the canonical mixed workload (80% agentic coding, 20% chat):
 
@@ -742,11 +748,22 @@ holds pool-wide, not merely within one class.
 `fixed` is for isolation studies.
 
 **Output length control.** Each prompt carries a target `max_tokens` sampled from
-`output_length`. The load generator sends `max_tokens=<sampled>` **and** `ignore_eos=True`,
-forcing the model to emit exactly that many decode tokens. This makes decode cost
-reproducible across runs and across models — measured TPOT and `output_tokens` no longer
-depend on per-model stopping behaviour. Sources that carry ground-truth output lengths
-(`reasoning_trace_replay`) override the sampled value with the recorded target.
+`output_length`. Behaviour is governed by `output_length_mode` (§10.4):
+
+- **`forced` (default)**: the load generator sends `max_tokens=<sampled>` **and**
+  `ignore_eos=True`, forcing the model to emit exactly that many decode tokens. Decode
+  cost becomes reproducible across runs, configs, and models — measured TPOT and
+  `output_tokens` no longer depend on per-model stopping behaviour. The price: responses
+  are truncated / padded arbitrarily, so **sweep traffic is ungradeable for quality by
+  construction** — response quality is measured by the separate evaluation phase (§12.5).
+- **`natural`**: `ignore_eos=False`; the sampled value acts as a cap only. Output
+  lengths — and therefore decode cost — become model- and config-dependent. Use for
+  token-efficiency studies and stopping-behaviour analysis. **λ\*, latency, and
+  throughput results are not comparable across modes** — reports must refuse to overlay
+  them — and the active mode is disclosed in the manifest's `run_assumptions` (§13.7).
+
+Sources that carry ground-truth output lengths (`reasoning_trace_replay`) override the
+sampled value with the recorded target.
 
 **Thinking models (v1 approximation).** When a scenario sets top-level `thinking: true`,
 the generator widens `output_length` sampling to approximate the combined
@@ -831,7 +848,7 @@ side-effect of running:
 | `mix` | The `scenario_mix` actually consumed: `[{scenario, weight}, …]`, plus the resulting expected per-request share per class (derived from `weight × E[turns_per_session]`). |
 | Per-class `name`, `summary`, `maturity`, `modelled`, `not_modelled` | Copied verbatim from each class's scenario registry entry. |
 | Per-class `assumptions` | Auto-filled from the per-class config actually consumed: input / output length distributions; turns-per-session distribution; session mode; prefix strategy; source `kind` + relevant source config. |
-| `run_assumptions` | Auto-filled run-level facts: arrival process + parameters (§11.3); routing strategy (§11.4); master seed; tokenizer ID. |
+| `run_assumptions` | Auto-filled run-level facts: arrival process + parameters (§11.3); routing strategy (§11.4); `output_length_mode` (§10.6); master seed; tokenizer ID. |
 
 Together these are sufficient to reconstruct what the run measured without re-reading the
 registry at a specific revision.
@@ -867,7 +884,8 @@ Before the sweep starts, the load generator must, for **each** deployed instance
   `model_load_*` fields populated (§9.2).
 - Run the inductor pre-compilation primer (§9.3).
 
-The sweep begins only once **all** instances are ready, profiled, and primed.
+The sweep begins only once **all** instances are ready, profiled, primed, and — unless
+`skip_quality_gate: true` — quality-gated (§12.5 Stage A).
 
 ### 11.2 Sweep structure
 
@@ -887,6 +905,8 @@ The sweep begins only once **all** instances are ready, profiled, and primed.
   span sweep steps — every request inherits the `rate_lambda` of the step its session
   started in.
 - `request_timeout_s`: client-side TTFT hard cutoff; exceeded requests recorded as `success=0`.
+- After the final rate level's drain, the **quality comparison** (§12.5 Stage B) runs
+  against the still-running deployment(s), before teardown.
 
 ### 11.3 Open-loop stochastic arrivals
 
@@ -1064,16 +1084,63 @@ experiment's goodput operating point, and the anchor for the supportable-users e
 it prominently (the sweep should be extended toward lower rates). λ\* is a **derived,
 report-time quantity** — nothing cluster-side computes or persists it.
 
+### 12.5 Response-quality evaluation
+
+Sweep traffic is **ungradeable for quality by construction**: in the default
+`output_length_mode: forced` (§10.6) every response is truncated or padded to a sampled
+length. Response quality is therefore measured by a **separate evaluation phase** that
+runs graded QnA suites — via the
+[EleutherAI lm-evaluation-harness](https://github.com/EleutherAI/lm-evaluation-harness)
+— against the experiment's already-deployed OpenAI-compatible endpoint(s), with natural
+decoding and suite-defined sampling parameters. Two stages, configured by the benchmark
+YAML's `quality_eval` block:
+
+**Stage A — pre-sweep sanity gate.** Runs after the inductor primer (§9.3), before the
+first sweep step. A small graded subset checked against a **blunt absolute floor** whose
+only job is detecting rubbish — corrupted weights, a broken chat template, a
+mis-quantized checkpoint, a kernel-level correctness bug — **before** GPU-hours are
+committed to the sweep. The floor is deliberately coarse; fine regressions are Stage B's
+job. The gate runs in **every experiment** unless explicitly disabled
+(`skip_quality_gate: true`; use sparingly, mirroring §7.5).
+
+**Stage B — post-sweep quality comparison.** Runs after the final sweep step's drain, on
+the same still-running deployment(s): the full configured suites, each at one or more
+**eval-concurrency** levels (the eval traffic itself is the load, exposing
+concurrency-dependent numerics such as batch-variant kernels). Stage B is **measurement,
+not a gate**: one score set per deployment config, persisted to `quality_evals` (§13.9).
+There is **no standing quality reference**: deltas are **experiment-internal** — when
+the deployment sweep varies a quality-impacting knob (weight quantization,
+`kv_cache_dtype`, a speculative-decoding implementation, …), the report (§14.1) pairs
+each config's capacity (λ\*, supportable users) with its measured quality, so *"the
+quantized config serves N× more users"* and *"the quantized config costs M pts on
+GPQA"* are two columns of the same table in the same report. An experiment with a
+single deployment config reports absolute scores, informational.
+
+| `quality_eval` field | Default | Notes |
+|---|---|---|
+| `gate.suite` | `gsm8k` | Stage-A suite. |
+| `gate.sample_size` | `100` | Subset size — minutes of wall-clock, not hours. |
+| `gate.floor` | `0.5` | Blunt rubbish detector; per-model tuning tracked in TODOs. |
+| `gate.on_fail` | `abort` | `abort` \| `continue`. A failed-but-continued gate marks the run's results **quality-flagged** (§14.1). |
+| `compare.suites` | `[gsm8k, gpqa_diamond]` | Stage-B suites. GPQA-Diamond is HF-gated (license + auth token on the Benchmarker). |
+| `compare.eval_concurrency` | `[1, 32]` | lm-eval parallel request counts; each level produces its own score rows. |
+| `skip_quality_gate` | `false` | Disables Stage A only. |
+| `skip_quality_compare` | `false` | Disables Stage B only (e.g. when no quality-impacting knob is swept). |
+
+The consumed `quality_eval` block is persisted on `experiments.quality_eval` (§13.1) for
+provenance.
+
 ---
 
 
 ## 13. Results
 
-Per-run results live in a SQLite database file (`run_<id>.db`) with six tables:
+Per-run results live in a SQLite database file (`run_<id>.db`) with seven tables:
 `experiments` (one row per sweep), `instances` (one row per deployed server instance),
 `requests` (one row per issued request), `server_stats` (periodic samples of
 server-side counters), `hardware_stats` (periodic samples of host hardware telemetry),
-and `system_prechecks` (one row per pre-check metric). A first-class `agent_tasks`
+`system_prechecks` (one row per pre-check metric), and `quality_evals` (one row per
+quality-eval measurement, §13.9). A first-class `agent_tasks`
 table is deferred (see `TODOs.md` *Precise agentic / tool-calling measurement*); v1
 derives per-task agentic metrics by grouping `requests` on `session_idx` (§12.2).
 
@@ -1091,6 +1158,7 @@ One row per sweep — the configuration and overall outcome of the run.
 | `scenario_mix` | TEXT (JSON) | The workload mix: `[{scenario, weight}, …]` (§10.4). Single-scenario runs carry one entry with `weight = 1.0`. |
 | `scenario_manifest` | TEXT (JSON) | Structured disclosure of what each class models, omits, and assumes, plus run-level assumptions. See §13.7. |
 | `slos` | TEXT (JSON) | Serialized `slos` block (§12.4); `NULL` when the experiment declares none. |
+| `quality_eval` | TEXT (JSON) | Serialized `quality_eval` block as consumed (§12.5); `NULL` when both stages are disabled. |
 | `rate_levels` | TEXT (JSON) | List of λ values (session starts/s; §11.3 *What λ counts*) swept in this run. |
 | `warmup_s` | INTEGER | Warmup phase duration in seconds (metrics excluded; see §11.2). |
 | `measurement_s` | INTEGER | Measurement phase duration in seconds. |
@@ -1220,7 +1288,7 @@ following required keys:
 | `classes[].modelled` | list[string] | Aspects of real workload that the class *does* exercise — e.g. `"large multi-turn prompts (16K–32K input tokens)"`, `"follow-up turns reusing the initial context"`. |
 | `classes[].not_modelled` | list[string] | Aspects the class explicitly does *not* cover — e.g. `"no image inputs"`, `"no audio inputs"`, `"no reasoning / thinking traces"`, `"no tool-call interleaving"`. |
 | `classes[].assumptions` | list[string] | Numeric or structural assumptions baked into the class — e.g. `"follow-up turn probability = 0.4"`, `"max output tokens = 4096"`, `"input length distribution: lognormal, mean=20K, σ=0.3"`, `"system prompt length: 1.2K tokens, identical across sessions"`. |
-| `run_assumptions` | list[string] | Run-level assumptions shared by all classes: arrival process + parameters (§11.3), routing strategy (§11.4), master seed, tokenizer ID. |
+| `run_assumptions` | list[string] | Run-level assumptions shared by all classes: arrival process + parameters (§11.3), routing strategy (§11.4), `output_length_mode` (§10.6), master seed, tokenizer ID. |
 
 Validation: the Coordinator aborts **before submission** if the benchmark YAML's
 `scenario_mix` is missing or empty, names an unregistered scenario (§10.3), or carries
@@ -1237,6 +1305,27 @@ Each completed sweep produces an `experiments/YYYY-MM-DD_description/` folder co
 - the run's SQLite DB file (`run_<id>.db`)
 - deployment artifacts used for the run (sbatch scripts, Kubernetes YAML, Dockerfile)
 - the executed report notebook and its rendered outputs (see §14)
+
+### 13.9 `quality_evals` table
+
+One row per quality-eval measurement (§12.5) — per stage, suite, and eval-concurrency
+level.
+
+| Column | Type | Semantic |
+|---|---|---|
+| `run_id` | TEXT, FK | Foreign key to `experiments.run_id` (one run per deployment config; cross-config comparisons join across runs in the report). |
+| `instance_id` | TEXT | Instance/endpoint the eval targeted; `NULL` when routed across instances. |
+| `stage` | TEXT | `gate` (Stage A) or `compare` (Stage B). |
+| `suite` | TEXT | Suite identifier (e.g. `gsm8k`, `gpqa_diamond`). |
+| `eval_concurrency` | INTEGER | lm-eval parallel request count used for this measurement. |
+| `sample_size` | INTEGER | Number of items graded. |
+| `metric` | TEXT | Suite metric name (e.g. `exact_match`). |
+| `score` | REAL | Measured score. |
+| `floor` | REAL | Stage-A floor in effect; `NULL` for `compare` rows. |
+| `status` | TEXT | `pass` / `fail` for `gate` rows; `NULL` for `compare` rows (measurement, not a gate). |
+| `sampling_params` | TEXT (JSON) | Sampling parameters actually used (temperature, top_p, …). |
+| `harness_version` | TEXT | lm-eval version + task version, for provenance. |
+| `ts` | TEXT (ISO 8601) | Time the measurement completed. |
 
 ---
 
@@ -1287,6 +1376,13 @@ Every experiment report must include:
   per-user session rate, and (b) **concurrent active sessions** via Little's law =
   session throughput × mean session wall-time. Always presented as an estimate, with
   the parameters disclosed alongside the result. Undefined when λ\* is undefined.
+- **Response-quality panel** (from `quality_evals`, §13.9 + §12.5): the Stage-A gate
+  outcome — with an unmissable **quality-flagged** banner if the gate failed under
+  `on_fail: continue` — and the Stage-B per-suite scores per eval-concurrency level.
+  When the experiment's deployment sweep varies a quality-impacting knob, a
+  **capacity-vs-quality table**: per deployment config, users at λ\* alongside quality
+  scores and the deltas between configs — the *"N× more users, −M pts"* pairing in one
+  view, in the same report as the capacity claim.
 - **Hardware utilization** (from `hardware_stats`, §13.5), per λ level, overlaid against
   TTFT/ITL so untapped headroom is visible at a glance:
   - GPU SM-active and tensor-active vs λ (the key headroom indicator — SLO met with these
@@ -1395,8 +1491,9 @@ target** (SLURM vs Kubernetes — frequently a sweep dimension in its own right,
 CSCS-fork vs upstream — comparing two versions of the same backend is a first-class
 experiment shape), the BackendConfig knobs that vary across deployments within the
 experiment (§15.2), and the model(s) under test (§8.2). The benchmark YAML specifies
-all five, plus the workload mix the deployment is loaded with (`scenario_mix`, §10.4)
-and the SLOs the results are judged against (`slos`, §12.4). An experiment thus has two nested sweeps: the **deployment sweep** over
+all five, plus the workload mix the deployment is loaded with (`scenario_mix`, §10.4),
+the SLOs the results are judged against (`slos`, §12.4), and the quality-evaluation
+configuration (`quality_eval`, §12.5). An experiment thus has two nested sweeps: the **deployment sweep** over
 deployment-target × backend-version × BackendConfig × model combinations (one engine
 launch per combination), and inside each deployment the **rate-level sweep** over λ
 values (each λ being one "sweep step" in the sense used by the `requests` /
@@ -1432,8 +1529,11 @@ taxonomy in the README).
 | **Multi-replica routing and session affinity** | Distributes load across replicas; `session_affinity` preserves prefix-cache hits at the cost of fairness. | `routing_strategy` (§11.4) | Ingress / load-balancer requirements; cache-locality vs replica-fairness trade-off. |
 
 Each feature's contribution to latency, throughput, error rate, and hardware utilisation
-(§12.3) is recorded per sweep. Reports plot the marginal effect of enabling / disabling
-individual features so procurement evidence can isolate the value of each.
+(§12.3) is recorded per sweep — and, for quality-impacting knobs (weight quantization,
+`kv_cache_dtype`, speculative-decoding implementations, …), response quality (§12.5
+Stage B), so reports pair each feature's capacity gain with its measured quality change
+(§14.1). Reports plot the marginal effect of enabling / disabling individual features so
+procurement evidence can isolate the value of each.
 
 **Platform comparison (SLURM ↔ Kubernetes).** Independent of any specific feature,
 comparing the same workload across **SLURM** (clariden / bristen / beverin) and

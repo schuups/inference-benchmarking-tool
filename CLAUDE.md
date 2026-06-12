@@ -7,6 +7,7 @@ Systematic measurement of LLM inference deployments across multiple dimensions:
 - **Token efficiency**: tokens consumed per task for a given model + config (system prompts, templates).
 - **Cost efficiency**: cost per completed task at a given SLO — for buy-vs-scale decisions.
 - **Reliability**: request error rates across load levels.
+- **Response quality**: quality cost of serving optimizations (weight quantization, KV dtype, …) measured via graded evals against the deployed endpoint (SPECIFICATIONS.md §12.5) — capacity gains and quality deltas disclosed in the same report; a pre-sweep sanity gate protects every sweep from measuring a corrupted deployment.
 - **Model loading times**: time-to-ready per configuration (SPECIFICATIONS.md §9.2) — supports auto-scaling decisions.
 - **Hardware elasticity**: benefit of dynamically adding compute under load.
 
@@ -29,6 +30,7 @@ Cluster-side (allocated on the cluster under test):
 - **Benchmarker** — Coordinator-submitted SLURM allocation, one per experiment. Runs three sequential phases (dataset prep → engine spawn → load generation); spawns the inference deployment **only after the dataset generator has completed** so GPUs do not sit idle during CPU-bound prompt prep. Hosts:
   - **Dataset generator** — produces the prompt dataset from the experiment's weighted `scenario_mix` (synthetic with unique headers, or real-text e.g. LongBench / WildChat). (§10)
   - **Load generator** — awaits LLM readiness, issues requests at rate λ via the configured arrival process (Poisson or burst-aware), collects per-request metrics. (§9.3, §11)
+  - **Quality evaluator** — lm-eval-harness against the deployed endpoint(s): pre-sweep sanity gate (default-on, skippable) + post-sweep quality comparison across deployment configs. (§12.5)
 - **Inference deployment(s) under test** — the LLM serving stack(s) being measured (engine + replicas + ingress/auth/accounting). Spawned by the Benchmarker as SLURM jobs or K8s manifests; multi-instance deployments map to rows in the `instances` table. (§15.2, §13.2)
 
 ## Targeted Infrastructures
@@ -51,7 +53,7 @@ Additional targets may be added (e.g. systems outside CSCS).
 - `examples/` — image build via SLURM, vLLM deployment on K8s and SLURM.
 - `firecrest-mcp/` — FirecREST MCP server registered in Claude Code. Do not modify; use via its registered tools.
 - `SPECIFICATIONS.md` — authoritative reference for detailed requirements, schema, known constraints, and cluster-specific workarounds. Read it before making changes to the tool.
-- `IMPLEMENTATION_PLAN.md` — build order: component milestones (M0–M10), experiments track (E1–E5), dependencies, definitions of done, open decisions, review log. Living document; consult and update it when starting or finishing implementation work.
+- `IMPLEMENTATION_PLAN.md` — build order: component milestones (M0–M11), experiments track (E1–E5), dependencies, definitions of done, open decisions, review log. Living document; consult and update it when starting or finishing implementation work.
 - `TODOs.md` — tracked future work; deferred activities per the working agreement (see "How we work together" below).
 
 ## Constants
