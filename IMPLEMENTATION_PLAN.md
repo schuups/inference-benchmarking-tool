@@ -144,7 +144,7 @@ Sizes are relative complexity (S < M < L), not time promises.
   runs dependency-free in a bare container image locally (all-`NULL` GPU rows on
   laptop); verified on a GH200 node during E1.
 
-### M4 — System performance pre-checks runner (M)
+### M4 — System performance pre-checks runner (M) — 🚧 laptop half done 2026-06-12 (runner + parsers + §7.3/§7.4 grading + gate policy, fixture-tested; in-container execution on clariden pending — needs M5/E1; NVSHMEM output fixtures provisional until captured from the real image)
 
 - **Deliverables**: `tools/benchmarker/prechecks/run_system_prechecks` — adapts
   `examples/nccl-tests/` (stack fingerprint, cached build, rank-0 toolchain install,
