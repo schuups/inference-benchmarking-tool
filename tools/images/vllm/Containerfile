@@ -3,32 +3,136 @@
 ARG BASE_IMAGE
 FROM ${BASE_IMAGE}
 
-SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+# SHELL is unsupported by the OCI image format (would require --format=docker);
+# each phase script sets its own bash strict mode and is run via `bash`.
+# SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-ARG OCI_SOURCE="unknown"
-ARG OCI_REVISION="unknown"
-ARG OCI_CREATED="unknown"
-ARG OCI_DESCRIPTION="unknown"
-ARG CSCS_ALPS_GIT_COMMIT_SHORT="unknown"
-
-LABEL org.opencontainers.image.source="${OCI_SOURCE}" \
-      org.opencontainers.image.revision="${OCI_REVISION}" \
-      org.opencontainers.image.created="${OCI_CREATED}" \
-      org.opencontainers.image.description="${OCI_DESCRIPTION}" \
-      com.cscs.alps.git.repo="${OCI_SOURCE}" \
-      com.cscs.alps.git.commit="${OCI_REVISION}" \
-      com.cscs.alps.git.commit_short="${CSCS_ALPS_GIT_COMMIT_SHORT}"
-
-ARG VLLM_VERSION=0.20.1
-
-# Install vLLM.
+# ---------------------------------------------------------------------------
+# Alps HPC network stack, built one phase per layer.
 #
-# The NGC PyTorch base already has torch, flash-attn, and the Alps HPC stack
-# has NCCL built from source at /usr (picked up first by ldconfig). vLLM will
-# pull in nvidia-nccl-cu12 as a Python dep; that copy lives under site-packages
-# and does not override the system libnccl.so.2. The alps-runtime.env variables
-# (NCCL_NET, FI_PROVIDER, …) steer NCCL to the CXI plugin at runtime.
+# Each phase is its own COPY + RUN: podman caches every successful layer, so a
+# failed (or edited) phase re-runs only that step and everything after it —
+# earlier phases come straight from cache. ARGs are declared immediately before
+# the phase that consumes them, so bumping a version invalidates the minimum
+# number of layers. The phase order mirrors install-alps-hpc-stack.sh's
+# ALL_PHASES (that script is the equivalent one-shot runner for interactive use).
+#
+# _helpers.sh is shared by every phase (it also clears the base HPC-X/MPI env
+# in-process); editing it invalidates all phase layers below, so it changes
+# rarely.
+# ---------------------------------------------------------------------------
+COPY common/phases/_helpers.sh /opt/alps/phases/_helpers.sh
+
+COPY common/phases/apt_install_build_deps.sh /opt/alps/phases/
+RUN bash /opt/alps/phases/apt_install_build_deps.sh
+
+COPY common/phases/remove_efa.sh /opt/alps/phases/
+RUN bash /opt/alps/phases/remove_efa.sh
+
+COPY common/phases/neutralize_base_mpi.sh /opt/alps/phases/
+RUN bash /opt/alps/phases/neutralize_base_mpi.sh
+
+ARG REMOVE_HPCX_DIRS=""
+COPY common/phases/remove_hpcx_plugins.sh /opt/alps/phases/
+RUN bash /opt/alps/phases/remove_hpcx_plugins.sh
+
+ARG XPMEM_REF=3bcab55479489fdd93847fa04c58ab16e9c0b3fd
+COPY common/phases/build_xpmem.sh /opt/alps/phases/
+RUN bash /opt/alps/phases/build_xpmem.sh
+
+ARG GDRCOPY_VER=2.5.1
+COPY common/phases/build_gdrcopy.sh /opt/alps/phases/
+RUN bash /opt/alps/phases/build_gdrcopy.sh
+
+ARG CASSINI_HEADERS_VERSION=release/shs-13.0.0
+ARG CXI_DRIVER_VERSION=release/shs-13.0.0
+ARG LIBCXI_VERSION=release/shs-13.0.0
+COPY common/phases/build_cxi_bits.sh /opt/alps/phases/
+RUN bash /opt/alps/phases/build_cxi_bits.sh
+
+# patches/ is consumed by libfabric, nccl, aws-ofi-nccl and nvshmem (via
+# apply_patch_if_set); copied here, just before the first consumer.
+COPY patches/ /opt/alps/patches/
+
+ARG LIBFABRIC_COMMIT=79fd4514977a8f15844fbe26df9f5930eb96311a
+ARG LIBFABRIC_PATCH="libfabric/prov_cxi_netns_support.79fd451.patch"
+COPY common/phases/build_libfabric.sh /opt/alps/phases/
+RUN bash /opt/alps/phases/build_libfabric.sh
+
+#ARG NCCL_VER=2.29.7-1
+ARG NCCL_VER=2.28.7-1
+ARG NCCL_PATCH="nccl/net.cc.2.29.7-1.patch"
+COPY common/phases/build_nccl_deb.sh /opt/alps/phases/
+RUN bash /opt/alps/phases/build_nccl_deb.sh
+
+ARG UCX_VERSION=1.20.0
+COPY common/phases/build_ucx.sh /opt/alps/phases/
+RUN bash /opt/alps/phases/build_ucx.sh
+
+ARG UCC_VERSION=1.7.0
+COPY common/phases/build_ucc.sh /opt/alps/phases/
+RUN bash /opt/alps/phases/build_ucc.sh
+
+ARG OMPI_VER=5.0.10
+COPY common/phases/build_ompi5.sh /opt/alps/phases/
+RUN bash /opt/alps/phases/build_ompi5.sh
+
+#ARG AWS_OFI_NCCL_COMMIT=394ae7b20dd0e6b4e5f63652e15e9da100d5fe83
+#ARG AWS_OFI_NCCL_PATCH="aws-ofi-nccl/endpoint_mr.394ae7b.patch"
+ARG AWS_OFI_NCCL_COMMIT=93fa84ca880325013b2f639356bbb60f075148af
+ARG AWS_OFI_NCCL_PATCH=""
+COPY common/phases/build_aws_ofi_nccl.sh /opt/alps/phases/
+RUN bash /opt/alps/phases/build_aws_ofi_nccl.sh
+
+ARG NVSHMEM_VER=3.6.5-0
+ARG NVSHMEM_PATCH="nvshmem/requirements-v3.6.5-0.patch"
+COPY common/phases/build_nvshmem.sh /opt/alps/phases/
+RUN bash /opt/alps/phases/build_nvshmem.sh
+
+ARG NCCL_TESTS_VER=2.18.2
+COPY common/phases/build_nccl_tests.sh /opt/alps/phases/
+RUN bash /opt/alps/phases/build_nccl_tests.sh
+
+ARG OSU_VERSION=7.5.2
+COPY common/phases/build_osu.sh /opt/alps/phases/
+RUN bash /opt/alps/phases/build_osu.sh
+
+COPY common/phases/clean_up.sh /opt/alps/phases/
+RUN bash /opt/alps/phases/clean_up.sh
+
+# ---------------------------------------------------------------------------
+# Runtime environment + warnings + optional variant hooks (unchanged).
+# ---------------------------------------------------------------------------
+COPY common/alps-runtime.env /opt/alps/env/alps-runtime.env
+
 RUN set -eux; \
-    pip install --no-cache-dir \
-        -i https://jfrog.svc.cscs.ch/artifactory/api/pypi/pypi-remote/simple \
-        "vllm==${VLLM_VERSION}"
+    chmod 0644 /opt/alps/env/alps-runtime.env; \
+    printf '%s\n' \
+      'if [ -f /opt/alps/env/alps-versions.env ]; then . /opt/alps/env/alps-versions.env; fi' \
+      'if [ -f /opt/alps/env/alps-runtime.env ]; then . /opt/alps/env/alps-runtime.env; fi' \
+      > /etc/profile.d/99-alps-env.sh
+
+COPY common/alps-runtime-warning.txt /opt/alps/env/alps-runtime-warning.txt
+COPY common/alps-runtime-warning.sh /opt/alps/env/alps-runtime-warning.sh
+COPY common/alps-runtime-warning.py /opt/alps/env/alps-runtime-warning.py
+COPY common/install-alps-runtime-warnings.sh /opt/alps/env/install-alps-runtime-warnings.sh
+
+RUN set -eux; \
+    chmod +x /opt/alps/env/install-alps-runtime-warnings.sh; \
+    /opt/alps/env/install-alps-runtime-warnings.sh
+
+# Optional image-specific fixes (late hooks)
+ARG NGC_VARIANT_DIR=""
+COPY variants/${NGC_VARIANT_DIR}/ /opt/alps/ngc-variant/
+# Run any hooks if present
+RUN set -eux; \
+    if [ -d /opt/alps/ngc-variant/hooks.d ]; then \
+      for f in /opt/alps/ngc-variant/hooks.d/*.sh; do \
+        [ -e "$f" ] || break; \
+        echo "Running variant hook: $f"; \
+        chmod +x "$f"; \
+        "$f"; \
+      done; \
+    else \
+      echo "No variant hooks for NGC_VARIANT_DIR=${NGC_VARIANT_DIR}"; \
+    fi

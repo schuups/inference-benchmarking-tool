@@ -6,6 +6,20 @@ set -euo pipefail
 
 export DEBIAN_FRONTEND=noninteractive
 
+# Neutralise the base image's bundled HPC-X / MPI environment for every build
+# phase. The NGC base sets LD_LIBRARY_PATH, OPAL_PREFIX, HPCX_* and MPI_*
+# pointing at the HPC-X stack (/usr/local/mpi, /opt/hpcx) that the
+# neutralize_base_mpi phase removes; leaving them set drags the old
+# libpmix/libopen-pal into later link steps (e.g. OpenMPI 5). Clearing them
+# here — sourced by every phase — reproduces the monolithic build's in-process
+# `unset` in each layer, WITHOUT writing them into the final image's ENV, which
+# must keep the base's CUDA/torch LD_LIBRARY_PATH for the vLLM runtime.
+unset OPAL_PREFIX PMIX_INSTALL_PREFIX PMIX_HOME MPI_HOME MPI_ROOT \
+      HPCX_DIR HPCX_HOME HPCX_MPI_DIR HPCX_UCX_DIR HPCX_UCC_DIR \
+      HPCX_HCOLL_DIR HPCX_SHARP_DIR HPCX_NVSHMEM_DIR \
+      OMPI_MCA_prefix OMPI_HOME OPAL_LIBDIR \
+      LD_LIBRARY_PATH LIBRARY_PATH 2>/dev/null || true
+
 die() {
     echo "ERROR: $*" >&2
     exit 1

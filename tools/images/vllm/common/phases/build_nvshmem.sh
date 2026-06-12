@@ -7,7 +7,7 @@ setup_env
 : "${NVSHMEM_SRC_DIR:=/tmp/nvshmem-src}"
 : "${NVSHMEM_CUDA_ARCH:=90}"
 : "${NVSHMEM_ENABLE_PYTHON:=1}"
-: "${NVSHMEM_ENABLE_TESTS:=0}"
+: "${NVSHMEM_ENABLE_TESTS:=1}"
 
 # Remove preinstalled NVSHMEM
 apt-get update
@@ -38,6 +38,23 @@ pushd "${NVSHMEM_SRC_DIR}" >/dev/null
 apply_patch_if_set "${NVSHMEM_PATCH}"
 popd >/dev/null
 
+# CUDA 13 NGC images ship libnvJitLink as a versioned runtime .so without the
+# unversioned dev symlink NVSHMEM's test/common find_library(nvJitLink) requires
+# (it searches lib64 with NO_DEFAULT_PATH — no fallback). Tests are on, so
+# test/common is configured; create the symlink from the runtime lib if missing.
+if ! ls "${CUDA_DIR}"/lib64/libnvJitLink.so >/dev/null 2>&1; then
+    njl_rt=$(ls -1 "${CUDA_DIR}"/lib64/libnvJitLink.so.* \
+                   "${CUDA_DIR}"/targets/*/lib/libnvJitLink.so.* 2>/dev/null \
+             | sort -V | tail -1)
+    if [[ -n "${njl_rt}" ]]; then
+        ln -sf "${njl_rt}" "${CUDA_DIR}/lib64/libnvJitLink.so"
+        echo "[nvshmem] linked ${CUDA_DIR}/lib64/libnvJitLink.so -> ${njl_rt}"
+    else
+        echo "[nvshmem] WARNING: no libnvJitLink runtime lib under ${CUDA_DIR}; test/common will fail" >&2
+        ls -la "${CUDA_DIR}"/lib64/libnvJitLink* "${CUDA_DIR}"/targets/*/lib/libnvJitLink* 2>&1 || true
+    fi
+fi
+
 NVSHMEM_BUILD_EXAMPLES=0 \
 NVSHMEM_BUILD_TESTS="$([[ "${NVSHMEM_ENABLE_TESTS}" == "1" ]] && echo 1 || echo 0)" \
 NVSHMEM_DEBUG=0 \
@@ -50,7 +67,7 @@ NVSHMEM_GPU_COLL_USE_LDST=0 \
 NVSHMEM_LIBFABRIC_SUPPORT=1 \
 NVSHMEM_MPI_SUPPORT=1 \
 NVSHMEM_MPI_IS_OMPI=1 \
-NVSHMEM_NVTX=0 \
+NVSHMEM_NVTX=1 \
 NVSHMEM_PMIX_SUPPORT=1 \
 NVSHMEM_SHMEM_SUPPORT=1 \
 NVSHMEM_TEST_STATIC_LIB=0 \

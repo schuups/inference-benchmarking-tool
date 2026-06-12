@@ -69,7 +69,17 @@
 
 ## Docker Image Builds
 
-- [ ] Support building Docker images via SLURM jobs
+- [ ] Automate image builds — the image builds green via manual `sbatch` from a
+  login node; automated submission is deferred. See IMPLEMENTATION_PLAN.md M5.
+- [ ] Cross-rebuild layer cache — the per-phase Containerfile caches each phase,
+  but with `graphroot` on `/dev/shm` (wiped at job end) the cache persists only
+  within an allocation. Iterate interactively; cross-job caching would need a
+  persistent (capstor) graphroot.
+- [ ] **Embed a library-version manifest in built images** (§8.1) — replace the
+  removed build-args provenance: record the resolved versions of CUDA, NCCL,
+  libfabric, CXI, NVSHMEM, vLLM, etc. inside the image (e.g. a
+  `/opt/alps/env/alps-versions.env` queryable at runtime and surfaced in the
+  experiment provenance).
 
 ## Prompt / Dataset Generation
 
