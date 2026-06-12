@@ -11,6 +11,7 @@
 stack_fingerprint() {
     {
         echo "nccl_tests=${NCCL_TESTS_VERSION:-unset}"
+        echo "mpi_build=${NCCL_TESTS_MPI:-0}"
 
         if command -v nvcc >/dev/null 2>&1; then
             nvcc --version 2>/dev/null | grep -iE 'release' | head -1
