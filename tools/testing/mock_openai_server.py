@@ -34,6 +34,8 @@ class MockConfig:
     error_rate: float = 0.0          # fraction of requests answered with error_status
     error_status: int = 500
     abort_mid_stream_after: int | None = None  # tokens emitted before truncating
+    slow_first_n: int = 0            # cold-start simulation: first N requests use slow_ttft_ms
+    slow_ttft_ms: float = 0.0
     seed: int = 0
 
 
@@ -85,12 +87,17 @@ class MockServer:
         if self.config.abort_mid_stream_after is not None:
             tokens = tokens[: self.config.abort_mid_stream_after]
 
+        ttft_ms = (
+            self.config.slow_ttft_ms
+            if self.requests_received <= self.config.slow_first_n
+            else self.config.ttft_ms
+        )
         response = web.StreamResponse()
         response.content_type = "text/event-stream"
         await response.prepare(request)
         self.requests_running += 1
         try:
-            await asyncio.sleep(self.config.ttft_ms / 1000)
+            await asyncio.sleep(ttft_ms / 1000)
             for i, token in enumerate(tokens):
                 if i > 0:
                     await asyncio.sleep(self.config.tpot_ms / 1000)

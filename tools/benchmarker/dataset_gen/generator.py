@@ -157,6 +157,7 @@ def generate(
                     {
                         "scenario": slug,
                         "session_idx": session_idx,
+                        "session_mode": plan.session.mode,
                         "turn_idx": turn_idx,
                         "prompt_text": text,
                         "text_tokens": tokenizer.count(text),

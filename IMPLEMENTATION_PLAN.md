@@ -42,7 +42,8 @@ None are descoped.
 | `examples/docker-images-build/` (Dockerfile) | Partial — seed for M5 |
 | `tools/common/` (global.yaml §2.3, benchmark-YAML schema + CLI, run-ID §6.2) + `examples/benchmark-configs/mixed-80-20.yaml` + `tools/tests/` (20 tests) | Done (M0, 2026-06-12) |
 | `tools/benchmarker/dataset_gen/` (registry loader, seeded sampling, all four §10.5 sources, manifest emitter, offline CLI) — validated against real LongBench / WildChat / gsm8k downloads | Done (M1, 2026-06-12) |
-| Planner, Coordinator, Cleaner, Reports generator, Benchmarker (orchestrator, load gen, prechecks runner, hw sampler, results DB) | **Not implemented** |
+| `tools/benchmarker/load_gen/` (arrival, client + §12.1 taxonomy, session scheduler with §11.2 phase accounting, `server_stats` scraper, readiness/model-load/primer) + `tools/testing/mock_openai_server.py` | Done (M2, 2026-06-12) |
+| Planner, Coordinator, Cleaner, Reports generator, Benchmarker (orchestrator, prechecks runner, hw sampler, results DB) | **Not implemented** |
 
 ## 3. Build strategy
 
@@ -97,7 +98,7 @@ Sizes are relative complexity (S < M < L), not time promises.
   manifest schema-validates; runs on laptop with no cluster access (synthetic + cached
   HF datasets).
 
-### M2 — Load generator (L) — 🚧 in progress (2026-06-12: arrival processes + mock server landed; client/session-scheduler/phases, server_stats scraper, readiness/model-load/primer outstanding)
+### M2 — Load generator (L) — ✅ done 2026-06-12 (vLLM model-load log regexes seeded from upstream message shapes — re-capture fixtures from the pinned vllm-cxi image at E1)
 
 - **Deliverables**: `tools/benchmarker/load_gen/` — asyncio streaming client
   (forced/natural `output_length_mode` per §10.6, sampled `max_tokens`); arrival

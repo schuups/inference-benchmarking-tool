@@ -1010,7 +1010,7 @@ never dilute another's statistics (§14.1):
 
 | Per-session metric | Derivation |
 |---|---|
-| `session_e2e_ms` | Time from the first turn's `send` to the last turn's last token (max of per-request E2E within the session) |
+| `session_e2e_ms` | Time from the first turn's send to the last turn's last token: `MAX(issued_at_ms + e2e_ms) − MIN(issued_at_ms)` within the session (§13.3) |
 | `session_turns` | Number of requests with the same `session_idx` |
 | `session_input_tokens` | `SUM(input_tokens)` per `session_idx` |
 | `session_output_tokens` | `SUM(output_tokens)` per `session_idx` |
@@ -1021,7 +1021,8 @@ these metrics collapse to the underlying per-request values.
 
 **Boundary rule.** Session-level metrics are computed only over sessions **fully
 contained in the sweep step** — started during warmup or measurement and completed by
-drain end (§11.2). Truncated sessions are excluded from the session-level aggregates
+drain end (§11.2); completion is detected by the presence of the session's `final_turn`
+row (§13.3). Truncated sessions are excluded from the session-level aggregates
 (their per-request rows still count toward request-level metrics), and the report
 discloses the excluded count per λ level; a high truncation share at a given λ is
 itself a saturation signal.
@@ -1224,6 +1225,8 @@ One row per issued request — the per-request latency record.
 | `session_idx` | INTEGER | Session this request belongs to (§10.7). Shared by every turn of the session; enables grouping per-session for session-affinity routing analysis (§11.4). For single-turn scenarios equals the request's underlying prompt index. |
 | `scenario` | TEXT | Workload-class slug of the session this request belongs to (§10.4, §10.7). Constant across a session's turns; the key for per-class group-bys (§12.2, §12.4, §14.1). |
 | `turn_idx` | INTEGER | 0-based position of this request within its session (§10.7). `0` for the first turn (and for every request in single-turn scenarios); `1` for the first follow-up; etc. Lets reports plot per-turn metrics directly (e.g. "TTFT vs turn index" to visualise prefix-cache benefit on follow-up turns) without reconstructing the order from timestamps. |
+| `issued_at_ms` | REAL | Milliseconds from the sweep-step start at which the request was sent. Lets reports derive measurement-window membership (§11.2) and `session_e2e_ms` (§12.2) without extra state. |
+| `final_turn` | INTEGER | `1` if this request is its session's last planned turn. A session is complete iff its `final_turn` row exists and every turn succeeded; sessions truncated at drain end lack it (§11.2, §12.2). |
 | `ttft_ms` | REAL | Time to first token, milliseconds — authoritative SLO metric. |
 | `tpot_ms` | REAL | Inter-token latency, mean across the request's output tokens. |
 | `e2e_ms` | REAL | End-to-end request time, milliseconds. |
