@@ -87,6 +87,9 @@ class MockLauncher:
     def engine_log_text(self):
         return "Model loading took 1.0 GiB and 2.50 seconds\n"
 
+    def is_alive(self):
+        return not self.torn_down
+
 
 @pytest.mark.asyncio
 async def test_end_to_end_phases_and_persistence(tmp_path):

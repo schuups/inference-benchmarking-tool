@@ -105,7 +105,25 @@ trap 'rm -rf "${SRC_DIR}"' EXIT
 
 curl -fsSL "https://github.com/NVIDIA/nccl-tests/archive/refs/tags/v${NCCL_TESTS_VERSION}.tar.gz" \
     | tar xz -C "${SRC_DIR}" --strip-components=1
-(cd "${SRC_DIR}" && MPI=1 make -j"$(nproc)")
+
+# nccl-tests needs MPI_HOME when mpi.h sits outside the default include path
+# (e.g. Ubuntu multiarch /usr/lib/<arch>-linux-gnu/openmpi on NGC images).
+if [ -z "${MPI_HOME:-}" ]; then
+    for d in "/usr/lib/$(uname -m)-linux-gnu/openmpi" /usr/lib/x86_64-linux-gnu/openmpi \
+             /usr/lib64/openmpi /usr/local/openmpi /usr/local/mpi /usr; do
+        if [ -f "${d}/include/mpi.h" ]; then MPI_HOME="${d}"; break; fi
+    done
+fi
+if [ -z "${MPI_HOME:-}" ] && command -v mpicc >/dev/null 2>&1; then
+    inc="$(mpicc --showme:incdirs 2>/dev/null | awk '{print $1}')"
+    if [ -n "${inc}" ] && [ -f "${inc}/mpi.h" ]; then MPI_HOME="$(dirname "${inc}")"; fi
+fi
+if [ -z "${MPI_HOME:-}" ]; then
+    echo "[build] mpi.h not found anywhere — cannot build with MPI=1" >&2
+    exit 1
+fi
+echo "[build] MPI_HOME=${MPI_HOME}"
+(cd "${SRC_DIR}" && MPI=1 MPI_HOME="${MPI_HOME}" make -j"$(nproc)")
 
 # Atomic publish: move into place, then write the sentinel last.
 mkdir -p "${CACHE_DIR}"

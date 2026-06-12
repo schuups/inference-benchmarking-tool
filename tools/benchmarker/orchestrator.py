@@ -58,6 +58,10 @@ class EngineLauncher(Protocol):
         """Engine log content for §9.2 model-load parsing; None if unavailable."""
         ...
 
+    def is_alive(self) -> bool:
+        """False once the engine deployment is known dead (fast-fail waits)."""
+        ...
+
 
 @dataclass
 class SlurmEngineLauncher:
@@ -100,6 +104,15 @@ class SlurmEngineLauncher:
     def engine_log_text(self) -> str | None:
         matches = sorted(Path.cwd().glob(f"ib-engine-*-{self.job_id}.out"))
         return matches[-1].read_text() if matches else None
+
+    def is_alive(self) -> bool:
+        if not self.job_id:
+            return False
+        out = subprocess.run(
+            ["squeue", "-j", self.job_id, "-h", "-o", "%T"],
+            capture_output=True, text=True,
+        ).stdout.strip()
+        return out in ("RUNNING", "COMPLETING")
 
 
 QualityHook = Callable[[list[tuple[str, str]], ResultsDB, str], Awaitable[None]]
@@ -262,6 +275,16 @@ async def _await_precheck_results(
                         return None
             except aiohttp.ClientError:
                 pass
+            if not launcher.is_alive():
+                # the gate may have aborted the engine job (§7.4) after writing
+                # its results — give the shared filesystem a moment, then read
+                await asyncio.sleep(10)
+                if path.exists():
+                    return json.loads(path.read_text())
+                raise RunAborted(
+                    "engine job died before §7 pre-checks produced results — "
+                    "see the engine job log in the run directory"
+                )
             await asyncio.sleep(5)
     raise RunAborted(
         f"neither pre-check results nor a healthy endpoint within {timeout_s}s "
