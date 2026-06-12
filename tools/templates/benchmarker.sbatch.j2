@@ -19,7 +19,7 @@ export HF_HOME={{ scratch_base }}/hf-cache
 
 # host-side venv created by tools/cluster/bootstrap_venv.sbatch (no container);
 # the tools/ package tree is staged into the run dir (= --chdir), so `-m` resolves.
-exec {{ scratch_base }}/ib-venv/bin/python -m tools.benchmarker.main \
+exec {{ scratch_base }}/venv/bin/python -m tools.benchmarker.main \
     --config {{ run_dir_remote }}/benchmark_config.yaml \
     --run-id {{ run_id }} \
     --run-dir {{ run_dir_remote }} \

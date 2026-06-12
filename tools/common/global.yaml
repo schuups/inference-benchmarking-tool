@@ -31,8 +31,10 @@ clusters:
 slurm:
   account: csstaff                 # never use other accounts (§5.1)
 
-scratch_base: /capstor/scratch/cscs/stefschu          # run dirs, prompt pools, caches (§2.2)
-collective_tests_cache_dir: /capstor/scratch/cscs/stefschu/collective-tests-cache  # §7.2
+# All project files on the cluster live under this single folder (§2.2/§2.3):
+# run dirs, prompt pools, hf-cache, venv, image builds, caches.
+scratch_base: /capstor/scratch/cscs/stefschu/ib
+collective_tests_cache_dir: /capstor/scratch/cscs/stefschu/ib/collective-tests-cache  # §7.2
 
 registry:
   jfrog_base: https://jfrog.svc.cscs.ch/artifactory/ml/inference   # image publish base (§8.1); jf server-id cscs-jfrog

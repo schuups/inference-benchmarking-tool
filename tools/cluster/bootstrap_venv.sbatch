@@ -3,7 +3,7 @@
 # M7/E1): the benchmarker.sbatch runs tools/benchmarker/main.py on the HOST
 # (no container), which needs Python >= 3.10 + tools/requirements.txt.
 #
-# Creates /capstor/scratch/cscs/$USER/ib-venv. Re-run to refresh deps.
+# Creates /capstor/scratch/cscs/$USER/ib/venv. Re-run to refresh deps.
 # Submit with: sbatch bootstrap_venv.sbatch   (requirements.txt staged alongside)
 
 #SBATCH --account=csstaff
@@ -16,7 +16,7 @@
 #SBATCH --time=00:30:00
 
 set -eo pipefail
-VENV=/capstor/scratch/cscs/${USER}/ib-venv
+VENV=/capstor/scratch/cscs/${USER}/ib/venv
 PYPI=https://jfrog.svc.cscs.ch/artifactory/api/pypi/pypi-remote/simple
 # FirecREST invokes sbatch from its own cwd — pass BOOTSTRAP_DIR via the API.
 HERE="${BOOTSTRAP_DIR:-${SLURM_SUBMIT_DIR:-$(pwd)}}"

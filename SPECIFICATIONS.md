@@ -94,7 +94,7 @@ The repository root also carries `SPECIFICATIONS.md`, `CLAUDE.md`, `TODOs.md`, `
 
 ### 2.2 Remote (cluster scratch)
 
-On SLURM clusters, the operator's scratch base is `/capstor/scratch/cscs/$USER/` (Lustre, HDD; see §5.1). Each experiment creates a run-specific subdirectory holding the Benchmarker's working files (sbatch + EDF copies), the dataset generator's prompt pool, and the inference deployment's container working directory. A shared `nccl-tests-cache/` lives at the same level — one entry per stack fingerprint (§7.2).
+On SLURM clusters, **all project files live under a single folder** — `/capstor/scratch/cscs/$USER/ib/` (Lustre, HDD; see §5.1), the configured `scratch_base` (§2.3) — keeping the operator's scratch root uncluttered. Each experiment creates a run-specific subdirectory there holding the Benchmarker's working files (sbatch + EDF copies), the dataset generator's prompt pool, and the inference deployment's container working directory. Alongside the run dirs live the shared `collective-tests-cache/` (one entry per stack fingerprint, §7.2), `hf-cache/`, the host-side `venv/` (Benchmarker runtime), and `image-builds/` staging.
 
 On Kubernetes (`breithorn`), the equivalent layout lives under Ceph-backed PVCs scoped per experiment.
 
@@ -281,8 +281,8 @@ discovered and reclaimed later:
 
 - Cancel the Benchmarker SLURM job (`scancel <job_id>`).
 - Delete the Benchmarker's capstor scratch run directory
-  (`/capstor/scratch/cscs/$USER/<run_id>/`), which holds the dataset, working files, and
-  load-gen state.
+  (`/capstor/scratch/cscs/$USER/ib/<run_id>/`), which holds the dataset, working files,
+  and load-gen state.
 
 The Benchmarker spawned the inference deployment(s) but its cancellation does **not**
 automatically cancel them — the per-target sections below handle that explicitly.
@@ -325,7 +325,7 @@ Resource classes the Cleaner identifies (and, on approval, prunes):
 | Class | Discovery | Notes |
 |---|---|---|
 | K8s objects (Deployment, Service, Ingress, TLS Secret) | `kubectl get ... -l app.kubernetes.io/managed-by=inference-benchmarking` | Skip Model-cache PVCs (§6.6 keeps them intentionally). |
-| SLURM scratch dirs under `/capstor/scratch/cscs/$USER/` | Match the run-ID pattern (§6.2); skip dirs owned by an active job. | |
+| SLURM scratch dirs under `/capstor/scratch/cscs/$USER/ib/` | Match the run-ID pattern (§6.2); skip dirs owned by an active job. | |
 | JFrog images tagged for benchmark runs | JFrog API filtered by the benchmark tag prefix (§6.1). | Skip the most recent N tags per repository. |
 
 Cleaner actions are logged on the laptop but are not persisted to the per-run results DB.
@@ -382,7 +382,7 @@ test adds maintenance without adding signal.
   - `collective_tests_version` — git tag to build (e.g. `nccl-tests` `2.17.1` or the
     matching `rccl-tests` tag). Pinned per experiment.
   - `collective_tests_cache_dir` — persistent path where compiled binaries live (default
-    `/capstor/scratch/cscs/$USER/collective-tests-cache` on SLURM; a PVC mount on K8s).
+    `/capstor/scratch/cscs/$USER/ib/collective-tests-cache` on SLURM; a PVC mount on K8s).
     Shared across experiments; safe to delete to force a rebuild.
 
   The pre-check script **installs missing build tools** (`make`, `g++`, OpenMPI dev, `curl`,
