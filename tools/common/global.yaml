@@ -7,22 +7,26 @@ clusters:
     type: slurm
     platform: mlp                  # FirecREST MCP "ML Platform"
     partition: normal
-    gpus_per_node: 4               # NVIDIA GH200
+    gpus_per_node: 4
+    gpu_label: GH200               # used in §7.3 reference scope strings
   bristen:
     type: slurm
     platform: mlp
     partition: normal
-    gpus_per_node: 4               # NVIDIA A100 (sm_80 — see §5.1 portability note)
+    gpus_per_node: 4
+    gpu_label: A100                # sm_80 — see §5.1 portability note
   beverin:
     type: slurm
     platform: hpc                  # FirecREST MCP "HPC Platform"
     partition: mi300
-    gpus_per_node: 4               # AMD MI300A
+    gpus_per_node: 4
+    gpu_label: MI300A
   breithorn:
     type: k8s
     namespace: ml
     node_type: gh200               # nodeSelector beta.kubernetes.io/instance-type
     gpus_per_node: 4
+    gpu_label: gh200
 
 slurm:
   account: csstaff                 # never use other accounts (§5.1)

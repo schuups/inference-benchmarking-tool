@@ -35,6 +35,7 @@ class StrictModel(BaseModel):
 class ClusterInfo(StrictModel):
     type: Literal["slurm", "k8s"]
     gpus_per_node: int = Field(gt=0)
+    gpu_label: str
     platform: Literal["mlp", "hpc"] | None = None
     partition: str | None = None
     namespace: str | None = None
@@ -105,6 +106,7 @@ class Deployment(StrictModel):
     backend_version: str
     model: str
     backend_config: BackendConfig = BackendConfig()
+    image: str | None = None  # canonical JFrog tag (§8.1); derived from global.yaml when absent
 
 
 class MixEntry(StrictModel):

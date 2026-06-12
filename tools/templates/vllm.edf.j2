@@ -1,0 +1,14 @@
+# Engine container EDF (SLURM --environment=) — rendered by the Planner (§4)
+# run_id: {{ run_id }}
+image = "{{ image }}"
+
+mounts = [
+    "/users",
+    "/capstor",
+    "/iopsstor"
+]
+
+workdir = "{{ run_dir_remote }}"
+
+[env]
+HF_HOME = "{{ scratch_base }}/hf-cache"

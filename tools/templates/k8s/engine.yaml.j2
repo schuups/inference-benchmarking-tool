@@ -1,0 +1,86 @@
+# Engine Deployment + Service (breithorn) — rendered by the Planner (§4).
+# Labels per §6.1 so the Cleaner and per-run teardown can discover everything.
+# Ingress/TLS wiring lands with E5 (plan §5).
+# run_id: {{ run_id }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ib-engine-{{ run_id_slug }}
+  namespace: {{ namespace }}
+  labels:
+    app.kubernetes.io/managed-by: inference-benchmarking
+    inference-benchmarking/run-id: "{{ run_id }}"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ib-engine-{{ run_id_slug }}
+  template:
+    metadata:
+      labels:
+        app: ib-engine-{{ run_id_slug }}
+        app.kubernetes.io/managed-by: inference-benchmarking
+    spec:
+      nodeSelector:
+        beta.kubernetes.io/instance-type: {{ node_type }}
+      tolerations:
+      - { key: hpc, operator: Equal, value: "true", effect: NoSchedule }
+      - { key: hpc, operator: Equal, value: "true", effect: NoExecute }
+      containers:
+      - name: engine
+        image: {{ image }}
+        # §7.2: pre-checks + sampler share the engine container; gate failure stops the pod
+        command: ["bash", "-c"]
+        args:
+          - >
+            bash /tools/benchmarker/prechecks/run_system_prechecks.sh &&
+            { python3 /tools/benchmarker/hw_sampler.py --out /results/hw-$(hostname).ndjson
+            --interval {{ hardware_sampling_interval_s }} & exec {{ engine_command }}; }
+        env:
+        - { name: PRECHECK_CLUSTER, value: "{{ cluster }}" }
+        - { name: PRECHECK_SCOPE, value: "{{ precheck_scope }}" }
+        - { name: PRECHECK_STORAGE_SCOPE, value: "{{ precheck_storage_scope }}" }
+        - { name: PRECHECK_OUT, value: "/results/prechecks" }
+        - { name: PRECHECK_ON_WARN, value: "{{ prechecks.system_prechecks_on_warn }}" }
+        - { name: PRECHECK_ON_FAIL, value: "{{ prechecks.system_prechecks_on_fail }}" }
+        - { name: SKIP_SYSTEM_PRECHECKS, value: "{{ '1' if prechecks.skip_system_prechecks else '0' }}" }
+        - { name: NCCL_TESTS_VERSION, value: "{{ prechecks.collective_tests_version or '2.17.1' }}" }
+        - { name: NCCL_TESTS_CACHE, value: "/results/collective-tests-cache" }
+        - { name: NVSHMEM_REQUIRED, value: "{{ '1' if prechecks.shmem_required else '0' }}" }
+        - { name: MSG_END, value: "128M" }
+        ports:
+        - { containerPort: 8000, name: http, protocol: TCP }
+        resources:
+          requests:
+            nvidia.com/gpu: {{ total_gpus }}
+            ephemeral-storage: 60Gi
+          limits:
+            nvidia.com/gpu: {{ total_gpus }}
+        startupProbe:
+          httpGet: { path: /health, port: 8000 }
+          periodSeconds: 10
+          failureThreshold: {{ startup_failure_threshold }}
+        volumeMounts:
+        - { name: model-cache, mountPath: /model-cache }
+        - { name: results, mountPath: /results }
+      volumes:
+      - name: model-cache
+        persistentVolumeClaim:
+          claimName: model-cache-{{ model_slug }}   # §6.6: kept across runs
+      - name: results
+        persistentVolumeClaim:
+          claimName: ib-results-{{ run_id_slug }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ib-engine-{{ run_id_slug }}
+  namespace: {{ namespace }}
+  labels:
+    app.kubernetes.io/managed-by: inference-benchmarking
+    inference-benchmarking/run-id: "{{ run_id }}"
+spec:
+  selector:
+    app: ib-engine-{{ run_id_slug }}
+  ports:
+  - { port: 8000, targetPort: 8000, name: http }

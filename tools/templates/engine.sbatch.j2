@@ -1,0 +1,59 @@
+#!/bin/bash
+# Inference-deployment job — rendered by the Planner (§4); submitted by the
+# Benchmarker orchestrator from within its allocation (§1, M7).
+# run_id: {{ run_id }}
+
+#SBATCH --account={{ account }}
+#SBATCH --partition={{ partition }}
+#SBATCH --job-name=ib-engine-{{ run_id }}
+#SBATCH --comment=inference-benchmarking
+#SBATCH --output=%x-%j.out
+#SBATCH --nodes={{ nodes }}
+#SBATCH --ntasks-per-node=1
+#SBATCH --gpus-per-node={{ gpus_per_node }}
+#SBATCH --time={{ time_limit }}
+#SBATCH --chdir={{ run_dir_remote }}
+
+export HUGGING_FACE_HUB_TOKEN=$(cat ~/.hf_token 2>/dev/null || true)
+export HF_HOME={{ scratch_base }}/hf-cache
+
+# §7.2 pre-check surface (graded by tools/benchmarker/prechecks/grade.py)
+export PRECHECK_CLUSTER={{ cluster }}
+export PRECHECK_SCOPE="{{ precheck_scope }}"
+export PRECHECK_STORAGE_SCOPE="{{ precheck_storage_scope }}"
+export PRECHECK_OUT={{ run_dir_remote }}/prechecks
+export PRECHECK_ON_WARN={{ prechecks.system_prechecks_on_warn }}
+export PRECHECK_ON_FAIL={{ prechecks.system_prechecks_on_fail }}
+export SKIP_SYSTEM_PRECHECKS={{ "1" if prechecks.skip_system_prechecks else "0" }}
+export NCCL_TESTS_VERSION={{ prechecks.collective_tests_version or "2.17.1" }}
+export NCCL_TESTS_CACHE={{ prechecks.collective_tests_cache_dir or collective_tests_cache_dir }}
+export NVSHMEM_REQUIRED={{ "1" if prechecks.shmem_required else "0" }}
+export MSG_END=128M
+
+{% if nodes > 1 %}
+# ---- multi-node Ray bring-up (validated at the E3 ladder; see plan §5/E3) ----
+# Head starts Ray, workers join, vLLM launches on the head with the Ray backend.
+nodes_list=$(scontrol show hostnames "$SLURM_JOB_NODELIST")
+head_node=$(echo "$nodes_list" | head -1)
+export VLLM_HOST_IP=$(hostname --ip-address)
+RAY_CMD='if [ "$SLURM_NODEID" = "0" ]; then ray start --head --port=6379; else sleep 10 && ray start --address='"$head_node"':6379 --block; fi'
+{% endif %}
+
+srun --environment={{ run_dir_remote }}/engine.toml --mpi=pmix bash -c '
+set -eo pipefail
+bash {{ tools_remote }}/benchmarker/prechecks/run_system_prechecks.sh && {
+    # §12.3 sampler backgrounded in the SAME container session before exec (M3/H3)
+    python3 {{ tools_remote }}/benchmarker/hw_sampler.py \
+        --out {{ run_dir_remote }}/hw-$(hostname).ndjson --interval {{ hardware_sampling_interval_s }} &
+{% if nodes > 1 %}
+    '"$RAY_CMD"'
+    if [ "$SLURM_NODEID" = "0" ]; then
+        exec {{ engine_command }} --distributed-executor-backend ray
+    else
+        wait  # workers stay alive for Ray
+    fi
+{% else %}
+    exec {{ engine_command }}
+{% endif %}
+}
+'

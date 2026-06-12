@@ -1,0 +1,32 @@
+# Benchmarker pod (breithorn) — the §4 Benchmarker-as-pod path, needed by E5.
+# run_id: {{ run_id }}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ib-benchmarker-{{ run_id_slug }}
+  namespace: {{ namespace }}
+  labels:
+    app.kubernetes.io/managed-by: inference-benchmarking
+    inference-benchmarking/run-id: "{{ run_id }}"
+spec:
+  restartPolicy: Never
+  containers:
+  - name: benchmarker
+    image: {{ benchmarker_image }}
+    command: ["python3", "-m", "tools.benchmarker.main"]
+    args:
+      - --config
+      - /results/benchmark_config.yaml
+      - --run-id
+      - "{{ run_id }}"
+      - --run-dir
+      - /results
+      - --k8s
+    resources:
+      requests: { cpu: "8", memory: 32Gi }
+    volumeMounts:
+    - { name: results, mountPath: /results }
+  volumes:
+  - name: results
+    persistentVolumeClaim:
+      claimName: ib-results-{{ run_id_slug }}

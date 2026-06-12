@@ -44,7 +44,8 @@ None are descoped.
 | `tools/benchmarker/dataset_gen/` (registry loader, seeded sampling, all four §10.5 sources, manifest emitter, offline CLI) — validated against real LongBench / WildChat / gsm8k downloads | Done (M1, 2026-06-12) |
 | `tools/benchmarker/load_gen/` (arrival, client + §12.1 taxonomy, session scheduler with §11.2 phase accounting, `server_stats` scraper, readiness/model-load/primer) + `tools/testing/mock_openai_server.py` | Done (M2, 2026-06-12) |
 | `tools/benchmarker/db.py` (seven §13 tables, WAL + single-writer, smoke-mode suppression, NDJSON ingestion) + `tools/benchmarker/hw_sampler.py` (stdlib-only, engine-node placement) | Done (M3, 2026-06-12) |
-| Planner, Coordinator, Cleaner, Reports generator, Benchmarker (orchestrator, prechecks runner) | **Not implemented** |
+| `tools/benchmarker/prechecks/` (runner + parsers + §7.3/§7.4 grading) and `tools/planner/` + `tools/templates/` (EDF, engine/benchmarker sbatch, K8s engine + benchmarker pod) | Laptop halves done (M4/M6, 2026-06-12); cluster validation at E1/E5 |
+| Coordinator, Cleaner, Reports generator, Benchmarker orchestrator | **Not implemented** |
 
 ## 3. Build strategy
 
@@ -171,7 +172,7 @@ Sizes are relative complexity (S < M < L), not time promises.
   cluster. Networking-library correctness (NCCL ↔ Slingshot/libfabric) is proven by M4
   passing inside this image — the two milestones gate each other.
 
-### M6 — Planner (M)
+### M6 — Planner (M) — 🚧 laptop half done 2026-06-12 (templates + renderer + render-invariant tests; `sbatch --test-only` / `kubectl --dry-run=server` validation at E1/E5; multi-node Ray block is a skeleton validated at the E3 ladder; K8s ingress wiring lands with E5)
 
 - **Deliverables**: `tools/planner/` + templates `tools/templates/vllm.edf.j2`,
   `tools/templates/benchmarker.sbatch.j2`, **`tools/templates/benchmarker.pod.yaml.j2`**
