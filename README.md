@@ -76,7 +76,7 @@ The operational set under active measurement — kept aligned with the authorita
 | **Kimi-K2.6** (Moonshot AI) | target | Yes | Yes — deeper reasoning and planning; strong on agentic, multi-step workflows | Yes — text + image + video (MoonViT encoder; multimodal performance comparatively weak) | Yes — strong tool-use reliability; leads open weights on HLE-with-tools |
 | **DeepSeek-V4-Pro** | target | Yes — 1M-token context | Yes — three modes: Non-think / Think High / Think Max; toggled via `thinking_mode` runtime parameter; `<think>` / `</think>` delimiters in output | No — text only | Yes — tool-use supported via the model's custom encoding (`encoding_dsv4`); 1.6T MoE / 49B activated |
 
-**Forward-looking additions** (per §8.2, the forward-looking taxonomy lives here; entries are promoted into the §8.2 operational table when they come under active measurement): **GLM-5.1** (Zhipu AI — 202K context, "rumination" multi-iteration self-revision, long autonomous loops up to 8 h, unified multimodal pipeline, multi-step agentic tool use) and further frontier families as they emerge.
+Candidate future models are tracked in [`TODOs.md`](TODOs.md) and enter the §8.2 operational table when they come under active measurement.
 
 ## Future roadmap
 

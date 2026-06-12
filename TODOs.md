@@ -60,6 +60,13 @@
   TBD placeholders in §7.3 must be replaced with measured medians plus tolerances before
   the foundation gate (§7.4) becomes enforceable.
 
+## Candidate models
+
+- [ ] **GLM-5.1** (Zhipu AI) — 202K context, "rumination" multi-iteration self-revision,
+  long autonomous loops (up to 8 h), unified multimodal pipeline, multi-step agentic
+  tool use. Promote into SPECIFICATIONS.md §8.2 when it comes under active measurement
+  (planner-template + benchmark-YAML change per §8.2).
+
 ## Docker Image Builds
 
 - [ ] Support building Docker images via SLURM jobs
