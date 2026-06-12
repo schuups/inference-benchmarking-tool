@@ -49,7 +49,11 @@ podman build --format=docker \
     -t "${IMAGE_TAG}" .
 
 # ---------------------------------------------------------------- push
-podman login jfrog.svc.cscs.ch --username "${USER}" --password-stdin < ~/.ib_jfrog_token
+# Prefer podman's stored credentials (~/.config/containers/auth.json); the
+# token file is the fallback for a fresh cluster account.
+if [ -f ~/.ib_jfrog_token ]; then
+    podman login jfrog.svc.cscs.ch --username "${USER}" --password-stdin < ~/.ib_jfrog_token
+fi
 podman push "${ALPS_BASE_TAG}"
 podman push "${IMAGE_TAG}"
 echo "[build] pushed ${IMAGE_TAG}"
