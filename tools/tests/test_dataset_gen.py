@@ -227,10 +227,12 @@ def test_manifest_schema(tmp_path, registry_dir):
 # ------------------------------------------------------------------ §10.1/§10.5
 
 
-def test_unimplemented_source_aborts(tmp_path):
-    cfg = _config([{"scenario": "chat-short-turns", "weight": 1.0}])
+def test_unimplemented_source_aborts(tmp_path, registry_dir):
+    entry = _synthetic_scenario("synth-traces", source={"kind": "reasoning_trace_replay", "config": {"dataset": "gsm8k-cot"}})
+    (registry_dir / "synth-traces.yaml").write_text(yaml.safe_dump(entry))
+    cfg = _config([{"scenario": "synth-traces", "weight": 1.0}])
     with pytest.raises(DatasetSourceError, match="not implemented"):
-        generate(cfg, WordTokenizer(), tmp_path / "o", SCENARIOS_DIR)
+        generate(cfg, WordTokenizer(), tmp_path / "o", registry_dir)
 
 
 def test_longbench_missing_datasets_pkg_aborts(tmp_path, registry_dir, monkeypatch):
@@ -255,6 +257,108 @@ def test_longbench_with_fake_corpus(tmp_path, registry_dir, monkeypatch):
     generate(cfg, WordTokenizer(), tmp_path / "o", registry_dir)
     records = _records(tmp_path / "o")
     assert records and all("def fn_" in r["prompt_text"] for r in records)
+
+
+# -------------------------------------------------------------------- wildchat
+
+
+FAKE_CONVERSATIONS = [
+    ["hello there, can you help me plan a trip?", "what about trains?", "thanks a lot"],
+    ["explain transformers " + "in detail " * 400, "shorter please"],
+    ["write a haiku about glaciers", "now one about scree", "and one about tarns", "merge them"],
+]
+
+
+@pytest.fixture()
+def wildchat_registry(registry_dir, monkeypatch):
+    entry = _synthetic_scenario(
+        "synth-chat",
+        source={"kind": "wildchat", "config": {"languages": ["en"], "min_turns": 2}},
+        input_length={"distribution": "lognormal", "params": {"mean": 120, "sigma": 0.4, "min": 5, "max": 200}},
+    )
+    entry["session"]["turns_per_session"] = {
+        "distribution": "lognormal",
+        "params": {"mean": 4, "sigma": 0.4, "min": 2, "max": 3},
+    }
+    (registry_dir / "synth-chat.yaml").write_text(yaml.safe_dump(entry))
+    monkeypatch.setattr(
+        sources, "_load_wildchat_conversations", lambda labels, min_turns, cap: FAKE_CONVERSATIONS
+    )
+    return registry_dir
+
+
+def test_wildchat_conversation_drives_structure(tmp_path, wildchat_registry):
+    cfg = _config([{"scenario": "synth-chat", "weight": 1.0}], num_prompts=120)
+    generate(cfg, WordTokenizer(), tmp_path / "o", wildchat_registry)
+    records = _records(tmp_path / "o")
+    by_session: dict[int, list[dict]] = {}
+    for r in records:
+        by_session.setdefault(r["session_idx"], []).append(r)
+    fake_lengths = {min(len(c), 3) for c in FAKE_CONVERSATIONS}  # clamped to max=3
+    observed = {len(turns) for turns in by_session.values()}
+    assert observed <= fake_lengths
+    assert all(len(turns) <= 3 for turns in by_session.values())
+    # content comes from the corpus, not from filler vocabulary
+    sample_record = next(r for r in records if r["turn_idx"] == 1)
+    all_followups = {c[i] for c in FAKE_CONVERSATIONS for i in range(1, len(c))}
+    assert any(r["prompt_text"].startswith(f.split()[0]) for f in all_followups for r in [sample_record])
+
+
+def test_wildchat_lengths_clamped_to_bounds(tmp_path, wildchat_registry):
+    cfg = _config([{"scenario": "synth-chat", "weight": 1.0}], num_prompts=120)
+    generate(cfg, WordTokenizer(), tmp_path / "o", wildchat_registry)
+    records = _records(tmp_path / "o")
+    assert all(r["text_tokens"] <= 200 for r in records)  # the 4000-word turn got trimmed
+    headers = [r for r in records if r["turn_idx"] == 0]
+    assert all(r["prompt_text"].startswith("[session-") for r in headers)
+
+
+def test_wildchat_byte_identity(tmp_path, wildchat_registry):
+    cfg = _config([{"scenario": "synth-chat", "weight": 1.0}], num_prompts=120)
+    a, b = tmp_path / "a", tmp_path / "b"
+    generate(cfg, WordTokenizer(), a, wildchat_registry)
+    generate(cfg, WordTokenizer(), b, wildchat_registry)
+    assert (a / POOL_FILENAME).read_bytes() == (b / POOL_FILENAME).read_bytes()
+
+
+def test_wildchat_manifest_discloses_corpus_driven_structure(tmp_path, wildchat_registry):
+    cfg = _config([{"scenario": "synth-chat", "weight": 1.0}], num_prompts=120)
+    manifest = generate(cfg, WordTokenizer(), tmp_path / "o", wildchat_registry)
+    assert any("real conversation" in a for a in manifest["classes"][0]["assumptions"])
+
+
+def test_wildchat_empty_match_aborts(tmp_path, registry_dir, monkeypatch):
+    entry = _synthetic_scenario("synth-chat", source={"kind": "wildchat", "config": {"languages": ["xx"]}})
+    (registry_dir / "synth-chat.yaml").write_text(yaml.safe_dump(entry))
+    monkeypatch.setattr(sources, "_load_wildchat_conversations", lambda labels, min_turns, cap: [])
+    cfg = _config([{"scenario": "synth-chat", "weight": 1.0}])
+    with pytest.raises(DatasetSourceError, match="no conversations matched"):
+        generate(cfg, WordTokenizer(), tmp_path / "o", registry_dir)
+
+
+def test_wildchat_row_filter():
+    row = {
+        "language": "English",
+        "conversation": [
+            {"role": "user", "content": "hi"},
+            {"role": "assistant", "content": "hello"},
+            {"role": "user", "content": "more"},
+        ],
+    }
+    assert sources._wildchat_row_matches(row, {"English"}, 2)
+    assert not sources._wildchat_row_matches(row, {"German"}, 2)
+    assert not sources._wildchat_row_matches(row, {"English"}, 3)
+
+
+def test_chat_short_turns_generates_with_fake_corpus(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        sources, "_load_wildchat_conversations", lambda labels, min_turns, cap: FAKE_CONVERSATIONS
+    )
+    cfg = _config([{"scenario": "chat-short-turns", "weight": 1.0}], num_prompts=200)
+    manifest = generate(cfg, WordTokenizer(), tmp_path / "o", SCENARIOS_DIR)
+    records = _records(tmp_path / "o")
+    assert records and manifest["classes"][0]["name"] == "chat-short-turns"
+    assert all(r["text_tokens"] <= 2000 for r in records)  # registry max bound
 
 
 def test_modality_rejection(tmp_path, registry_dir):

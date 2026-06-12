@@ -79,7 +79,7 @@ Sizes are relative complexity (S < M < L), not time promises.
 - **DoD**: pytest green; `python -m tools.common.config <yaml>` accepts the canonical
   example and rejects each violation class with a one-line error.
 
-### M1 — Dataset generator (L) — 🚧 in progress (2026-06-12: core + synthetic + longbench landed; wildchat, reasoning_trace_replay, and real-HF-download validation outstanding)
+### M1 — Dataset generator (L) — 🚧 in progress (2026-06-12: core + synthetic + longbench + wildchat landed; reasoning_trace_replay and real-HF-download validation outstanding)
 
 - **Deliverables**: `tools/benchmarker/dataset_gen/` — registry loader (rejects
   non-`[text]` modalities at load time, §10.5), mix planner (per-class sub-pools,

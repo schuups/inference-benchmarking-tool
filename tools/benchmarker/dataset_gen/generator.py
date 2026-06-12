@@ -16,7 +16,7 @@ from tools.common.config import BenchmarkConfig, MixEntry
 
 from .registry import Distribution, Scenario, Session, load_scenario
 from .sampling import class_rng, expected_mean, sample, sample_int, widen_for_thinking
-from .sources import make_source
+from .sources import ConversationSource, make_source, trim_to_tokens
 from .tokenizers import Tokenizer
 
 POOL_FILENAME = "prompts.jsonl"
@@ -104,15 +104,37 @@ def generate(
         rng_turns = class_rng(dc.seed, slug, "turns")
         rng_think = class_rng(dc.seed, slug, "thinktime")
 
+        conversational = isinstance(source, ConversationSource)
+        max_turns = plan.session.turns_per_session.params.get("max")
+
         for _ in range(plan.num_sessions):
             session_idx = next_session_idx
             next_session_idx += 1
-            n_turns = sample_int(plan.session.turns_per_session, rng_turns)
+            if conversational:
+                # §10.5: corpus turn boundaries drive the structure, clamped to
+                # the declared turns ceiling.
+                user_turns = source.conversation(rng_sel)
+                if max_turns is not None:
+                    user_turns = user_turns[: int(max_turns)]
+                n_turns = len(user_turns)
+            else:
+                n_turns = sample_int(plan.session.turns_per_session, rng_turns)
             header = _header(plan.session, session_idx)
             for turn_idx in range(n_turns):
                 length_dist = plan.input_length if turn_idx == 0 else plan.followup_input_length
-                target = sample_int(length_dist, rng_in)
-                body = source.body(max(1, target - tokenizer.count(header) if turn_idx == 0 else target), rng_sel)
+                if conversational:
+                    # real content, clamped to the distribution's max bound (§10.5)
+                    bound = length_dist.params.get("max")
+                    body = user_turns[turn_idx]
+                    if bound is not None:
+                        budget = int(bound) - (tokenizer.count(header) if turn_idx == 0 else 0)
+                        body = trim_to_tokens(body, max(1, budget), tokenizer)
+                else:
+                    target = sample_int(length_dist, rng_in)
+                    body = source.body(
+                        max(1, target - tokenizer.count(header) if turn_idx == 0 else target),
+                        rng_sel,
+                    )
                 text = f"{header} {body}" if turn_idx == 0 else body
                 think_time_ms = (
                     round(sample(plan.session.think_time_ms, rng_think), 1)
@@ -165,6 +187,11 @@ def _class_assumptions(plan: _ClassPlan) -> list[str]:
     if plan.session.think_time_ms is not None:
         out.append(
             f"think time ms: {plan.session.think_time_ms.distribution} {plan.session.think_time_ms.params}"
+        )
+    if s.source.kind == "wildchat":
+        out.append(
+            "session structure and per-turn lengths driven by real conversation "
+            "content; lengths clamped to the declared distribution max bounds (§10.5)"
         )
     return out
 
