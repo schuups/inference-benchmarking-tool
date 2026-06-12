@@ -19,7 +19,14 @@
 #SBATCH --time=03:00:00
 
 set -eo pipefail
-cd "${SLURM_SUBMIT_DIR}"
+# FirecREST invokes sbatch from its own cwd, so SLURM_SUBMIT_DIR is not the
+# staged context dir — pass BUILD_CONTEXT explicitly when submitting via API.
+BUILD_CONTEXT="${BUILD_CONTEXT:-${SLURM_SUBMIT_DIR}}"
+cd "${BUILD_CONTEXT}"
+if [ ! -f build-args.env ]; then
+    echo "build-args.env not found in ${BUILD_CONTEXT} — set BUILD_CONTEXT to the staged tools/images/vllm dir" >&2
+    exit 1
+fi
 source ./build-args.env
 
 echo "[build] alps stack ${ALPS_STACK_REPO}@${ALPS_STACK_COMMIT} on ${BASE_IMAGE}"
