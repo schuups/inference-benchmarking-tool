@@ -1,0 +1,53 @@
+# E1 — walking skeleton (IMPLEMENTATION_PLAN.md §5): pipeline validation only.
+# smoke-synthetic scenario + stock NGC image, both per the §8.2 smoke-run
+# exemption (operator decision 2026-06-12): results are NEVER findings.
+# Validate: .venv/bin/python -m tools.common.config examples/benchmark-configs/e1-walking-skeleton.yaml
+
+name: e1-walking-skeleton
+description: >
+  First end-to-end pipeline shakeout on clariden: pre-checks -> engine ->
+  primer -> sweep -> DB -> notebook. Validates the cluster halves of M4/M6/M7
+  and captures real vLLM log fixtures.
+
+deployments:
+  - target: clariden
+    backend: vllm
+    backend_version: ngc-26.04-py3
+    model: swiss-ai/Apertus-8B-Instruct-2509
+    image: "nvcr.io#nvidia/vllm:26.04-py3"   # EDF registry syntax; stock NGC (E1 exemption)
+    backend_config:
+      tensor_parallel_size: 1                 # 8B fits a single GH200
+      max_model_len: 8192
+      max_num_batched_tokens: 8192
+      gpu_memory_utilization: 0.90
+      enable_prefix_caching: true
+
+dataset_config:
+  scenario_mix:
+    - scenario: smoke-synthetic
+      weight: 1.0
+  num_prompts: 800        # > Σ λ·(warmup+measurement) = 630 expected sessions (§10.4)
+  seed: 42
+
+rate_levels: [0.5, 1.0, 2.0]   # session starts/s; single-turn => requests/s
+
+arrival_process:
+  kind: poisson
+
+routing_strategy: random
+
+phases:
+  warmup_s: 60
+  measurement_s: 120
+  drain_timeout_s: 60
+  request_timeout_s: 120
+  server_ready_timeout_s: 1800
+
+slos:                      # exercises the λ* machinery; thresholds deliberately lax
+  - { scenario: smoke-synthetic, metric: ttft_ms, percentile: p95, threshold: 2000 }
+  - { scenario: all, metric: error_rate_pct, threshold: 1.0 }
+
+system_prechecks:
+  collective_tests_version: "2.18.5"
+
+server_time_limit: "01:30:00"

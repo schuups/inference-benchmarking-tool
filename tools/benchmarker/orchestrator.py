@@ -146,9 +146,14 @@ async def run_experiment(
 
     db: ResultsDB | None = None
     try:
-        # phase 3 — §7 pre-check gate outcome + smoke mode (results.json
-        # written by run_system_prechecks.sh before the engine binary starts)
-        gate = _read_precheck_results(run_dir)
+        # phase 3 — §7 pre-check gate outcome + smoke mode. results.json is
+        # written by run_system_prechecks.sh BEFORE the engine binary starts,
+        # but AFTER the job begins running — so wait for whichever comes
+        # first: the results file (gate ran) or a healthy endpoint (gate was
+        # skipped via §7.5). The smoke flag must be known before the DB opens.
+        gate = await _await_precheck_results(
+            run_dir, endpoints, cfg.phases.server_ready_timeout_s
+        )
         if gate is not None:
             summary.precheck_gate_exit = gate.get("gate_exit_code")
             summary.smoke_test_mode = bool(gate.get("smoke_test_mode"))
@@ -242,11 +247,26 @@ async def _quality_stage(hook, stage: str, skipped: bool, endpoints, db, run_id,
     await hook(endpoints, db, run_id)
 
 
-def _read_precheck_results(run_dir: Path) -> dict | None:
+async def _await_precheck_results(
+    run_dir: Path, endpoints: list[tuple[str, str]], timeout_s: float
+) -> dict | None:
     path = run_dir / "prechecks" / "results.json"
-    if not path.exists():
-        return None
-    return json.loads(path.read_text())
+    deadline = time.monotonic() + timeout_s
+    async with aiohttp.ClientSession() as http:
+        while time.monotonic() < deadline:
+            if path.exists():
+                return json.loads(path.read_text())
+            try:  # healthy endpoint + no file => §7.5 skip (or absent gate)
+                async with http.get(f"{endpoints[0][1]}/health") as resp:
+                    if resp.status == 200:
+                        return None
+            except aiohttp.ClientError:
+                pass
+            await asyncio.sleep(5)
+    raise RunAborted(
+        f"neither pre-check results nor a healthy endpoint within {timeout_s}s "
+        f"(engine bring-up failed before §7 completed?)"
+    )
 
 
 def _step_config(cfg: BenchmarkConfig, deployment: Deployment, rate: float, endpoints) -> StepConfig:
