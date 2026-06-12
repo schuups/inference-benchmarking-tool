@@ -79,13 +79,13 @@ Sizes are relative complexity (S < M < L), not time promises.
 - **DoD**: pytest green; `python -m tools.common.config <yaml>` accepts the canonical
   example and rejects each violation class with a one-line error.
 
-### M1 — Dataset generator (L)
+### M1 — Dataset generator (L) — 🚧 in progress (2026-06-12: core + synthetic + longbench landed; wildchat, reasoning_trace_replay, and real-HF-download validation outstanding)
 
 - **Deliverables**: `tools/benchmarker/dataset_gen/` — registry loader (rejects
   non-`[text]` modalities at load time, §10.5), mix planner (per-class sub-pools,
   `num_prompts` split ∝ `weight × E[turns_per_session]`), sources in order
   **synthetic → longbench → wildchat → reasoning_trace_replay** (§10.5), session builder
-  (`append_delta`, turns, think-time fields), per-class seeding (§10.8), global unique
+  (`append_delta`, turns, think-time, `followup_input_length` §10.3), per-class seeding (§10.8), global unique
   headers (§10.6), `thinking: true` widening, tokenizer handling (§10.6), source-failure
   abort (§10.1), manifest emitter (§13.7: `mix` / `classes[]` / `run_assumptions`,
   including the derived per-class expected request rates per §11.3 *What λ counts*).

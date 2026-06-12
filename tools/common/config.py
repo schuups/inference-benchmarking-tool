@@ -116,14 +116,6 @@ class MixEntry(StrictModel):
     session: dict | None = None
     source_overrides: dict | None = None
 
-    @field_validator("scenario")
-    @classmethod
-    def _registered(cls, v: str) -> str:
-        if not (SCENARIOS_DIR / f"{v}.yaml").is_file():
-            known = sorted(p.stem for p in SCENARIOS_DIR.glob("*.yaml"))
-            raise ValueError(f"unregistered scenario '{v}' (registered: {known})")
-        return v
-
 
 class DatasetConfig(StrictModel):
     scenario_mix: list[MixEntry] = Field(min_length=1)
@@ -260,6 +252,18 @@ class BenchmarkConfig(StrictModel):
         return self
 
 
+def validate_scenarios_registered(
+    cfg: BenchmarkConfig, registry_dir: Path = SCENARIOS_DIR
+) -> None:
+    """Every mix entry must name a registered scenario (§10.3/§10.4)."""
+    known = sorted(p.stem for p in registry_dir.glob("*.yaml"))
+    for entry in cfg.dataset_config.scenario_mix:
+        if entry.scenario not in known:
+            raise ValueError(
+                f"unregistered scenario '{entry.scenario}' (registered: {known})"
+            )
+
+
 def validate_against_globals(cfg: BenchmarkConfig, glob: GlobalConfig) -> None:
     """Cross-checks needing the cluster catalogue (§5.1)."""
     for i, dep in enumerate(cfg.deployments):
@@ -279,10 +283,13 @@ def validate_against_globals(cfg: BenchmarkConfig, glob: GlobalConfig) -> None:
 
 
 def load_benchmark_config(
-    path: Path, global_config: GlobalConfig | None = None
+    path: Path,
+    global_config: GlobalConfig | None = None,
+    registry_dir: Path = SCENARIOS_DIR,
 ) -> BenchmarkConfig:
     with open(path) as f:
         cfg = BenchmarkConfig.model_validate(yaml.safe_load(f))
+    validate_scenarios_registered(cfg, registry_dir)
     validate_against_globals(cfg, global_config or load_global_config())
     return cfg
 

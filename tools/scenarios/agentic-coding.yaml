@@ -32,6 +32,11 @@ session:
   turns_per_session:
     distribution: lognormal
     params: { mean: 6, sigma: 0.5, min: 2, max: 24 }
+  followup_input_length:
+    distribution: lognormal
+    # PROVISIONAL — synthesized tool results injected as the next turn's prompt
+    # (§10.7): short confirmations up to large test/build outputs, heavy-tailed.
+    params: { mean: 1500, sigma: 1.0, min: 50, max: 16000 }
   prefix_strategy: append_delta      # only supported strategy (see §10.7)
   think_time_ms:
     distribution: lognormal

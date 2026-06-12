@@ -688,6 +688,7 @@ scenarios).
 | `thinking` | Optional boolean; widens output sampling per §10.6. Default `false`. |
 | `session.mode` | `open_loop` \| `sequential` (§10.7). |
 | `session.turns_per_session` | Distribution (same shapes as `input_length`). |
+| `session.followup_input_length` | Optional distribution for the input length of follow-up turns (`turn_idx ≥ 1`); defaults to `input_length`. Lets returning-user scenarios pair a large turn-0 context with short follow-ups (§10.6). |
 | `session.prefix_strategy` | `append_delta` (only supported value; §10.7). |
 | `session.think_time_ms` | Distribution; paces follow-up turns in **both** session modes — anchored at the previous turn's send time (`open_loop`) or response time (`sequential`); see §10.7. Required for multi-turn scenarios. |
 | `manifest.modelled` | Human-authored list of what the scenario explicitly represents. |
@@ -769,7 +770,10 @@ holds pool-wide, not merely within one class.
 **Length distributions.** `input_length` shape is per-scenario, declared in the registry
 (§10.3). Supported: `lognormal` (truncated), `normal` (truncated), `fixed`. Heavy-tailed
 `lognormal` matches observed LLM-workload distributions and is the recommended default;
-`fixed` is for isolation studies.
+`fixed` is for isolation studies. `input_length` governs turn 0 (and single-turn
+prompts); follow-up turns sample from `session.followup_input_length` when the scenario
+declares it, falling back to `input_length` otherwise — so returning-user scenarios pair
+a heavy initial context with short follow-ups instead of repeating turn-0-sized prompts.
 
 **Output length control.** Each prompt carries a target `max_tokens` sampled from
 `output_length`. Behaviour is governed by `output_length_mode` (§10.4):
@@ -871,7 +875,7 @@ side-effect of running:
 |---|---|
 | `mix` | The `scenario_mix` actually consumed: `[{scenario, weight}, …]`, plus the resulting expected per-request share per class (derived from `weight × E[turns_per_session]`). |
 | Per-class `name`, `summary`, `maturity`, `modelled`, `not_modelled` | Copied verbatim from each class's scenario registry entry. |
-| Per-class `assumptions` | Auto-filled from the per-class config actually consumed: input / output length distributions; turns-per-session distribution; session mode; prefix strategy; source `kind` + relevant source config. |
+| Per-class `assumptions` | Auto-filled from the per-class config actually consumed: input / output (and follow-up, when distinct) length distributions; turns-per-session distribution; session mode; prefix strategy; source `kind` + relevant source config. |
 | `run_assumptions` | Auto-filled run-level facts: arrival process + parameters (§11.3); routing strategy (§11.4); `output_length_mode` (§10.6); master seed; tokenizer ID. |
 
 Together these are sufficient to reconstruct what the run measured without re-reading the

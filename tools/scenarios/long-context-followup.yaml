@@ -32,6 +32,11 @@ session:
   turns_per_session:
     distribution: lognormal
     params: { mean: 3, sigma: 0.3, min: 2, max: 8 }
+  followup_input_length:
+    distribution: lognormal
+    # PROVISIONAL — short follow-up prompts after the heavy turn-0 context
+    # (the scenario's defining trait); validate against telemetry.
+    params: { mean: 300, sigma: 0.5, min: 20, max: 2000 }
   prefix_strategy: append_delta
   think_time_ms:
     distribution: lognormal

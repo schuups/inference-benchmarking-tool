@@ -11,6 +11,7 @@ from tools.common.config import (
     load_benchmark_config,
     load_global_config,
     validate_against_globals,
+    validate_scenarios_registered,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -30,6 +31,7 @@ def canonical_dict():
 
 def _validate(d, globals_cfg):
     cfg = BenchmarkConfig.model_validate(d)
+    validate_scenarios_registered(cfg)
     validate_against_globals(cfg, globals_cfg)
     return cfg
 
@@ -56,6 +58,7 @@ def test_weights_must_sum_to_one(canonical_dict, globals_cfg):
 
 def test_unregistered_scenario_rejected(canonical_dict, globals_cfg):
     canonical_dict["dataset_config"]["scenario_mix"][0]["scenario"] = "no-such-scenario"
+    canonical_dict["slos"] = [s for s in canonical_dict["slos"] if s["scenario"] != "agentic-coding"]
     with pytest.raises(ValueError, match="unregistered scenario"):
         _validate(canonical_dict, globals_cfg)
 

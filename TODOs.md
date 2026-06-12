@@ -87,6 +87,10 @@
   `wildchat`. LMSYS-Chat-1M brings per-message source-model identity (Vicuna / Llama /
   GPT family) — useful for splitting chat scenarios by source-model family. OASST1
   brings a smaller, fully-open (Apache-2.0) tree-structured conversation corpus.
+- [ ] **Validate provisional `followup_input_length` values** (§10.3) —
+  `long-context-followup` (~300-token follow-ups) and `agentic-coding` (~1.5K
+  heavy-tailed tool results) carry PROVISIONAL follow-up length distributions;
+  validate against telemetry alongside the think-time defaults below.
 - [ ] **Think-time distribution defaults** (§10.3) — validate the provisional
   `think_time_ms` values now in the registry (`chat-short-turns` ~1.5 s reading delay,
   `long-context-followup` ~4 s, `agentic-coding` ~3 s heavy-tailed tool-execution gap —
