@@ -46,7 +46,8 @@ None are descoped.
 | `tools/benchmarker/db.py` (seven §13 tables, WAL + single-writer, smoke-mode suppression, NDJSON ingestion) + `tools/benchmarker/hw_sampler.py` (stdlib-only, engine-node placement) | Done (M3, 2026-06-12) |
 | `tools/benchmarker/prechecks/` (runner + parsers + §7.3/§7.4 grading) and `tools/planner/` + `tools/templates/` (EDF, engine/benchmarker sbatch, K8s engine + benchmarker pod) | Laptop halves done (M4/M6, 2026-06-12); cluster validation at E1/E5 |
 | `tools/reports/` (panels lib, generated `experiments/template_report.ipynb`, headless executor) + `tools/images/vllm/` (vendored Alps stack + SLURM build job — build iterating on clariden) | M9 laptop half done; M5 in progress (2026-06-12) |
-| Coordinator, Cleaner, Benchmarker orchestrator | **Not implemented** |
+| `tools/benchmarker/orchestrator.py` + `main.py` (phase sequencing, §7.4 gate + §7.2 smoke handling, sampler ingestion; mock-launcher tested) | Laptop half done (M7, 2026-06-12) |
+| Coordinator, Cleaner, quality-eval runner | **Not implemented** |
 
 ## 3. Build strategy
 
@@ -186,7 +187,7 @@ Sizes are relative complexity (S < M < L), not time promises.
   `run_system_prechecks && exec <engine>` concatenation, and the M3 sampler
   backgrounding in the engine container command.
 
-### M7 — Benchmarker orchestrator (M–L) *(added by review H1)*
+### M7 — Benchmarker orchestrator (M–L) *(added by review H1)* — 🚧 laptop half done 2026-06-12 (full phase sequencing + gate/smoke handling + finalisation, mock-launcher integration tests; SlurmEngineLauncher and the §7.4 operator warn-pause [M8] validated at E1; §12.5 stages run as loud no-ops until M11)
 
 - **Deliverables**: `tools/benchmarker/main.py` — the cluster-side driver that owns the
   §1 phase sequencing: run dataset generation → **submit the inference deployment(s)

@@ -115,7 +115,7 @@ def render_experiment(
     exp_dir.mkdir(parents=True, exist_ok=True)
     shutil.copy(cfg_path, exp_dir / "benchmark_config.yaml")
 
-    for deployment in cfg.deployments:
+    for deployment_index, deployment in enumerate(cfg.deployments):
         cluster = glob.clusters[deployment.target]
         run_id = make_run_id(deployment.model, deployment.backend, deployment.target, now=now)
         run_dir = exp_dir / run_id
@@ -123,6 +123,7 @@ def render_experiment(
         gpus = total_gpus(deployment)
         context = {
             "run_id": run_id,
+            "deployment_index": deployment_index,
             "run_id_slug": re.sub(r"[^a-z0-9-]+", "-", run_id.lower()).strip("-"),
             "model_slug": model_slug(deployment.model),
             "cluster": deployment.target,

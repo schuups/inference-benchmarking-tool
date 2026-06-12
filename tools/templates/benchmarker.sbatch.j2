@@ -21,4 +21,5 @@ exec python3 -m tools.benchmarker.main \
     --config {{ run_dir_remote }}/benchmark_config.yaml \
     --run-id {{ run_id }} \
     --run-dir {{ run_dir_remote }} \
-    --engine-sbatch {{ run_dir_remote }}/engine.sbatch
+    --engine-sbatch {{ run_dir_remote }}/engine.sbatch \
+    --deployment-index {{ deployment_index }}
