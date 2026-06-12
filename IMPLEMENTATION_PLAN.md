@@ -43,7 +43,8 @@ None are descoped.
 | `tools/common/` (global.yaml §2.3, benchmark-YAML schema + CLI, run-ID §6.2) + `examples/benchmark-configs/mixed-80-20.yaml` + `tools/tests/` (20 tests) | Done (M0, 2026-06-12) |
 | `tools/benchmarker/dataset_gen/` (registry loader, seeded sampling, all four §10.5 sources, manifest emitter, offline CLI) — validated against real LongBench / WildChat / gsm8k downloads | Done (M1, 2026-06-12) |
 | `tools/benchmarker/load_gen/` (arrival, client + §12.1 taxonomy, session scheduler with §11.2 phase accounting, `server_stats` scraper, readiness/model-load/primer) + `tools/testing/mock_openai_server.py` | Done (M2, 2026-06-12) |
-| Planner, Coordinator, Cleaner, Reports generator, Benchmarker (orchestrator, prechecks runner, hw sampler, results DB) | **Not implemented** |
+| `tools/benchmarker/db.py` (seven §13 tables, WAL + single-writer, smoke-mode suppression, NDJSON ingestion) + `tools/benchmarker/hw_sampler.py` (stdlib-only, engine-node placement) | Done (M3, 2026-06-12) |
+| Planner, Coordinator, Cleaner, Reports generator, Benchmarker (orchestrator, prechecks runner) | **Not implemented** |
 
 ## 3. Build strategy
 
@@ -125,7 +126,7 @@ Sizes are relative complexity (S < M < L), not time promises.
   (event-loop lag guard), demonstrating the target λ range is generated without client
   bottleneck.
 
-### M3 — Results DB and hardware sampler (M)
+### M3 — Results DB and hardware sampler (M) — ✅ done 2026-06-12 (DCGM profiling counters emit NULL until wired + fixture-tested on a GH200 node at E1; rocm-smi parse best-effort until beverin)
 
 - **Deliverables**: `tools/benchmarker/db.py` — the six §13 tables, column-for-column,
   with a concurrency design (WAL mode + single-writer queue, or per-producer DB files

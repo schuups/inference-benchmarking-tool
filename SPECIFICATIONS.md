@@ -1223,6 +1223,7 @@ One row per issued request — the per-request latency record.
 | `rate_lambda` | REAL | λ value (session starts/s; §11.3) of the sweep step this request belongs to. |
 | `request_id` | INTEGER | Per-rate-level request index (monotonic). |
 | `session_idx` | INTEGER | Session this request belongs to (§10.7). Shared by every turn of the session; enables grouping per-session for session-affinity routing analysis (§11.4). For single-turn scenarios equals the request's underlying prompt index. |
+| `instance_id` | TEXT | Instance that served this request (§13.2). Required by routing-strategy analysis (§11.4): per-instance load and prefix-cache locality under `session_affinity` vs `random` are not reconstructible without it. |
 | `scenario` | TEXT | Workload-class slug of the session this request belongs to (§10.4, §10.7). Constant across a session's turns; the key for per-class group-bys (§12.2, §12.4, §14.1). |
 | `turn_idx` | INTEGER | 0-based position of this request within its session (§10.7). `0` for the first turn (and for every request in single-turn scenarios); `1` for the first follow-up; etc. Lets reports plot per-turn metrics directly (e.g. "TTFT vs turn index" to visualise prefix-cache benefit on follow-up turns) without reconstructing the order from timestamps. |
 | `issued_at_ms` | REAL | Milliseconds from the sweep-step start at which the request was sent. Lets reports derive measurement-window membership (§11.2) and `session_e2e_ms` (§12.2) without extra state. |
