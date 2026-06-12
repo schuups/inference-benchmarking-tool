@@ -1,0 +1,92 @@
+# syntax=docker/dockerfile:1
+
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+ARG OCI_SOURCE="unknown"
+ARG OCI_REVISION="unknown"
+ARG OCI_CREATED="unknown"
+ARG OCI_DESCRIPTION="unknown"
+ARG CSCS_ALPS_GIT_COMMIT_SHORT="unknown"
+
+LABEL org.opencontainers.image.source="${OCI_SOURCE}" \
+      org.opencontainers.image.revision="${OCI_REVISION}" \
+      org.opencontainers.image.created="${OCI_CREATED}" \
+      org.opencontainers.image.description="${OCI_DESCRIPTION}" \
+      com.cscs.alps.git.repo="${OCI_SOURCE}" \
+      com.cscs.alps.git.commit="${OCI_REVISION}" \
+      com.cscs.alps.git.commit_short="${CSCS_ALPS_GIT_COMMIT_SHORT}"
+
+ARG REMOVE_HPCX_DIRS=""
+
+ARG XPMEM_REF=3bcab55479489fdd93847fa04c58ab16e9c0b3fd
+ARG GDRCOPY_VER=2.5.1
+
+ARG CASSINI_HEADERS_VERSION=release/shs-13.0.0
+ARG CXI_DRIVER_VERSION=release/shs-13.0.0
+ARG LIBCXI_VERSION=release/shs-13.0.0
+
+ARG LIBFABRIC_COMMIT=79fd4514977a8f15844fbe26df9f5930eb96311a
+ARG LIBFABRIC_PATCH="libfabric/prov_cxi_netns_support.79fd451.patch"
+
+#ARG NCCL_VER=2.29.7-1
+ARG NCCL_VER=2.28.7-1
+ARG NCCL_PATCH="nccl/net.cc.2.29.7-1.patch"
+
+ARG UCX_VERSION=1.20.0
+ARG UCC_VERSION=1.7.0
+ARG OMPI_VER=5.0.10
+
+#ARG AWS_OFI_NCCL_COMMIT=394ae7b20dd0e6b4e5f63652e15e9da100d5fe83
+#ARG AWS_OFI_NCCL_PATCH="aws-ofi-nccl/endpoint_mr.394ae7b.patch"
+ARG AWS_OFI_NCCL_COMMIT=93fa84ca880325013b2f639356bbb60f075148af
+ARG AWS_OFI_NCCL_PATCH=""
+
+ARG NVSHMEM_VER=3.6.5-0
+ARG NVSHMEM_PATCH="nvshmem/requirements-v3.6.5-0.patch"
+
+ARG NCCL_TESTS_VER=2.18.2
+ARG OSU_VERSION=7.5.2
+
+COPY patches/ /opt/alps/patches/
+COPY common/install-alps-hpc-stack.sh /opt/alps/install-alps-hpc-stack.sh
+
+RUN set -eux; \
+    chmod +x /opt/alps/install-alps-hpc-stack.sh; \
+    /opt/alps/install-alps-hpc-stack.sh
+
+COPY common/alps-runtime.env /opt/alps/env/alps-runtime.env
+
+RUN set -eux; \
+    chmod 0644 /opt/alps/env/alps-runtime.env; \
+    printf '%s\n' \
+      'if [ -f /opt/alps/env/alps-versions.env ]; then . /opt/alps/env/alps-versions.env; fi' \
+      'if [ -f /opt/alps/env/alps-runtime.env ]; then . /opt/alps/env/alps-runtime.env; fi' \
+      > /etc/profile.d/99-alps-env.sh
+
+COPY common/alps-runtime-warning.txt /opt/alps/env/alps-runtime-warning.txt
+COPY common/alps-runtime-warning.sh /opt/alps/env/alps-runtime-warning.sh
+COPY common/alps-runtime-warning.py /opt/alps/env/alps-runtime-warning.py
+COPY common/install-alps-runtime-warnings.sh /opt/alps/env/install-alps-runtime-warnings.sh
+
+RUN set -eux; \
+    chmod +x /opt/alps/env/install-alps-runtime-warnings.sh; \
+    /opt/alps/env/install-alps-runtime-warnings.sh
+
+# Optional image-specific fixes (late hooks)
+ARG NGC_VARIANT_DIR=""
+COPY variants/${NGC_VARIANT_DIR}/ /opt/alps/ngc-variant/
+# Run any hooks if present
+RUN set -eux; \
+    if [ -d /opt/alps/ngc-variant/hooks.d ]; then \
+      for f in /opt/alps/ngc-variant/hooks.d/*.sh; do \
+        [ -e "$f" ] || break; \
+        echo "Running variant hook: $f"; \
+        chmod +x "$f"; \
+        "$f"; \
+      done; \
+    else \
+      echo "No variant hooks for NGC_VARIANT_DIR=${NGC_VARIANT_DIR}"; \
+    fi

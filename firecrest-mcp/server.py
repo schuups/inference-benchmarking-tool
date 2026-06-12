@@ -23,6 +23,7 @@ client = fc.v2.AsyncFirecrest(
 # System information
 # ---------------------------------------------------------------------------
 
+
 @mcp.tool()
 async def get_server_version() -> Optional[str]:
     """Get the FirecREST server version.
@@ -105,6 +106,7 @@ async def get_userinfo(system_name: str) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 # File information
 # ---------------------------------------------------------------------------
+
 
 @mcp.tool()
 async def list_files(
@@ -272,6 +274,7 @@ async def stat_path(
 # File attribute operations
 # ---------------------------------------------------------------------------
 
+
 @mcp.tool()
 async def chmod(system_name: str, path: str, mode: str) -> Dict[str, Any]:
     """Change the permissions of a file or directory on an HPC system.
@@ -318,6 +321,7 @@ async def chown(
 # ---------------------------------------------------------------------------
 # File manipulation operations
 # ---------------------------------------------------------------------------
+
 
 @mcp.tool()
 async def mkdir(
@@ -462,6 +466,7 @@ async def remove_path(
 # File transfer
 # ---------------------------------------------------------------------------
 
+
 @mcp.tool()
 async def upload_file(
     system_name: str,
@@ -530,6 +535,7 @@ async def download_file(
 # ---------------------------------------------------------------------------
 # Archive operations
 # ---------------------------------------------------------------------------
+
 
 @mcp.tool()
 async def compress_path(
@@ -608,6 +614,7 @@ async def extract_archive(
 # ---------------------------------------------------------------------------
 # Job management
 # ---------------------------------------------------------------------------
+
 
 @mcp.tool()
 async def submit_job(
@@ -758,9 +765,10 @@ async def wait_for_job(
 # Server entry point
 # ---------------------------------------------------------------------------
 
+
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--host", default="0.0.0.0")
+    parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8888)
     return parser.parse_args()
 

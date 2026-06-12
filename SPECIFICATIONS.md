@@ -559,7 +559,10 @@ subset**.
   `smoke-synthetic` scenario (single-turn, synthetic source, `exploratory`) may be run
   against any model purely to validate the pipeline end-to-end (e.g. experiment E1 in
   `IMPLEMENTATION_PLAN.md`); its results are never published as findings or used for
-  capacity / Pareto / procurement claims.
+  capacity / Pareto / procurement claims. The same exemption extends to the **engine
+  image**: a pipeline-validation run may deploy a stock vendor image (e.g. NGC vLLM)
+  while the repo-built lineage iterates; every graded run uses repo-built JFrog images
+  per §8.1.
 
 ---
 
