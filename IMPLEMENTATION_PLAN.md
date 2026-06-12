@@ -45,7 +45,8 @@ None are descoped.
 | `tools/benchmarker/load_gen/` (arrival, client + §12.1 taxonomy, session scheduler with §11.2 phase accounting, `server_stats` scraper, readiness/model-load/primer) + `tools/testing/mock_openai_server.py` | Done (M2, 2026-06-12) |
 | `tools/benchmarker/db.py` (seven §13 tables, WAL + single-writer, smoke-mode suppression, NDJSON ingestion) + `tools/benchmarker/hw_sampler.py` (stdlib-only, engine-node placement) | Done (M3, 2026-06-12) |
 | `tools/benchmarker/prechecks/` (runner + parsers + §7.3/§7.4 grading) and `tools/planner/` + `tools/templates/` (EDF, engine/benchmarker sbatch, K8s engine + benchmarker pod) | Laptop halves done (M4/M6, 2026-06-12); cluster validation at E1/E5 |
-| Coordinator, Cleaner, Reports generator, Benchmarker orchestrator | **Not implemented** |
+| `tools/reports/` (panels lib, generated `experiments/template_report.ipynb`, headless executor) + `tools/images/vllm/` (vendored Alps stack + SLURM build job — build iterating on clariden) | M9 laptop half done; M5 in progress (2026-06-12) |
+| Coordinator, Cleaner, Benchmarker orchestrator | **Not implemented** |
 
 ## 3. Build strategy
 
@@ -216,7 +217,7 @@ Sizes are relative complexity (S < M < L), not time promises.
   still tears down all labelled resources; PVC retention honored (§6.6); a >100 MB
   fixture DB round-trips intact through the staged-transfer download.
 
-### M9 — Reports generator (M)
+### M9 — Reports generator (M) — 🚧 laptop half done 2026-06-12 (panels lib + generated template + headless executor, fixture-verified λ\*/users/boundary rules; outstanding: execution against the real E1 DB, and the cross-run capacity-vs-quality table which needs the centralized DB / curated-report step)
 
 - **Deliverables**: `experiments/template_report.ipynb` with every §14.1 panel —
   scenario/mix manifest panel, pre-checks table, model-load breakdown, TTFT/ITL vs λ
