@@ -139,6 +139,7 @@ def render_experiment(
             "scratch_base": glob.scratch_base,
             "run_dir_remote": f"{glob.scratch_base}/{run_id}",
             "tools_remote": f"{glob.scratch_base}/{run_id}/tools",
+            "benchmarker_venv": f"{glob.scratch_base}/benchmarker-venv",  # decision 3 (shared)
             "collective_tests_cache_dir": glob.collective_tests_cache_dir,
             "prechecks": cfg.system_prechecks,
             "precheck_scope": precheck_scope(deployment, glob),

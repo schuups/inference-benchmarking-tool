@@ -1,0 +1,18 @@
+# Benchmarker cluster runtime dependencies (decision 3: staged uv venv on capstor).
+#
+# Installed once into {scratch_base}/benchmarker-venv by benchmarker.sbatch
+# (`uv venv` + `uv pip install -r` on first run; delete the venv to force a rebuild).
+# The live tools/ code is mounted from capstor and added to PYTHONPATH — only deps
+# live here, so code iterates without touching the venv.
+#
+# Versions are floored, not pinned; capture `uv pip freeze` from the first E1 build
+# and pin exact versions here for reproducibility (tracked in TODOs).
+
+pydantic>=2          # benchmark-YAML schema (tools/common/config.py)
+pyyaml               # config + scenario registry
+aiohttp              # load generator + quality grader (streaming client)
+transformers         # target-model tokenizer (dataset_gen.tokenizers.HFTokenizer)
+huggingface_hub      # longbench / wildchat source downloads (dataset_gen.sources)
+datasets             # reasoning_trace_replay source
+pyarrow              # wildchat parquet reads
+lm-eval              # Stage-A/B quality evaluation (quality_eval.lm_eval_backend)

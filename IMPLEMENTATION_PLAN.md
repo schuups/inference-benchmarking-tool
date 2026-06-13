@@ -328,8 +328,14 @@ DBs alongside M2/M3.
    `https://jfrog.svc.cscs.ch/artifactory/ml/inference` (in `global.yaml`). Operator
    action open: fix the local `jf` server config (doubled `/artifactory` in the stored
    Artifactory URL); a §3 pre-flight row now guards this.
-3. **Code-to-cluster delivery** — proposal: baked into the benchmarker image (M5), git
-   clone as fallback.
+3. **Code-to-cluster delivery / Benchmarker runtime** — **resolved 2026-06-13 (operator
+   decision)**: deps from a **staged uv venv on capstor** (`{scratch_base}/benchmarker-venv`,
+   built once by `benchmarker.sbatch`: `uv venv` + `uv pip install -r
+   tools/benchmarker/requirements.txt`); the **live `tools/` code is mounted from capstor**
+   (`{run_dir_remote}/tools`, staged by the Coordinator, added to PYTHONPATH) so code iterates
+   without rebuilds — same pattern the engine job already uses for the precheck/sampler
+   scripts. Needs compute-node egress for the one-time `uv pip install` (or a seeded wheel
+   cache); exact versions pinned after E1's first build (TODOs).
 4. **Centralized results DB shape** — **resolved 2026-06-13 (M8)**: `experiments/results.db`,
    per-run DBs merged on download via `tools/coordinator/merge.py` (`ATTACH` + delete-then-
    insert, idempotent by `run_id`); per-run files remain the §13.8 provenance artifacts.

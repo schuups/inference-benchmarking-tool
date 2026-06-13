@@ -100,6 +100,12 @@ def test_slurm_render_canonical(tmp_path, canonical_dict, globals_cfg):
     # M7: the orchestrator is told which deployment it is driving (§15 sweep)
     assert "--deployment-index 0" in benchmarker
 
+    # decision 3: deps from a staged uv venv on capstor; live tools/ on PYTHONPATH
+    assert "uv venv" in benchmarker
+    assert "benchmarker/requirements.txt" in benchmarker
+    assert '"$VENV/bin/python" -m tools.benchmarker.main' in benchmarker
+    assert "PYTHONPATH=" in benchmarker
+
     # §7.2 concatenation + M3 sampler backgrounding in the same container session
     assert "run_system_prechecks.sh &&" in engine
     assert "hw_sampler.py" in engine and "& " not in engine.split("hw_sampler.py")[0].splitlines()[-1]

@@ -17,7 +17,18 @@
 export HUGGING_FACE_HUB_TOKEN=$(cat ~/.hf_token 2>/dev/null || true)
 export HF_HOME={{ scratch_base }}/hf-cache
 
-exec python3 -m tools.benchmarker.main \
+# Runtime (open decision 3): deps from a staged uv venv on capstor, built once;
+# the live tools/ code is mounted from capstor at {{ tools_remote }} (staged by the
+# Coordinator) and put on PYTHONPATH, so code iterates without rebuilding the venv.
+VENV="{{ benchmarker_venv }}"
+if [ ! -x "$VENV/bin/python" ]; then
+    echo "[benchmarker] building staged venv at $VENV"
+    uv venv "$VENV"
+    uv pip install --python "$VENV/bin/python" -r "{{ tools_remote }}/benchmarker/requirements.txt"
+fi
+export PYTHONPATH="{{ run_dir_remote }}:${PYTHONPATH:-}"   # so `import tools` resolves
+
+exec "$VENV/bin/python" -m tools.benchmarker.main \
     --config {{ run_dir_remote }}/benchmark_config.yaml \
     --run-id {{ run_id }} \
     --run-dir {{ run_dir_remote }} \

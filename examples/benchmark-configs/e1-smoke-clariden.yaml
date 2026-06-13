@@ -1,0 +1,63 @@
+# E1 — walking-skeleton pipeline validation (IMPLEMENTATION_PLAN.md E1).
+#
+# smoke-synthetic on Apertus-8B, 1× GH200 (clariden), stock vLLM image (§8.2
+# pipeline-validation exemption: stock image allowed, results are NEVER findings).
+# Single node exercises no Slingshot/CXI path, so the vanilla image is sufficient.
+# Validate the render with:
+#   .venv/bin/python -m tools.planner.render examples/benchmark-configs/e1-smoke-clariden.yaml --out /tmp/e1
+
+name: e1-smoke-clariden
+description: >
+  E1 end-to-end pipeline shakeout: pre-checks → engine → primer → Stage-A gate →
+  3-λ sweep → Stage-B (skipped) → DB → notebook. Results are pipeline validation
+  only, never published as findings (§8.2 smoke exemption).
+
+deployments:
+  - target: clariden
+    backend: vllm
+    backend_version: "0.22.1"
+    model: swiss-ai/Apertus-8B-Instruct-2509
+    image: docker.io/vllm/vllm-openai:v0.22.1-aarch64-ubuntu2404   # stock (E1 exemption)
+    backend_config:
+      tensor_parallel_size: 1          # single GH200 — no cross-node fabric
+      max_model_len: 16384             # covers smoke-synthetic's ≤8K input + output
+      gpu_memory_utilization: 0.90
+
+dataset_config:
+  scenario_mix:
+    - scenario: smoke-synthetic        # synthetic source: no HF dataset egress
+      weight: 1.0
+  num_prompts: 200
+  seed: 1234
+  output_length_mode: forced
+
+rate_levels: [0.5, 1.0, 2.0]           # 3 λ levels (session starts/s, §11.3)
+
+arrival_process:
+  kind: poisson
+
+routing_strategy: random
+
+phases:
+  warmup_s: 60
+  measurement_s: 120
+  drain_timeout_s: 120
+  request_timeout_s: 120
+  server_ready_timeout_s: 1800
+
+slos:                                  # loose — E1 validates the pipeline, not performance
+  - { scenario: smoke-synthetic, metric: ttft_ms, percentile: p95, threshold: 2000 }
+  - { scenario: all,             metric: error_rate_pct,            threshold: 5.0 }
+
+quality_eval:                          # exercise §12.5 Stage A end-to-end (lm-eval in the venv)
+  gate:
+    suite: gsm8k
+    sample_size: 20                    # minutes, not hours
+    floor: 0.0                         # E1 validates the gate path, not the score
+  skip_quality_compare: true           # single deployment config — nothing to compare
+
+system_prechecks:
+  collective_tests_version: "2.17.1"
+  # clariden references are TBD until E2a → the §7.4 gate logs informational only
+
+server_time_limit: "02:00:00"          # shared by engine + benchmarker (§5.1)
