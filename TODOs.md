@@ -62,10 +62,23 @@
 
 ## Candidate models
 
+v1 focuses on **Apertus-70B** (with **Apertus-8B** as its speculative-decoding draft)
+and **Kimi-K2.6** only. Other models stay here until they come under active measurement,
+at which point they are promoted into SPECIFICATIONS.md §8.2 (planner-template +
+benchmark-YAML change per §8.2).
+
+- [ ] **DeepSeek-V4-Pro** (`deepseek-ai/DeepSeek-V4-Pro`) — target. 1,048,576-token (1M)
+  context; MoE, 1.6 T total / 49 B activated (expert routing exercises §15.1 *MoE expert
+  routing*). Three reasoning modes *Non-think* / *Think High* / *Think Max* via the
+  `thinking_mode` runtime parameter (*Think Max* needs context ≥ 384 K — clamp
+  `max_model_len` accordingly); DeepSeek custom encoding (`encoding_dsv4`; `<think>` /
+  `</think>` delimiters). License MIT; recommended sampling `temperature=1.0`,
+  `top_p=1.0`; precision FP4 (MoE expert params) + FP8 (other) mixed. Scenarios:
+  `agentic-coding`, `chat-short-turns`, `long-context-followup`. See also the
+  `thinking_mode` BackendConfig-knob item above.
 - [ ] **GLM-5.1** (Zhipu AI) — 202K context, "rumination" multi-iteration self-revision,
   long autonomous loops (up to 8 h), unified multimodal pipeline, multi-step agentic
-  tool use. Promote into SPECIFICATIONS.md §8.2 when it comes under active measurement
-  (planner-template + benchmark-YAML change per §8.2).
+  tool use.
 
 ## Docker Image Builds
 
@@ -80,13 +93,13 @@
   libfabric, CXI, NVSHMEM, vLLM, etc. inside the image (e.g. a
   `/opt/alps/env/alps-versions.env` queryable at runtime and surfaced in the
   experiment provenance).
-- [ ] **ROCm / RCCL engine image for `beverin` (MI300A)** — the AMD equivalent of
-  `tools/images/vllm/`: extend a ROCm vLLM base with the Alps network stack
-  (RCCL + rccl-tests instead of NCCL/nccl-tests, ROCm instead of CUDA), still over
-  Slingshot 11 / CXI. The §9.0 launch path (CXI hook disabled, `--network=disable_rdzv_get`,
-  PMIx) and the `alps_extended_image` flag already cover it — only the build phases
-  differ. Add `tools/images/vllm/` ROCm variant (or a sibling tree) + the rccl-tests
-  pre-check path (§7 already references `ROCm/rccl-tests`).
+- [ ] **ROCm / RCCL engine image for `beverin` (MI300A)** — the AMD equivalent of the
+  NVIDIA engine image: extend a ROCm vLLM base with the HPC network stack (RCCL +
+  rccl-tests instead of NCCL/nccl-tests, ROCm instead of CUDA), still over Slingshot 11
+  / CXI. The launch path (CXI hook disabled, `--network=disable_rdzv_get`, PMIx) is
+  CXI-level and identical to the NVIDIA image — only the build phases differ. Add the
+  ROCm image tree + the rccl-tests pre-check path (§7 already references
+  `ROCm/rccl-tests`). Fits the image-folder restructuring (NVIDIA vs AMD).
 
 ## Prompt / Dataset Generation
 

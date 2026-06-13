@@ -501,11 +501,6 @@ this repository**. For each backend:
 The image **registry** is the **CSCS JFrog Artifactory**. Built images are pushed there
 and referenced from the engine EDF / K8s manifest via their canonical tag.
 
-These images extend an NGC base with the Alps HPC network stack (the
-**alps-extended-images** pattern); because they bundle their own libfabric / NCCL / CXI
-libraries, they have specific launch requirements — CXI hook disabled, `--network=disable_rdzv_get`,
-PMIx — detailed in **§9.0**.
-
 **Build-when-needed.** Most experiments deploy a pre-built image straight from JFrog.
 When an experiment requires changes to the image — a new patch, a new upstream pin, a
 new backend variant — Claude carries the build through as part of the experiment-
@@ -540,7 +535,6 @@ subset**.
 | **Apertus-70B** | target | `swiss-ai/Apertus-70B-Instruct-2509` | Apertus family (multilingual, 1000+ languages) | 65,536 tokens | No dedicated thinking mode (base model) | No | `long-context-followup`, `chat-short-turns` (with the caveat below on `thinking: true`). Excluded from `agentic-coding` — Apertus is not used by operators as a coding model. |
 | **Apertus-8B**     | draft (same-family with Apertus-70B) | `swiss-ai/Apertus-8B-Instruct-2509` | Apertus family — **identical to the 70B**, tokenizer loaded once (§10.6) | 65,536 tokens | No | No | Always paired with Apertus-70B as the draft for speculative-decoding experiments |
 | **Kimi-K2.6**      | target | `moonshotai/Kimi-K2.6` | Kimi family | 262,144 tokens (256K) | Yes — deeper reasoning and planning; strong on agentic, multi-step workflows | Yes (MoE; expert routing exercised by §15.1 *MoE expert routing* row) | `agentic-coding`, `chat-short-turns`, `long-context-followup`. `thinking: true` scenarios are most representative on Kimi-K2.6 because the widened output distribution matches the model's actual think+answer behaviour. |
-| **DeepSeek-V4-Pro** | target | `deepseek-ai/DeepSeek-V4-Pro` | DeepSeek custom (`encoding_dsv4`; `<think>` / `</think>` reasoning delimiters) | 1,048,576 tokens (1M) | Yes — three modes: *Non-think* / *Think High* / *Think Max*, toggled via the `thinking_mode` runtime parameter (to be exposed as a BackendConfig knob when DeepSeek experiments are wired) | Yes (MoE; 1.6 T total parameters / 49 B activated; expert routing exercised by §15.1 *MoE expert routing* row) | `agentic-coding`, `chat-short-turns`, `long-context-followup`. `thinking: true` scenarios match the model's native thinking modes directly. *Think Max* requires context ≥ 384 K — align `max_model_len` accordingly when sweeping it. License: MIT. Recommended sampling: `temperature=1.0`, `top_p=1.0`. Precision: FP4 (MoE expert params) + FP8 (other params) mixed. |
 
 **Notes on scenario / model pairing:**
 
@@ -553,9 +547,9 @@ subset**.
   would ordinarily be shorter.
 - Speculative-decoding experiments require a draft/target pair from this table. Only
   the **Apertus-8B → Apertus-70B** pairing is in scope for v1 (same-family, identical
-  tokenizer). Kimi-K2.6 and DeepSeek-V4-Pro have no in-scope draft; cross-family
-  pairings (e.g. a smaller open model as draft for an MoE target) are deferred until
-  acceptance-rate baselines are characterised.
+  tokenizer). Kimi-K2.6 has no in-scope draft; cross-family pairings (e.g. a smaller
+  open model as draft for an MoE target) are deferred until acceptance-rate baselines
+  are characterised.
 - Tokenizer-loading consequences for these pairings are documented in §10.6.
 - Adding a new model to this set is a planner-template + benchmark-YAML change; no spec
   edit is required unless the model introduces a new capability dimension (e.g. native
@@ -592,52 +586,6 @@ libfabric / CUDA / NCCL / mounts / NUMA.
 
 Backend-version compatibility of individual flags (which were removed, renamed, or made
 mandatory in which release) is captured alongside the configuration surface in §15.2.
-
-### 9.0 Alps-extended engine images (CXI hook, network, PMIx)
-
-Repo-built engine images (§8.1) follow the **alps-extended-images** pattern: they extend
-an NGC base with the Alps HPC network stack — libfabric, NCCL, aws-ofi-nccl, NVSHMEM,
-UCX / UCC / OpenMPI built for the HPE Slingshot 11 / CXI interconnect. Because the image
-carries its **own** network libraries, it must be launched so those take priority over
-the host's, per CSCS guidance
-([docs.cscs.ch/software/alps-extended-images](https://docs.cscs.ch/software/alps-extended-images),
-*Danger*):
-
-- **Disable the host CXI hook** in the engine EDF — `[annotations] com.hooks.cxi.enabled = "false"` —
-  so the image's libfabric wins. Leaving it enabled bind-mounts the host libfabric over
-  the image's and breaks symbol-versioned loads (e.g. the image's OpenMPI / fi_info, built
-  against libfabric 2.5.0, require a `FABRIC_1.9` the older host library lacks). **Do not**
-  add the `aws_ofi_nccl` hook annotation.
-- **`srun --network=disable_rdzv_get`** — matches the image's `FI_CXI_RDZV_PROTO` runtime
-  default; omitting it raises a CXI performance/stability warning.
-- **`srun --mpi=pmix`** — the §7 pre-check collectives are MPI-built; launch MPI
-  applications via PMIx.
-- Pass `--environment=<edf>` to **`srun`**, not `sbatch`.
-
-The Planner renders these from the deployment's `alps_extended_image` flag (default
-**true** — every graded run uses a repo-built image, §8.1). A stock vendor image (the
-§8.2 E1 exemption) sets it **false**: it has no bundled stack and relies on the host CXI
-hook, which then stays enabled. The flag gates both the EDF annotation and the
-`--network=disable_rdzv_get` flag; `--mpi=pmix` is always passed.
-
-The three items above are **launch-side** — they are CE / `srun` settings the image
-cannot carry. Everything else needed for correct operation is **baked into the image**,
-so it is self-contained under any launch (login shell, `bash -c`, or a Kubernetes pod,
-where there is nowhere to inject adjustments):
-
-- The runtime env (`NCCL_NET`, `FI_PROVIDER`, `FI_CXI_*`, `OMPI_MCA_*`, `PMIX_MCA_psec`,
-  `NVSHMEM_*`) from `alps-runtime.env` is applied via **both** `/etc/profile.d` (login
-  shells) **and** `BASH_ENV` (non-login `bash -c`, the path the engine and K8s use).
-- `OPAL_PREFIX=/opt/hpcx/ompi` is set so OpenMPI 5 / PMIx find their components and help
-  text (the base image's stale `/usr/local/mpi` prefix is overridden).
-- `/opt/hpcx/{ompi,ucx}/lib` is on the dynamic-linker path (`ld.so.conf.d`) so MPI-built
-  binaries resolve `libmpi.so.40` without `LD_LIBRARY_PATH`.
-
-These launch requirements are **CXI / Slingshot-level, not accelerator-specific**: every
-Alps system is Slingshot 11, so the forthcoming **ROCm / RCCL** image for `beverin`
-(MI300A) is an alps-extended image too and uses the identical launch path — only the
-collective library (RCCL vs NCCL) and accelerator stack (ROCm vs CUDA) differ in the
-build. The `alps_extended_image` flag is therefore backend- and accelerator-agnostic.
 
 ### 9.1 Health-check timeout
 
