@@ -33,8 +33,9 @@ Status legend: `pending-build` → `building` → `built` → `pushed` →
 tools/images/
   README.md                      this catalogue (mirrors each image's manifest.yaml)
   core/                          shared, reused across images
-    common/                      runtime env + warnings baked into every image
+    common/                      generic, version-agnostic env/warning installers
     nvidia/netstack/v1/          NVIDIA Alps stack v1: Containerfile + phases/ + patches/
+      runtime/                   the env tuning (NCCL/FI_CXI/NVSHMEM/...) + rdzv warning
   <vendor>-<backend>-<ver>-net.<n>/   one directory per image
     manifest.yaml                identity, base, pins, status, provenance
     variant/hooks.d/             optional per-image late build hooks

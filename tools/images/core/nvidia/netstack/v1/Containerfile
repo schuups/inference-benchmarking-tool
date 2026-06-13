@@ -14,7 +14,8 @@
 #     ./Containerfile        this file
 #     ./phases/              core/nvidia/netstack/v1/phases/
 #     ./patches/             core/nvidia/netstack/v1/patches/
-#     ./common/              core/common/   (runtime env + warnings)
+#     ./runtime/             core/nvidia/netstack/v1/runtime/   (env tuning + warning)
+#     ./common/              core/common/   (generic env/warning installers)
 #     ./variant/             <image>/variant/   (per-image late hooks)
 #
 # Per-phase layering: each component is its own COPY + RUN, so podman caches
@@ -153,9 +154,11 @@ RUN set -eux; \
     ldconfig
 
 # (c) Runtime env (NCCL_NET / FI_PROVIDER / FI_CXI_* / OMPI_MCA_* / PMIX_MCA_psec
-#     / NVSHMEM_*). /etc/profile.d covers login shells; install-alps-runtime-env.sh
-#     below also wires it into BASH_ENV so non-login `bash -c` (SLURM + K8s) gets it.
-COPY common/alps-runtime.env /opt/alps/env/alps-runtime.env
+#     / NVSHMEM_*) — the netstack tuning, so it lives under this netstack version
+#     (runtime/), not core/common/. /etc/profile.d covers login shells;
+#     install-alps-runtime-env.sh (generic mechanism, from common/) also wires it
+#     into BASH_ENV so non-login `bash -c` (SLURM + K8s) gets it.
+COPY runtime/alps-runtime.env /opt/alps/env/alps-runtime.env
 
 RUN set -eux; \
     chmod 0644 /opt/alps/env/alps-runtime.env; \
@@ -164,9 +167,11 @@ RUN set -eux; \
       'if [ -f /opt/alps/env/alps-runtime.env ]; then . /opt/alps/env/alps-runtime.env; fi' \
       > /etc/profile.d/99-alps-env.sh
 
-COPY common/alps-runtime-warning.txt /opt/alps/env/alps-runtime-warning.txt
-COPY common/alps-runtime-warning.sh /opt/alps/env/alps-runtime-warning.sh
-COPY common/alps-runtime-warning.py /opt/alps/env/alps-runtime-warning.py
+# Warning content lives with the netstack (it enforces this stack's
+# FI_CXI_RDZV_PROTO=alt_read choice); the installer is generic (common/).
+COPY runtime/alps-runtime-warning.txt /opt/alps/env/alps-runtime-warning.txt
+COPY runtime/alps-runtime-warning.sh /opt/alps/env/alps-runtime-warning.sh
+COPY runtime/alps-runtime-warning.py /opt/alps/env/alps-runtime-warning.py
 COPY common/install-alps-runtime-warnings.sh /opt/alps/env/install-alps-runtime-warnings.sh
 
 RUN set -eux; \
