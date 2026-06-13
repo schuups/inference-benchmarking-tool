@@ -128,6 +128,10 @@ def render_experiment(
             "model_slug": model_slug(deployment.model),
             "cluster": deployment.target,
             "image": default_image(deployment, glob),
+            # Alps-extended images bundle their own CXI/libfabric stack → disable
+            # the host CXI hook so the image's libraries win (§9.0). Drives the EDF
+            # annotation + the srun --network=disable_rdzv_get flag.
+            "disable_cxi_hook": deployment.alps_extended_image,
             "engine_command": vllm_command(deployment),
             "total_gpus": gpus,
             "gpus_per_node": cluster.gpus_per_node,

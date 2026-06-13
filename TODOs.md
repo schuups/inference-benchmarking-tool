@@ -80,6 +80,13 @@
   libfabric, CXI, NVSHMEM, vLLM, etc. inside the image (e.g. a
   `/opt/alps/env/alps-versions.env` queryable at runtime and surfaced in the
   experiment provenance).
+- [ ] **ROCm / RCCL engine image for `beverin` (MI300A)** — the AMD equivalent of
+  `tools/images/vllm/`: extend a ROCm vLLM base with the Alps network stack
+  (RCCL + rccl-tests instead of NCCL/nccl-tests, ROCm instead of CUDA), still over
+  Slingshot 11 / CXI. The §9.0 launch path (CXI hook disabled, `--network=disable_rdzv_get`,
+  PMIx) and the `alps_extended_image` flag already cover it — only the build phases
+  differ. Add `tools/images/vllm/` ROCm variant (or a sibling tree) + the rccl-tests
+  pre-check path (§7 already references `ROCm/rccl-tests`).
 
 ## Prompt / Dataset Generation
 

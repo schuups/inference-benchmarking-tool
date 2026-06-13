@@ -101,8 +101,32 @@ COPY common/phases/clean_up.sh /opt/alps/phases/
 RUN bash /opt/alps/phases/clean_up.sh
 
 # ---------------------------------------------------------------------------
-# Runtime environment + warnings + optional variant hooks (unchanged).
+# Self-contained runtime environment.
+#
+# These make the image correct under ANY launch — login shell, `bash -c` on
+# SLURM (§9.0), or a Kubernetes pod (§7.2) — with no --environment, login
+# shell, or LD_LIBRARY_PATH injection needed. Essential for the K8s target,
+# where there is nowhere to inject such adjustments.
 # ---------------------------------------------------------------------------
+
+# (a) OMPI/PMIx install prefix. The base image's OPAL_PREFIX points at the HPC-X
+#     tree (/usr/local/mpi) that neutralize_base_mpi removed; override it so
+#     OpenMPI 5 finds its components + help text under /opt/hpcx/ompi. Without
+#     this, MPI launches emit spurious PMIx "find-available:not-valid / help
+#     file not found" errors.
+ENV OPAL_PREFIX=/opt/hpcx/ompi
+
+# (b) Make the /opt/hpcx libraries discoverable by the dynamic linker so the
+#     MPI-built §7 collectives (nccl-tests / OSU) resolve libmpi.so.40 etc.
+#     without LD_LIBRARY_PATH. Mirrors the NVSHMEM phase's ld.so.conf.d entry.
+RUN set -eux; \
+    printf '%s\n' /opt/hpcx/ompi/lib /opt/hpcx/ucx/lib \
+      > /etc/ld.so.conf.d/alps-hpcx.conf; \
+    ldconfig
+
+# (c) Runtime env (NCCL_NET / FI_PROVIDER / FI_CXI_* / OMPI_MCA_* / PMIX_MCA_psec
+#     / NVSHMEM_*). /etc/profile.d covers login shells; install-alps-runtime-env.sh
+#     below also wires it into BASH_ENV so non-login `bash -c` (SLURM + K8s) gets it.
 COPY common/alps-runtime.env /opt/alps/env/alps-runtime.env
 
 RUN set -eux; \
@@ -120,6 +144,13 @@ COPY common/install-alps-runtime-warnings.sh /opt/alps/env/install-alps-runtime-
 RUN set -eux; \
     chmod +x /opt/alps/env/install-alps-runtime-warnings.sh; \
     /opt/alps/env/install-alps-runtime-warnings.sh
+
+# Apply the runtime env in non-login shells too (BASH_ENV). Runs AFTER the
+# warning installer so its hook lands above the warning hook (env set first).
+COPY common/install-alps-runtime-env.sh /opt/alps/env/install-alps-runtime-env.sh
+RUN set -eux; \
+    chmod +x /opt/alps/env/install-alps-runtime-env.sh; \
+    /opt/alps/env/install-alps-runtime-env.sh
 
 # Optional image-specific fixes (late hooks)
 ARG NGC_VARIANT_DIR=""

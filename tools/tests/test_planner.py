@@ -108,6 +108,11 @@ def test_slurm_render_canonical(tmp_path, canonical_dict, globals_cfg):
     assert "--safetensors-load-strategy prefetch" in engine
     # EDF
     assert 'workdir = ' in edf and "hf-cache" in edf
+    # §9.0 Alps-extended image (default): CXI hook disabled in the EDF, and the
+    # srun carries --network=disable_rdzv_get + --mpi=pmix.
+    assert 'com.hooks.cxi.enabled = "false"' in edf
+    assert "--network=disable_rdzv_get" in engine
+    assert "--mpi=pmix" in engine
 
 
 def test_slurm_single_node_has_no_ray(tmp_path, canonical_dict, globals_cfg):
@@ -144,6 +149,20 @@ def test_k8s_render(tmp_path, canonical_dict, globals_cfg):
     pod = yaml.safe_load(pod_yaml)
     assert pod["kind"] == "Pod"
     assert pod["metadata"]["labels"]["app.kubernetes.io/managed-by"] == "inference-benchmarking"
+
+
+def test_stock_image_keeps_cxi_hook(tmp_path, canonical_dict, globals_cfg):
+    # §9.0/§8.2: a stock vendor image relies on the host CXI hook, so it stays
+    # enabled (no annotation) and the srun drops --network=disable_rdzv_get;
+    # --mpi=pmix is always present.
+    canonical_dict["deployments"][0]["alps_extended_image"] = False
+    _, run_dirs = _render(tmp_path, canonical_dict, globals_cfg)
+    run_dir = run_dirs[0]
+    edf = (run_dir / "engine.toml").read_text()
+    engine = (run_dir / "engine.sbatch").read_text()
+    assert "com.hooks.cxi.enabled" not in edf
+    assert "--network=disable_rdzv_get" not in engine
+    assert "--mpi=pmix" in engine
 
 
 def test_explicit_image_respected(tmp_path, canonical_dict, globals_cfg):

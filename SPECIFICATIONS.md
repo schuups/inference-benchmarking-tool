@@ -501,6 +501,11 @@ this repository**. For each backend:
 The image **registry** is the **CSCS JFrog Artifactory**. Built images are pushed there
 and referenced from the engine EDF / K8s manifest via their canonical tag.
 
+These images extend an NGC base with the Alps HPC network stack (the
+**alps-extended-images** pattern); because they bundle their own libfabric / NCCL / CXI
+libraries, they have specific launch requirements — CXI hook disabled, `--network=disable_rdzv_get`,
+PMIx — detailed in **§9.0**.
+
 **Build-when-needed.** Most experiments deploy a pre-built image straight from JFrog.
 When an experiment requires changes to the image — a new patch, a new upstream pin, a
 new backend variant — Claude carries the build through as part of the experiment-
@@ -587,6 +592,52 @@ libfabric / CUDA / NCCL / mounts / NUMA.
 
 Backend-version compatibility of individual flags (which were removed, renamed, or made
 mandatory in which release) is captured alongside the configuration surface in §15.2.
+
+### 9.0 Alps-extended engine images (CXI hook, network, PMIx)
+
+Repo-built engine images (§8.1) follow the **alps-extended-images** pattern: they extend
+an NGC base with the Alps HPC network stack — libfabric, NCCL, aws-ofi-nccl, NVSHMEM,
+UCX / UCC / OpenMPI built for the HPE Slingshot 11 / CXI interconnect. Because the image
+carries its **own** network libraries, it must be launched so those take priority over
+the host's, per CSCS guidance
+([docs.cscs.ch/software/alps-extended-images](https://docs.cscs.ch/software/alps-extended-images),
+*Danger*):
+
+- **Disable the host CXI hook** in the engine EDF — `[annotations] com.hooks.cxi.enabled = "false"` —
+  so the image's libfabric wins. Leaving it enabled bind-mounts the host libfabric over
+  the image's and breaks symbol-versioned loads (e.g. the image's OpenMPI / fi_info, built
+  against libfabric 2.5.0, require a `FABRIC_1.9` the older host library lacks). **Do not**
+  add the `aws_ofi_nccl` hook annotation.
+- **`srun --network=disable_rdzv_get`** — matches the image's `FI_CXI_RDZV_PROTO` runtime
+  default; omitting it raises a CXI performance/stability warning.
+- **`srun --mpi=pmix`** — the §7 pre-check collectives are MPI-built; launch MPI
+  applications via PMIx.
+- Pass `--environment=<edf>` to **`srun`**, not `sbatch`.
+
+The Planner renders these from the deployment's `alps_extended_image` flag (default
+**true** — every graded run uses a repo-built image, §8.1). A stock vendor image (the
+§8.2 E1 exemption) sets it **false**: it has no bundled stack and relies on the host CXI
+hook, which then stays enabled. The flag gates both the EDF annotation and the
+`--network=disable_rdzv_get` flag; `--mpi=pmix` is always passed.
+
+The three items above are **launch-side** — they are CE / `srun` settings the image
+cannot carry. Everything else needed for correct operation is **baked into the image**,
+so it is self-contained under any launch (login shell, `bash -c`, or a Kubernetes pod,
+where there is nowhere to inject adjustments):
+
+- The runtime env (`NCCL_NET`, `FI_PROVIDER`, `FI_CXI_*`, `OMPI_MCA_*`, `PMIX_MCA_psec`,
+  `NVSHMEM_*`) from `alps-runtime.env` is applied via **both** `/etc/profile.d` (login
+  shells) **and** `BASH_ENV` (non-login `bash -c`, the path the engine and K8s use).
+- `OPAL_PREFIX=/opt/hpcx/ompi` is set so OpenMPI 5 / PMIx find their components and help
+  text (the base image's stale `/usr/local/mpi` prefix is overridden).
+- `/opt/hpcx/{ompi,ucx}/lib` is on the dynamic-linker path (`ld.so.conf.d`) so MPI-built
+  binaries resolve `libmpi.so.40` without `LD_LIBRARY_PATH`.
+
+These launch requirements are **CXI / Slingshot-level, not accelerator-specific**: every
+Alps system is Slingshot 11, so the forthcoming **ROCm / RCCL** image for `beverin`
+(MI300A) is an alps-extended image too and uses the identical launch path — only the
+collective library (RCCL vs NCCL) and accelerator stack (ROCm vs CUDA) differ in the
+build. The `alps_extended_image` flag is therefore backend- and accelerator-agnostic.
 
 ### 9.1 Health-check timeout
 
