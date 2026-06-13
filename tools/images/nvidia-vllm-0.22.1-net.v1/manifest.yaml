@@ -1,0 +1,93 @@
+# Image manifest (SPECIFICATIONS.md §8.1).
+# Authoritative per-image record: identity, base, baked-in component pins,
+# published tag, build provenance, and sanity status. build.sh reads the pins
+# below and passes them to `podman build` as --build-arg (manifest wins over the
+# Containerfile ARG defaults). Keep `status` + `sanity` in sync with the
+# catalogue table in ../README.md.
+
+# ---- identity ----
+slug: nvidia-vllm-0.22.1-net.v1
+vendor: nvidia
+backend: vllm
+backend_version: "0.22.1"
+netstack: nvidia/v1                 # -> core/nvidia/netstack/v1
+description: >-
+  Official vLLM 0.22.1 image (aarch64 / Ubuntu 24.04, for GH200) extended with
+  the Alps Slingshot-11 network stack (netstack v1). Self-contained: no
+  container-engine CXI / aws-ofi-nccl hook required at runtime.
+
+# ---- lifecycle status ----
+# pending-build -> building -> built -> pushed -> sanity-pending -> verified -> benchmarked
+#                                                              \-> failed
+#   verified    = netstack sanity green (components load + Slingshot reference
+#                 bandwidth); usable, but inference performance scaling not yet tested.
+#   benchmarked = additionally validated in inference performance-scaling experiments.
+status: verified         # built + pushed + 2-node sanity green on clariden 2026-06-13
+
+# ---- source base + published tag ----
+base_image: docker.io/vllm/vllm-openai:v0.22.1-aarch64-ubuntu2404
+image_tag: jfrog.svc.cscs.ch/ml/inference/vllm:0.22.1-alps.net.v1
+
+# ---- baked-in netstack component pins ("what it contains") ----
+# Mirror core/nvidia/netstack/v1 Containerfile ARG defaults; override per-image
+# here. NOTE: nccl_ver must be reconciled with the NCCL/CUDA the base ships
+# (torch's bundled nvidia-nccl wheel) — confirmed during the build loop.
+netstack_pins:
+  xpmem_ref: 3bcab55479489fdd93847fa04c58ab16e9c0b3fd
+  gdrcopy_ver: "2.5.1"
+  cxi_shs: release/shs-13.0.0          # cassini-headers + cxi-driver + libcxi
+  libfabric_commit: 79fd4514977a8f15844fbe26df9f5930eb96311a
+  libfabric_version: "2.5.0"     # resolved from the commit (fi_info --version)
+  libfabric_patch: libfabric/prov_cxi_netns_support.79fd451.patch
+  nccl_ver: "2.28.9-1"           # matches base torch 2.11.0+cu130 (NCCL 2.28.9)
+  nccl_patch: nccl/net.cc.2.29.7-1.patch   # benign plugin-unload fix; drop if it won't apply
+  ucx_version: "1.20.0"
+  ucc_version: "1.7.0"
+  ompi_ver: "5.0.10"
+  aws_ofi_nccl_commit: 93fa84ca880325013b2f639356bbb60f075148af
+  aws_ofi_nccl_version: "1.17.3"  # resolved from the commit (NCCL NET/OFI init banner)
+  aws_ofi_nccl_patch: ""
+  nvshmem_ver: "3.6.5-0"
+  nvshmem_patch: nvshmem/requirements-v3.6.5-0.patch
+  nccl_tests_ver: "2.18.2"
+  osu_version: "7.5.2"
+
+# ---- provenance (filled at build time by build.sh) ----
+provenance:
+  containerfile: core/nvidia/netstack/v1/Containerfile
+  netstack_git_sha: null     # repo SHA of core/nvidia/netstack/v1 at build
+  base_digest: sha256:adced27d9aebd8355fe90b4546aa715ee169b2e5abdad437d0f48d1ee1fd3c06
+  base_probe:                # observed in the base on 2026-06-13 (drives the pins above)
+    os: Ubuntu 24.04.3 LTS
+    arch: aarch64
+    python: "3.12.3"
+    cuda: "13.0"
+    torch: 2.11.0+cu130
+    torch_nccl: "2.28.9"     # -> netstack_pins.nccl_ver
+    base_nvshmem_pip: "3.4.5"
+    hpcx_efa: absent
+    entrypoint: ["vllm", "serve"]
+  built_by: stefschu
+  built_at: "2026-06-13T20:17:30+02:00"
+  image_id: sha256:75147c238b2d803a31b79bc1fe487e5d464d09c630f603e1acea48a9cd7d7837
+  registry_digest: sha256:f3188394e0720aecf6da6ce892bc6a281a3ecbff060860cf40b0a5f1d775921a
+  # No durable build_log: build/staging under /capstor/.../ib is EPHEMERAL (can be
+  # reclaimed anytime). Reproducibility = netstack_git_sha + the pins above +
+  # base_digest + registry_digest.
+
+# ---- post-push sanity (filled by tests/, see tests/README) ----
+sanity:
+  status: pass               # 1-node + 2-node NCCL green on clariden 2026-06-13
+  ran_at: "2026-06-13T21:00+02:00"
+  nodes: 2
+  notes: >-
+    GH200, self-contained (EDF cxi hook off, no aws-ofi hook, srun
+    --network=disable_rdzv_get). 1-node 4-GPU: fi_info -p cxi = 4 NICs (cxi0-3),
+    NCCL loads aws-ofi-nccl 1.17.3 over libfabric 2.5/CXI, all_reduce busbw 79.2
+    GB/s (NVLink-C2C). 2-node 8-rank over Slingshot: all ranks "Selected provider
+    cxi (4 nics)" + "Using network AWS Libfabric"; all_reduce busbw 131.9 GB/s @
+    128 MiB, 151.4 GB/s @ 1 GiB (above the ~122 GB/s CSCS reference). OSU osu_bw
+    inter-node 23.9 GB/s (Slingshot single-NIC). NVSHMEM v3.6.5 over CXI:
+    shmem_put_bw 23.45 GB/s, alltoall_latency 8-PE inter-node OK. All components
+    (NCCL/aws-ofi/CXI, libfabric, NVSHMEM, OMPI, OSU) load + run with no errors.
+  todo_inter_node: false
