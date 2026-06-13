@@ -385,10 +385,15 @@ test adds maintenance without adding signal.
     `/capstor/scratch/cscs/$USER/collective-tests-cache` on SLURM; a PVC mount on K8s).
     Shared across experiments; safe to delete to force a rebuild.
 
-  The pre-check script **installs missing build tools** (`make`, `g++`, OpenMPI dev, `curl`,
-  `tar`) inside the engine container via `apt-get` / `dnf` / `yum` rather than aborting —
-  the engine image is not required to ship them. Only **rank 0** performs the install
-  (other ranks wait on a sentinel), so apt is not hammered by `N` ranks concurrently.
+  The pre-check script attempts to **install missing build tools** (`make`, `g++`, OpenMPI
+  dev, `curl`, `tar`) inside the engine container via `apt-get` / `dnf` / `yum`, rank 0 only
+  (other ranks wait on a sentinel, so apt is not hammered by `N` ranks). **This fallback
+  only works when the container runs as root.** On the CSCS Container Engine the container
+  runs as the invoking user (non-root), so the install does not succeed and the
+  `nccl-tests` build aborts on a missing `mpi.h` (observed at E1 on the stock vLLM image).
+  Therefore the **engine image must pre-ship the MPI/NCCL build toolchain** — the repo-built
+  Alps image (§8.1) does; stock vendor images (§8.2) do not, so `skip_system_prechecks: true`
+  is required when running on them (§7.5, §17.1).
 - The NVSHMEM benchmark uses the perftest binaries that ship with the engine image's
   NVSHMEM SDK (no separate build). If NVSHMEM is absent the row is skipped with a warning;
   set `nvshmem_required: true` in the benchmark YAML to make absence a failure.
@@ -562,7 +567,8 @@ subset**.
   capacity / Pareto / procurement claims. The same exemption extends to the **engine
   image**: a pipeline-validation run may deploy a stock vendor image (e.g. NGC vLLM)
   while the repo-built lineage iterates; every graded run uses repo-built JFrog images
-  per §8.1.
+  per §8.1. Such stock-image runs must set `skip_system_prechecks: true` — stock images
+  lack the MPI/NCCL build toolchain the §7 collective checks need (§7.2, §17.1).
 
 ---
 
@@ -618,8 +624,11 @@ one-time compilation is the dominant cold-start cost on first request after a se
 
 **Requirements:**
 
-- The benchmarker must send a **priming request** (20K-token prompt, `max_tokens=1`) to the
-  engine's HTTP endpoint before the sweep begins, and wait up to 300 s for it to complete.
+- The benchmarker must send a **priming request** (a large prompt — target ~20K tokens but
+  **capped to `max_model_len`** so it never exceeds the served context — with `max_tokens=1`)
+  to the engine's HTTP endpoint before the sweep begins, and wait up to 300 s for it to
+  complete. An over-long primer prompt is rejected (http_400) and silently fails to warm the
+  compile (observed at E1 with `max_model_len=16384`; see §17.2).
 - After the primer completes, the first measurement request should exhibit genuine
   steady-state TTFT (not the cold compile delay). If it does not, **warn the operator**
   that the primer missed its target.
@@ -719,7 +728,7 @@ The benchmark YAML's `dataset_config` block:
 | `scenario_mix[].output_length` | object | no | Per-class override of the registry's `output_length` distribution. |
 | `scenario_mix[].session` | object | no | Per-class override of session fields. |
 | `scenario_mix[].source_overrides` | object | no | Per-class source-specific overrides (e.g. LongBench task subset). |
-| `num_prompts` | integer | yes | Total size of the generated prompt pool, split across classes proportionally to `weight × E[turns_per_session]` so no class exhausts its sub-pool early. Must be set sufficiently large that prompts are not exhausted before the experiment's request budget is consumed, so that prompt uniqueness (§10.6) holds for every request actually issued. |
+| `num_prompts` | integer | yes | Total size of the generated prompt pool, split across classes proportionally to `weight × E[turns_per_session]` so no class exhausts its sub-pool early. Prompts are never recycled (the load generator raises `PoolExhaustedError`), so the pool must outlast the **whole sweep's** session-start budget — rule of thumb: `num_prompts ≥ Σ over sweep steps of λ × (warmup_s + measurement_s) × E[turns_per_session]` (summed over the mix). Undersizing aborts the run mid-sweep (observed at E1). This also keeps prompt uniqueness (§10.6) holding for every request actually issued. |
 | `seed` | integer | yes | Master seed; per-class sub-seeds derived deterministically (§10.8). |
 | `tokenizer_id` | string | no | Override the tokenizer (defaults to the target model's; see §10.6). Shared by every class in the mix — all lengths are measured with one tokenizer. |
 | `output_length_mode` | string | no | `forced` (default) or `natural` — governs `ignore_eos` on sweep traffic; see §10.6. Disclosed in `run_assumptions`; results are not comparable across modes. |
@@ -1695,5 +1704,23 @@ Total concurrent        ≈ 80 slots
 
 ## 17. Known Issues & Workarounds
 
-Issues discovered during experiment runs — and the workarounds that resolved them — will
-be tracked here as they arise. Empty for now.
+Issues discovered during experiment runs — and the workarounds that resolved them — are
+tracked here as they arise.
+
+### 17.1 §7 pre-checks require the engine image to pre-ship the build toolchain (E1, 2026-06-14)
+
+The §7.2 "install missing build tools via `apt-get`" fallback assumes a root container. On
+the **CSCS Container Engine the container runs non-root**, so the install does not succeed
+and the `nccl-tests` build aborts on `mpi.h: No such file or directory` (seen at E1 on the
+stock `vllm-openai:0.22.1` image). **Requirement / workaround:** the engine image must
+pre-ship the MPI/NCCL build toolchain — the repo-built Alps image (§8.1) does. On stock
+vendor images (pipeline-validation only, §8.2) set `skip_system_prechecks: true` (§7.5); a
+single GPU has no meaningful collective to check anyway. §7 is validated on the Alps image
+at E2.
+
+### 17.2 Inductor primer prompt must fit `max_model_len` (E1, 2026-06-14)
+
+The §9.3 primer's ~20K-token prompt exceeds a smaller `max_model_len` and is rejected
+(http_400), silently skipping the compile warm-up (seen at E1 with `max_model_len=16384`).
+**Workaround:** cap the primer prompt to the served context (tracked in `TODOs.md`), or set
+`max_model_len` ≥ the primer prompt when exact warm-up matters.
