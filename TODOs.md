@@ -33,6 +33,15 @@
 
 ## Experiment Execution
 
+- [ ] **E1-surfaced follow-ups (2026-06-14)** — found driving the first clariden run:
+  - **Primer must cap its prompt to `max_model_len`** (§9.3, `load_gen/readiness.py`): the
+    primer sends a fixed 20K-token prompt; with `max_model_len=16384` the engine returned
+    http_400 and the primer warned (non-fatal, but it didn't warm the inductor compile).
+    Clamp `prompt_tokens` to the served context (read from the engine, or pass it in).
+  - **M7 re-run into a dirty run dir crashes** (`orchestrator._persist_experiment`): a
+    pre-existing `run_<id>.db` makes the plain `INSERT` into `experiments` hit a UNIQUE
+    constraint. Normal flow uses a fresh run_id per run, but make it robust — clear/replace
+    the run's rows, or have the Coordinator ensure a clean run dir before submit.
 - [ ] Run NCCL benchmarks (using the same Docker images) before inference benchmarks
 - [ ] Support testing endpoints provided via URL (not only SLURM and Kubernetes deployments)
 
