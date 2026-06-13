@@ -26,6 +26,9 @@ from tools.common.runid import run_id_slug
 from .dataset_gen.tokenizers import load_tokenizer
 from .launchers import K8sEngineLauncher, SlurmEngineLauncher
 from .orchestrator import RunAborted, run_experiment
+from .quality_eval.base import QualityEvalError
+from .quality_eval.lm_eval_backend import LmEvalBackend
+from .quality_eval.runner import QualityEvalRunner
 
 log = logging.getLogger("benchmarker")
 
@@ -72,16 +75,22 @@ def main() -> int:
             run_id=args.run_id,
         )
 
+    # §12.5: the standard-suite harness (lm-eval) is the production backend; the
+    # orchestrator skips Stage A/B per the YAML's skip_quality_gate/_compare flags.
+    quality = QualityEvalRunner(LmEvalBackend())
     try:
         summary = asyncio.run(
             run_experiment(
                 cfg, deployment, args.run_id, args.run_dir, tokenizer, launcher, SCENARIOS_DIR,
-                quality=None,  # M11 wires the real QualityEvaluator here
+                quality=quality,
             )
         )
     except RunAborted as exc:
         print(f"ABORTED: {exc}", file=sys.stderr)
         return 3
+    except QualityEvalError as exc:
+        print(f"QUALITY-EVAL ERROR: {exc}", file=sys.stderr)
+        return 4
     print(f"OK: {summary}")
     return 0
 
