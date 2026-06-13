@@ -13,6 +13,14 @@ Alps has no InfiniBand — the Slingshot 11 path reaches NCCL through the
 **AWS OFI NCCL hook**, injected at launch by the CSCS Container Engine when the
 engine EDF carries the right annotation.
 
+> **Launch model — superseded for repo-built engine images.** The AWS OFI NCCL hook
+> described here is the **hook-injection** model, for stock images that ship *without*
+> the Alps network stack. The framework's repo-built engine images are
+> **self-contained** — the stack is baked in, so they run with the CXI hook
+> **disabled** and **no** aws-ofi hook (see `SPECIFICATIONS.md` §8.1). The
+> `nccl-tests` build/run scripts in this directory are still the basis for the §7
+> in-container pre-checks; only the EDF hook annotations differ.
+
 ## Operating model: same container, concatenated commands
 
 Per `SPECIFICATIONS.md` §7.2, the pre-check runs in the **same container instance**
