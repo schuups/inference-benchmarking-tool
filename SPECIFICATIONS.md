@@ -489,35 +489,76 @@ backends, are both first-class experiment shapes.
 #### Image lifecycle and registry
 
 Every inference-engine image the framework tests is **built from sources checked into
-this repository**. For each backend:
+this repository**, organised as a small catalogue under `tools/images/`
+(`tools/images/README.md` carries the operational detail):
 
-- The **Dockerfile** lives at `tools/images/<backend>/Dockerfile`.
-- Any source-level **patches** applied at build time (e.g. the CXI / Slingshot-11
-  integration patches for `vllm-cxi`) live under `tools/images/<backend>/patches/`,
-  tracked in the repo with the same review discipline as the rest of the code.
-- A **build-args metadata file** captures the upstream version pin, the patch list, the
-  base image, and the canonical image tag the build produces.
+- **Shared `core/`** holds the vendor-scoped, **version-tagged Alps network stack** at
+  `core/<vendor>/netstack/<v>/` — the Containerfile, per-component build `phases/`,
+  source `patches/`, and the baked `runtime/` env tuning — plus generic env/warning
+  installers in `core/common/`. The netstack version (`v1`, `v2`, …) is a **maturity
+  axis independent of the engine**: bumping a component pin, a Slingshot release, or a
+  tuning choice (e.g. re-enabling NCCL LL128) lands as a new `vN` sibling so the prior
+  one stays reproducible, and the same engine can be built on two netstacks to isolate
+  the stack's contribution.
+- **Each image is a thin per-image directory** — a `manifest.yaml` (identity = vendor ×
+  backend × backend-version × netstack-version; base image; baked-in component pins;
+  published tag; provenance; sanity status), an optional `variant/`, and `tests/`. The
+  Containerfile lives once per netstack version; the manifest selects the base and any
+  pin overrides.
 
-The image **registry** is the **CSCS JFrog Artifactory**. Built images are pushed there
-and referenced from the engine EDF / K8s manifest via their canonical tag.
+**Self-contained images.** The network libraries (libfabric/CXI, patched NCCL +
+aws-ofi-nccl, NVSHMEM, UCX/UCC/OpenMPI) **and** the runtime tuning env are baked into the
+image, so it is correct under any launch — login shell, non-login `bash -c` on SLURM, or
+a K8s pod — with **no container-engine hook and no `--environment` injection**. This is
+essential for the K8s target, where there is nowhere to inject such adjustments. The
+launch contract for a self-contained image is:
+
+- EDF / pod annotation **`com.hooks.cxi.enabled = "false"`** and **no** `aws_ofi_nccl`
+  hook annotation — the libraries are in the image, not injected by the engine. With the
+  CXI hook disabled the devices remain accessible (`fi_info -p cxi` still enumerates the
+  NICs), so disabling it costs nothing.
+- Launch collectives with **`srun --network=disable_rdzv_get`**, matching the baked
+  `FI_CXI_RDZV_PROTO=alt_read` (a runtime warning fires otherwise).
+- The baked env (`NCCL_NET=AWS Libfabric`, `FI_PROVIDER=cxi`, `FI_CXI_*`, `OMPI_MCA_*`,
+  `PMIX_MCA_psec`, `NVSHMEM_*`) applies via `/etc/profile.d` and `BASH_ENV` as *defaults*
+  (set-if-unset), so any knob can be overridden per launch.
+
+This **supersedes the older hook-injection model** in `examples/nccl-tests/README.md`
+(which enables the `aws_ofi_nccl` hook and relies on host libraries); that guidance
+applies only to stock images that ship without the Alps stack.
+
+**Build, push, sanity.** Builds run under podman in node-local `/dev/shm` — a
+RAM-resident layer cache, lost when the node is released — driven over **SSH +
+`srun --overlap` into a held SLURM allocation** (FirecREST exposes no `srun`). The
+per-phase Containerfile makes a failed or edited phase rebuild only from that layer down,
+so a held node is reused across iterations. `tools/images/build.sh` reads a manifest,
+stages the composed context, and runs `podman build` + `podman push`; one hard
+constraint — the **built NCCL version must match the base image's torch-bundled NCCL**,
+so the aws-ofi-nccl plugin is ABI-compatible with the NCCL actually loaded at runtime.
+
+**Post-push acceptance gate + maturity.** Before an image is used, a short-lived 2-node
+job (`tools/images/sanity.sbatch`) validates that the baked stack loads and **inter-node
+collectives reach the Slingshot reference bandwidth** — NCCL `all_reduce` busbw near the
+per-system reference (§7.3), *not* the ~5 GB/s "plugin didn't fire" floor — plus OSU and
+NVSHMEM over CXI. Image status then distinguishes **`verified`** (sanity green —
+functionally usable, performance scaling not yet characterised) from **`benchmarked`**
+(additionally validated in inference performance-scaling experiments). To re-test a
+rebuilt image under an unchanged tag, the sanity EDF is pinned by the **registry digest**
+to bypass the engine's stale image cache (§17.1).
+
+The image **registry** is the **CSCS JFrog Artifactory** (`registry.jfrog_base` in
+`tools/common/global.yaml`, §2.3); images are referenced from the engine EDF / K8s
+manifest by canonical tag or digest. Full build provenance — netstack source revision,
+component pins, base image digest, published registry digest, build date — lives in each
+image's `manifest.yaml` (durable; the `/capstor/.../ib` build scratch is ephemeral) and
+is recorded per experiment alongside the BackendConfig, so the exact stack any experiment
+ran on is recoverable.
 
 **Build-when-needed.** Most experiments deploy a pre-built image straight from JFrog.
-When an experiment requires changes to the image — a new patch, a new upstream pin, a
-new backend variant — Claude carries the build through as part of the experiment-
-preparation phase:
-
-1. Updates the Dockerfile / patches under `tools/images/<backend>/`.
-2. Submits the build (SLURM-based Docker build workflow per TODOs.md *Support building
-   Docker images via SLURM jobs*, or the operator's local Docker).
-3. Pushes the resulting image to JFrog with a canonical tag.
-4. Updates the planner template's image reference to the new tag.
-
-The full build provenance — Dockerfile commit SHA, patch revisions, base image, build
-date, JFrog tag — is recorded per experiment alongside the BackendConfig so the exact
-stack any experiment ran on is recoverable. The canonical JFrog path and other
-shared cluster-side constants are deferred to a global configuration location — see
-TODOs.md *Establish a global configuration location for shared values* and *Define and
-configure JFrog folder/path for publishing built images*.
+When an experiment requires a change — a new pin, patch, base, or backend variant —
+Claude carries the build through during experiment preparation: update the netstack /
+manifest, build + push via `build.sh`, run the sanity gate, and update the planner
+template's image reference to the new tag.
 
 ### 8.2 Models
 
@@ -1694,5 +1735,36 @@ Total concurrent        ≈ 80 slots
 
 ## 17. Known Issues & Workarounds
 
-Issues discovered during experiment runs — and the workarounds that resolved them — will
-be tracked here as they arise. Empty for now.
+Issues discovered during image builds and experiment runs — and the workarounds that
+resolved them — are tracked here as they arise.
+
+### 17.1 Engine image cache is stale across rebuilds under the same tag
+
+The container engine (enroot/pyxis) caches an imported image keyed by reference, so
+rebuilding and re-pushing under the **same tag** leaves the cached squashfs pointing at
+the old digest — a sanity or experiment run then silently uses the *previous* image.
+**Workaround:** pin the launch EDF by the **registry manifest digest**
+(`image = "<host>#<repo>@sha256:…"`), captured from `podman push --digestfile`. Do **not**
+use `podman image inspect {{.Digest}}` — that is the *local* manifest digest, which a
+format-converting push can change, and the registry returns `404` for it.
+`tools/images/build.sh` writes the digest-pinned EDF that `sanity.sbatch` consumes.
+
+### 17.2 Slim Ubuntu/CUDA bases need extra netstack steps vs NGC
+
+NGC bases ship a complete CUDA toolkit, an HPC-X stack, and `/bin/sh`→bash; slim engine
+bases (e.g. `vllm/vllm-openai`, Ubuntu 24.04 / CUDA 13) do not. Building the Alps network
+stack on them therefore requires, as a principle (the exact steps live in the netstack
+phase scripts and Containerfile):
+
+- installing the CUDA dev components the stack links against but the slim toolkit omits —
+  `cuda-nvml-dev` (libfabric `nvml.h`), `cuda-nvrtc-dev` (NVSHMEM `CUDA::nvrtc`), and a
+  `libnvJitLink` runtime (present only in a pip wheel) symlinked into the toolkit;
+- a `python`→`python3` alias (the slim base ships only `python3`);
+- `ENV BASH_ENV=/etc/bash.bashrc` so the baked env reaches non-login `bash -c` (NGC bases
+  set it; the slim base leaves it unset);
+- a **POSIX-sh-safe** runtime env file — the container init sources it under **dash**,
+  which rejects bash-only `${!x}` / `printf -v` / `[[ ]]` with "Bad substitution" and
+  aborts container start.
+
+The §8.1 post-push acceptance gate is what catches a base that silently lacks one of
+these (e.g. collectives that fall back off the Slingshot path).
