@@ -1,18 +1,20 @@
-# Benchmarker cluster runtime dependencies (decision 3: staged uv venv on capstor).
+# Benchmarker cluster runtime dependencies (decision 3: staged uv venv on capstor,
+# bare node — no container). Installed once into {scratch_base}/benchmarker-venv by
+# benchmarker.sbatch (`uv venv` + `uv pip install -r`); delete the venv to rebuild.
+# The live tools/ code is mounted from capstor and added to PYTHONPATH.
 #
-# Installed once into {scratch_base}/benchmarker-venv by benchmarker.sbatch
-# (`uv venv` + `uv pip install -r` on first run; delete the venv to force a rebuild).
-# The live tools/ code is mounted from capstor and added to PYTHONPATH — only deps
-# live here, so code iterates without touching the venv.
-#
-# Versions are floored, not pinned; capture `uv pip freeze` from the first E1 build
-# and pin exact versions here for reproducibility (tracked in TODOs).
+# Versions floored, not pinned; capture `uv pip freeze` after the first build and pin.
 
+# --- E1 core (synthetic dataset + load gen + orchestration; torch-free, fast) ---
 pydantic>=2          # benchmark-YAML schema (tools/common/config.py)
 pyyaml               # config + scenario registry
 aiohttp              # load generator + quality grader (streaming client)
 transformers         # target-model tokenizer (dataset_gen.tokenizers.HFTokenizer)
-huggingface_hub      # longbench / wildchat source downloads (dataset_gen.sources)
-datasets             # reasoning_trace_replay source
-pyarrow              # wildchat parquet reads
-lm-eval              # Stage-A/B quality evaluation (quality_eval.lm_eval_backend)
+                     # (pulls huggingface_hub, tokenizers, numpy — but NOT torch)
+
+# --- graded E2+ extras: install into the shared venv when needed (NOT for E1) ---
+# These pull torch and large data libs; deferred until real HF sources / graded
+# quality come online (E2/E3), so E1's first venv build stays light.
+# datasets             # longbench / wildchat / reasoning_trace_replay sources
+# pyarrow              # wildchat parquet reads
+# lm-eval              # Stage-A/B quality evaluation (pulls torch)

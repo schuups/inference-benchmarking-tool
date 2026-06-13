@@ -27,7 +27,7 @@ dataset_config:
   scenario_mix:
     - scenario: smoke-synthetic        # synthetic source: no HF dataset egress
       weight: 1.0
-  num_prompts: 200
+  num_prompts: 1500                  # ≥ Σ(λ × (warmup+measurement)) ≈ 630 sessions + margin (§10.4)
   seed: 1234
   output_length_mode: forced
 
@@ -49,15 +49,15 @@ slos:                                  # loose — E1 validates the pipeline, no
   - { scenario: smoke-synthetic, metric: ttft_ms, percentile: p95, threshold: 2000 }
   - { scenario: all,             metric: error_rate_pct,            threshold: 5.0 }
 
-quality_eval:                          # exercise §12.5 Stage A end-to-end (lm-eval in the venv)
-  gate:
-    suite: gsm8k
-    sample_size: 20                    # minutes, not hours
-    floor: 0.0                         # E1 validates the gate path, not the score
-  skip_quality_compare: true           # single deployment config — nothing to compare
+quality_eval:                          # E1 is a pure pipeline shakeout — quality deferred to E2+
+  skip_quality_gate: true              # lm-eval/torch intentionally not in the E1 venv
+  skip_quality_compare: true           # (graded quality comes online at E2+)
 
 system_prechecks:
+  # E1 runs the stock vLLM image, which lacks the MPI/NCCL dev stack to build
+  # nccl-tests (and a single-GPU collective is degenerate); §7 is validated on the
+  # Alps networking image at E2. §7.5 sanctions skipping in exactly this case.
+  skip_system_prechecks: true
   collective_tests_version: "2.17.1"
-  # clariden references are TBD until E2a → the §7.4 gate logs informational only
 
 server_time_limit: "02:00:00"          # shared by engine + benchmarker (§5.1)

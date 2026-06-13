@@ -23,7 +23,7 @@ export HF_HOME={{ scratch_base }}/hf-cache
 VENV="{{ benchmarker_venv }}"
 if [ ! -x "$VENV/bin/python" ]; then
     echo "[benchmarker] building staged venv at $VENV"
-    uv venv "$VENV"
+    uv venv --python 3.12 "$VENV"   # pin a modern Python (bare-node python3 is ancient 3.6)
     uv pip install --python "$VENV/bin/python" -r "{{ tools_remote }}/benchmarker/requirements.txt"
 fi
 export PYTHONPATH="{{ run_dir_remote }}:${PYTHONPATH:-}"   # so `import tools` resolves

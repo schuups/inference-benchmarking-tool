@@ -44,7 +44,11 @@ def render_report(
     timeout_s: int = 600,
     kernel_name: str = "python3",
 ) -> Path:
-    out_dir = Path(out_dir)
+    # Resolve to absolute: the kernel runs with cwd=out_dir, so relative db/template
+    # paths would resolve against the wrong directory.
+    template_path = Path(template_path).resolve()
+    db_path = Path(db_path).resolve()
+    out_dir = Path(out_dir).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
     nb = nbformat.read(str(template_path), as_version=4)
     _inject_params(nb, {
