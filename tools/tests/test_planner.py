@@ -4,6 +4,7 @@ sbatch --test-only on clariden and kubectl --dry-run=server on breithorn are
 the cluster half, validated at E1/E5.
 """
 
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -96,6 +97,9 @@ def test_slurm_render_canonical(tmp_path, canonical_dict, globals_cfg):
         assert "#SBATCH --time=04:00:00" in content
         assert "#SBATCH --comment=inference-benchmarking" in content  # §6.1
 
+    # M7: the orchestrator is told which deployment it is driving (§15 sweep)
+    assert "--deployment-index 0" in benchmarker
+
     # §7.2 concatenation + M3 sampler backgrounding in the same container session
     assert "run_system_prechecks.sh &&" in engine
     assert "hw_sampler.py" in engine and "& " not in engine.split("hw_sampler.py")[0].splitlines()[-1]
@@ -159,5 +163,10 @@ def test_renders_one_run_dir_per_deployment(tmp_path, canonical_dict, globals_cf
     canonical_dict["deployments"].append(second)
     _, run_dirs = _render(tmp_path, canonical_dict, globals_cfg)
     assert len(run_dirs) == 2  # one engine launch == one run_id (§15)
-    contents = [(d / "engine.sbatch").read_text() for d in sorted(run_dirs)]
+    contents = [(d / "engine.sbatch").read_text() for d in run_dirs]
     assert sum("--kv-cache-dtype fp8" in c for c in contents) == 1
+    # each benchmarker carries a distinct --deployment-index (run dirs differ only
+    # by the random run-id suffix, so assert the set rather than positional order)
+    bench = [(d / "benchmarker.sbatch").read_text() for d in run_dirs]
+    idxs = {re.search(r"--deployment-index (\d+)", t).group(1) for t in bench}
+    assert idxs == {"0", "1"}

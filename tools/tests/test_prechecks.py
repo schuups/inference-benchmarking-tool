@@ -6,6 +6,7 @@ NVSHMEM fixtures are provisional shapes — re-capture from the engine image at 
 
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -143,7 +144,7 @@ def test_grade_cli_end_to_end(tmp_path):
     results = tmp_path / "results.json"
     proc = subprocess.run(
         [
-            ".venv/bin/python", "tools/benchmarker/prechecks/grade.py",
+            sys.executable, "tools/benchmarker/prechecks/grade.py",
             "--out-dir", str(out_dir), "--cluster", "clariden",
             "--scope", "4× GH200, 1 node",
             "--storage-scope", "capstor weights mount (Lustre, HDD)",

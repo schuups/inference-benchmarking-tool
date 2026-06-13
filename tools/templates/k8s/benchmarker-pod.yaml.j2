@@ -22,6 +22,8 @@ spec:
       - --run-dir
       - /results
       - --k8s
+      - --deployment-index
+      - "{{ deployment_index }}"
     resources:
       requests: { cpu: "8", memory: 32Gi }
     volumeMounts:

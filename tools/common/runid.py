@@ -25,3 +25,8 @@ def make_run_id(
     ts = (now or datetime.now(timezone.utc)).strftime("%Y%m%d-%H%M%S")
     suffix = secrets.token_hex(2)
     return f"{ts}_{model_slug(model_id)}_{backend}_{deployment}_{suffix}"
+
+
+def run_id_slug(run_id: str) -> str:
+    """run_id → DNS/label-safe slug (K8s object names, §6.1). Underscores → '-'."""
+    return re.sub(r"[^a-z0-9-]+", "-", run_id.lower()).strip("-")
