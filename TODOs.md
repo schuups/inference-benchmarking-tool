@@ -22,6 +22,14 @@
   injection onto the PVC; the planner renders no PVC manifest yet) lands with E5. Also: the
   monitor loop has no overall wall-clock timeout (relies on job status + resume); add one
   if a stuck-PENDING pod/job proves a problem.
+- [ ] **M10 Cleaner — JFrog backend + cluster validation (E1/E5)** — `tools/cleaner.py`
+  implements the `KubectlCleanerBackend` (K8s) and the pure `identify()` policy (tested over
+  all three §6.7 resource classes incl. JFrog), but the **JFrog tag discovery/deletion
+  backend** (`jf rt search`/`del` or the Artifactory REST API, filtered by the benchmark tag
+  prefix) is not built — wire it alongside the M5 JFrog push work. SLURM scratch discovery is
+  assistant-driven via the FirecREST MCP (`scratch_candidates()` from a `list_files` listing +
+  `squeue` for active-job run-ids); validate identify→prune end-to-end on real orphaned
+  resources at E1/E5. `keep_recent_jfrog` is currently global, not per-repository.
 
 ## Experiment Execution
 

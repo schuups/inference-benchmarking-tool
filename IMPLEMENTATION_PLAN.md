@@ -49,7 +49,7 @@ None are descoped.
 | `tools/coordinator/` (`state` resumable run file, `merge` idempotent central-DB merge, `policy` §7.4 gate, `teardown` §6 plan, `backend` ClusterBackend + Fake/Kubectl, `coordinator` phase loop, `main` CLI) + `tools/tests/test_coordinator.py` (11 tests) | Done (M8, 2026-06-13) — deterministic logic + >100MB staged-download round-trip unit-tested vs a fake backend; SLURM FirecREST effects assistant-driven via MCP in-session (decision 5), K8s `kubectl` path headless (staging is E5); live FirecREST validation at E1 |
 | `tools/benchmarker/quality_eval/` (`runner` implementing M7's QualityEvaluator seam, `BuiltinEvalBackend` in-process grader, `LmEvalBackend` lm-eval-harness wrapper, `suites`/`base`) + `tools/tests/test_quality_eval.py` (7 tests); M7 `main.py` wires `QualityEvalRunner(LmEvalBackend())` | Done (M11, 2026-06-13) — Stage-A gate (floor pass/fail) + Stage-B comparison (suites × eval-concurrency → `quality_evals` rows) verified vs the mock's canned answers; gate-abort path exercised by `test_orchestrator`. lm-eval invocation/parse provisional → validated at E1; GPQA-Diamond gating documented (decision 8) |
 | `tools/reports/` (`analysis` §14.1 computations, `plots` matplotlib figures, `notebook` builder, `render` nbclient executor, `fixtures` known-answer DB) + `experiments/template_report.ipynb` + `reports/STYLE.md` + `tools/tests/test_reports.py` (12 tests) | Done (M9, 2026-06-13) — λ\*/supportable-users/capacity-vs-quality asserted against a crafted fixture; notebook executes headless (PNGs + λ\* captured); validated against the real E1 DB later |
-| Cleaner | **Not implemented** |
+| `tools/cleaner.py` (§6.7 `identify` policy + `prune`, ClusterBackend seam: Kubectl/Fake, `scratch_candidates` for the MCP-driven SLURM path, `reminder_due`) + `tools/tests/test_cleaner.py` (5 tests) | Done (M10, 2026-06-13) — identification + skip policy (model-cache PVC §6.6, recent-N JFrog, active-job scratch, age threshold) and approval-gated pruning tested vs a fake backend; K8s headless; SLURM scratch assistant-driven; JFrog `jf` backend is a follow-up |
 
 ## 3. Build strategy
 
@@ -236,7 +236,7 @@ Sizes are relative complexity (S < M < L), not time promises.
   user count, and quality rows (asserted, including the capacity-vs-quality deltas),
   then against the real E1 DB.
 
-### M10 — Cleaner (S–M)
+### M10 — Cleaner (S–M) — ✅ done 2026-06-13 (read-only `identify()` policy over the §6.1 labels/§6.2 pattern with the skip rules — model-cache PVC §6.6, recent-N JFrog tags, active-job scratch, age threshold — plus approval-gated `prune()`; KubectlCleanerBackend headless, SLURM scratch via the MCP-driven `scratch_candidates()`, JFrog `jf` backend deferred; `reminder_due()` for Claude's periodic nudge — Claude never prunes itself; 5 tests; cluster-resource validation at E1/E5)
 
 - **Deliverables**: `tools/cleaner.py` (§6.7) — identification stage (read-only report
   over the §6.1 labels: K8s objects, scratch dirs, JFrog tags) + pruning stage gated on
