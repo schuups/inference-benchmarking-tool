@@ -82,8 +82,10 @@ benchmark-YAML change per §8.2).
 
 ## Docker Image Builds
 
-- [ ] Automate image builds — the image builds green via manual `sbatch` from a
-  login node; automated submission is deferred. See IMPLEMENTATION_PLAN.md M5.
+- [x] Automate image builds — done: `tools/images/build.sh` drives `podman build` +
+  `podman push` over ssh + `srun --overlap` into a held allocation (manifest-driven
+  build-args; writes a digest-pinned EDF consumed by `sanity.sbatch`). See
+  SPECIFICATIONS.md §8.1. First green image: `vllm:0.22.1-alps.net.v1`.
 - [ ] Cross-rebuild layer cache — the per-phase Containerfile caches each phase,
   but with `graphroot` on `/dev/shm` (wiped at job end) the cache persists only
   within an allocation. Iterate interactively; cross-job caching would need a
