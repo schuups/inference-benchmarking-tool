@@ -4,6 +4,24 @@
 
 - [ ] Define which files and folders are immutable (cannot be modified when running experiments)
 - [ ] Structure the tool modularly so the core engine is rarely (ideally never) modified; new capabilities added as modules
+- [ ] **M7 launcher cluster validation (E1/E5)** — `SlurmEngineLauncher` / `K8sEngineLauncher`
+  (`tools/benchmarker/launchers.py`) are exercised only against the mock in
+  `test_orchestrator.py`. On-cluster, validate: nested `sbatch`/`squeue %N` node discovery
+  (incl. the fast-aborting-job race where the node leaves the queue before discovery),
+  `scancel`/`kubectl delete` teardown, engine-log path resolution, and `is_alive()`
+  state mapping. Also: multi-instance readiness currently `asyncio.gather`s `_await_ready`
+  without cancelling siblings on the first abort (harmless for the single-instance v1
+  path, leaves pending tasks for DP/replica deployments), and `model_load_total_s` is the
+  coarse submit→ready wait (scheduling + pre-check + load) with the precise breakdown in
+  the parsed `model_load_*` components — revisit if a cleaner total is needed.
+- [ ] **M8 Coordinator cluster validation (E1/E5)** — the `tools/coordinator/` logic is
+  unit-tested vs `FakeClusterBackend` only. At E1 validate the assistant-driven SLURM path
+  end-to-end via the FirecREST MCP (stage → submit → monitor → §7.4 gate surfacing →
+  staged-download → merge → §6 teardown). `KubectlClusterBackend.stage()` raises
+  NotImplementedError — full K8s coordination (results PVC creation + `benchmark_config`
+  injection onto the PVC; the planner renders no PVC manifest yet) lands with E5. Also: the
+  monitor loop has no overall wall-clock timeout (relies on job status + resume); add one
+  if a stuck-PENDING pod/job proves a problem.
 
 ## Experiment Execution
 
@@ -159,6 +177,16 @@
   workloads).
 
 ## Quality Evaluation
+
+- [ ] **M11 lm-eval validation + grader limits (E1)** — `LmEvalBackend` (`quality_eval/
+  lm_eval_backend.py`) is unit-tested only via the `BuiltinEvalBackend`; the lm-eval
+  `local-chat-completions` model-args and the results-dict metric parsing are provisional
+  (seeded from documented shapes) and must be validated against the pinned lm-eval on the
+  M5 Benchmarker image at E1 — capture a `results.json` fixture and pin the parse. Also:
+  `BuiltinEvalBackend` grades via the load-gen streaming client, which sends no
+  `temperature`/`top_p` (server defaults apply), so suite-defined sampling is lm-eval's job;
+  and both stages target `instances[0]` only (multi-instance routing / `instance_id=NULL`
+  per §13.9 deferred).
 
 - [ ] **Harder eval suites** (SPECIFICATIONS.md §12.5) — extend Stage B beyond
   GSM8K / GPQA-Diamond (both approach saturation on frontier models): MATH-500, HLE,

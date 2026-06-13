@@ -45,7 +45,11 @@ None are descoped.
 | `tools/benchmarker/load_gen/` (arrival, client + §12.1 taxonomy, session scheduler with §11.2 phase accounting, `server_stats` scraper, readiness/model-load/primer) + `tools/testing/mock_openai_server.py` | Done (M2, 2026-06-12) |
 | `tools/benchmarker/db.py` (seven §13 tables, WAL + single-writer, smoke-mode suppression, NDJSON ingestion) + `tools/benchmarker/hw_sampler.py` (stdlib-only, engine-node placement) | Done (M3, 2026-06-12) |
 | `tools/benchmarker/prechecks/` (runner + parsers + §7.3/§7.4 grading) and `tools/planner/` + `tools/templates/` (EDF, engine/benchmarker sbatch, K8s engine + benchmarker pod) | Laptop halves done (M4/M6, 2026-06-12); cluster validation at E1/E5 |
-| Coordinator, Cleaner, Reports generator, Benchmarker orchestrator | **Not implemented** |
+| `tools/benchmarker/orchestrator.py` (`run_experiment` phase driver, `EngineLauncher` + `QualityEvaluator`/M11 seams) + `launchers.py` (Slurm/K8s) + `main.py` CLI + `tools/tests/test_orchestrator.py` (7 mock-integration tests) + planner `--deployment-index` wiring | Done (M7, 2026-06-13) — DoD met on the laptop half against the mock server; SlurmEngineLauncher/K8sEngineLauncher subprocess paths (sbatch/squeue/scancel, kubectl) exercised on-cluster at E1/E5 |
+| `tools/coordinator/` (`state` resumable run file, `merge` idempotent central-DB merge, `policy` §7.4 gate, `teardown` §6 plan, `backend` ClusterBackend + Fake/Kubectl, `coordinator` phase loop, `main` CLI) + `tools/tests/test_coordinator.py` (11 tests) | Done (M8, 2026-06-13) — deterministic logic + >100MB staged-download round-trip unit-tested vs a fake backend; SLURM FirecREST effects assistant-driven via MCP in-session (decision 5), K8s `kubectl` path headless (staging is E5); live FirecREST validation at E1 |
+| `tools/benchmarker/quality_eval/` (`runner` implementing M7's QualityEvaluator seam, `BuiltinEvalBackend` in-process grader, `LmEvalBackend` lm-eval-harness wrapper, `suites`/`base`) + `tools/tests/test_quality_eval.py` (7 tests); M7 `main.py` wires `QualityEvalRunner(LmEvalBackend())` | Done (M11, 2026-06-13) — Stage-A gate (floor pass/fail) + Stage-B comparison (suites × eval-concurrency → `quality_evals` rows) verified vs the mock's canned answers; gate-abort path exercised by `test_orchestrator`. lm-eval invocation/parse provisional → validated at E1; GPQA-Diamond gating documented (decision 8) |
+| `tools/reports/` (`analysis` §14.1 computations, `plots` matplotlib figures, `notebook` builder, `render` nbclient executor, `fixtures` known-answer DB) + `experiments/template_report.ipynb` + `reports/STYLE.md` + `tools/tests/test_reports.py` (12 tests) | Done (M9, 2026-06-13) — λ\*/supportable-users/capacity-vs-quality asserted against a crafted fixture; notebook executes headless (PNGs + λ\* captured); validated against the real E1 DB later |
+| Cleaner | **Not implemented** |
 
 ## 3. Build strategy
 
@@ -185,7 +189,7 @@ Sizes are relative complexity (S < M < L), not time promises.
   `run_system_prechecks && exec <engine>` concatenation, and the M3 sampler
   backgrounding in the engine container command.
 
-### M7 — Benchmarker orchestrator (M–L) *(added by review H1)*
+### M7 — Benchmarker orchestrator (M–L) *(added by review H1)* — ✅ laptop half done 2026-06-13 (run_experiment phase driver + EngineLauncher/QualityEvaluator seams + Slurm/K8s launchers + CLI + 7 mock-integration tests; planner gained `--deployment-index`; nested-sbatch / squeue / kubectl paths validated on-cluster at E1/E5; the M11 quality evaluator slots into the seam via `main.py`)
 
 - **Deliverables**: `tools/benchmarker/main.py` — the cluster-side driver that owns the
   §1 phase sequencing: run dataset generation → **submit the inference deployment(s)
@@ -201,7 +205,7 @@ Sizes are relative complexity (S < M < L), not time promises.
   until the dataset pool exists); forced pre-check warn pauses and resolves per config;
   smoke-test mode produces no persisted results and two unmissable warnings.
 
-### M8 — Coordinator (L)
+### M8 — Coordinator (L) — ✅ laptop half done 2026-06-13 (resumable state machine, idempotent `run_id`-keyed central-DB merge, §6 teardown on success+failure with best-effort partial-DB salvage, §7.4 gate policy, ClusterBackend seam + FakeClusterBackend + KubectlClusterBackend skeleton, CLI; 11 mock-integration/unit tests incl. the >100MB staged-download round-trip. Per decision 5 the SLURM/FirecREST path is assistant-driven via MCP in-session — no autonomous SLURM backend; K8s headless via kubectl, full K8s staging at E5; live FirecREST submit/monitor/download validated at E1)
 
 - **Deliverables**: `tools/coordinator/` — pre-staging of HF datasets to capstor before
   submission (review LOW); submit (FirecREST for SLURM, kubectl for K8s); monitor loop
@@ -216,7 +220,7 @@ Sizes are relative complexity (S < M < L), not time promises.
   still tears down all labelled resources; PVC retention honored (§6.6); a >100 MB
   fixture DB round-trips intact through the staged-transfer download.
 
-### M9 — Reports generator (M)
+### M9 — Reports generator (M) — ✅ done 2026-06-13 (analysis module computes every §14.1 panel — measurement-phase filtering, per-class latency-vs-λ, λ\* / SLO attainment, supportable-users via Little's law, quality + capacity-vs-quality deltas, hardware overlays — asserted against a known-answer fixture; matplotlib plots; the §14.1 template notebook `experiments/template_report.ipynb` executes headless via nbclient, writing report.ipynb + ttft/itl/hardware PNGs; `reports/STYLE.md` bootstrapped; real-DB validation at E1)
 
 - **Deliverables**: `experiments/template_report.ipynb` with every §14.1 panel —
   scenario/mix manifest panel, pre-checks table, model-load breakdown, TTFT/ITL vs λ
@@ -242,7 +246,7 @@ Sizes are relative complexity (S < M < L), not time promises.
 - **DoD**: identification correctly lists deliberately-orphaned test resources on both
   platforms; pruning removes exactly the approved list; model-cache PVCs skipped.
 
-### M11 — Quality eval runner (M)
+### M11 — Quality eval runner (M) — ✅ laptop half done 2026-06-13 (QualityEvalRunner implements M7's seam; BuiltinEvalBackend in-process grader is the tested path against the mock's canned answers; LmEvalBackend wraps lm-eval-harness `local-chat-completions` for standard suites — provisional model-args/parse, E1-validated like the readiness regexes; Stage-A floor gate + Stage-B suites×eval-concurrency rows persisted to `quality_evals`; wired into M7 `main.py`; GPQA gating + thinking-model parsing documented/deferred)
 
 - **Deliverables**: `tools/benchmarker/quality_eval/` — lm-eval-harness wrapper
   targeting the deployed OpenAI-compatible endpoint(s); **Stage A** sanity gate
@@ -326,18 +330,24 @@ DBs alongside M2/M3.
    Artifactory URL); a §3 pre-flight row now guards this.
 3. **Code-to-cluster delivery** — proposal: baked into the benchmarker image (M5), git
    clone as fallback.
-4. **Centralized results DB shape** — proposal: `experiments/results.db`, per-run DBs
-   merged on download (`run_id` keys make this idempotent); per-run files remain the
-   §13.8 provenance artifacts.
-5. **Programmatic FirecREST client for the Coordinator CLI path** — MCP serves the
-   Claude-driven path; the plain-CLI path likely needs `pyfirecrest`. Decide at M8.
+4. **Centralized results DB shape** — **resolved 2026-06-13 (M8)**: `experiments/results.db`,
+   per-run DBs merged on download via `tools/coordinator/merge.py` (`ATTACH` + delete-then-
+   insert, idempotent by `run_id`); per-run files remain the §13.8 provenance artifacts.
+5. **Programmatic FirecREST client for the Coordinator** — **resolved 2026-06-13 (M8,
+   operator decision)**: **MCP-mediated, assistant-driven in-session** — there is no
+   autonomous SLURM/FirecREST client; the assistant performs submit/monitor/staged-download/
+   teardown via the FirecREST MCP tools using the `tools/coordinator/` helpers. Consequence
+   (accepted): orchestrating a SLURM experiment goes through Claude. K8s runs headless via
+   `kubectl`. (`pyfirecrest` 3.8.0 stays installed for pre-flight/ad-hoc use.)
 6. **`sessions_per_user_per_hour` defaults per class** (TODOs) — needed before E3's
    report narrative is meaningful; literature/telemetry research task.
 7. **Small open MoE for the E3 bring-up ladder** — pick a model the pinned backend
    supports (candidate class: Mixtral-/Qwen-MoE-sized) purely as an EP smoke vehicle.
-8. **GPQA-Diamond gated access** — the dataset is HF-gated (license click-through +
-   auth token on the Benchmarker). Needed before Stage-B defaults run; fallback: swap
-   in an ungated hard suite.
+8. **GPQA-Diamond gated access** — **documented 2026-06-13 (M11)**: setup (HF license
+   click-through + `HF_TOKEN` on the Benchmarker, reusing the jobs' `HUGGING_FACE_HUB_TOKEN`)
+   is in `lm_eval_backend.py`; the default Stage-A gate is ungated GSM8K, and `compare.suites`
+   can drop GPQA for an ungated hard suite. Live token/access still to be confirmed at E1
+   before Stage-B GPQA defaults run.
 
 ## 10. Review log
 
