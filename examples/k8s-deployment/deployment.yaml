@@ -24,7 +24,7 @@ spec:
         effect: NoExecute
       containers:
       - name: vllm
-        image: jfrog.svc.cscs.ch/ml/inference/vllm:0.22.1-alps.net.v1
+        image: jfrog.svc.cscs.ch/ml/inference/vllm:0.22.1-alps.net.v1-gh200
         args:
         - --model
         - swiss-ai/Apertus-8B-Instruct-2509

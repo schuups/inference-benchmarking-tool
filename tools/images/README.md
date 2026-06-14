@@ -3,9 +3,12 @@
 Inference-engine container images extended with the **Alps HPC network stack**
 (Slingshot-11 / GH200 / MI300A), built from sources in this repo and published to
 the CSCS JFrog Artifactory (SPECIFICATIONS.md §9.1). Each image is identified by
-**vendor × backend × backend-version × netstack-version** and is self-contained:
-the network libraries are baked in, so no container-engine CXI / aws-ofi-nccl hook
-is needed at runtime.
+**vendor × node-type × backend × backend-version × netstack-version** and is
+self-contained: the network libraries are baked in, so no container-engine CXI /
+aws-ofi-nccl hook is needed at runtime. The **node-type** (`gh200` / `a100` /
+`mi300a`) carries through to the slug and the published tag (suffix, e.g.
+`…-alps.net.v1-gh200`), because an `nvidia` `vllm` image differs by GPU/arch
+(GH200 aarch64 vs A100 x86_64) and AMD swaps the netstack family entirely.
 
 The network-stack component set, pins, runtime env vars, and Slingshot-11 launch
 rules follow the [CSCS — Alps extended images documentation](https://docs.cscs.ch/software/alps-extended-images/).
@@ -21,9 +24,9 @@ Status legend: `pending-build` → `building` → `built` → `pushed` →
 - **`benchmarked`** — additionally validated through **inference performance-scaling**
   experiments (real serving workloads, multi-GPU/multi-node scaling characterised).
 
-| Image (slug) | Vendor | Backend | Version | Netstack | Tag | Status | Sanity |
-|---|---|---|---|---|---|---|---|
-| [`nvidia-vllm-0.22.1-net.v1`](nvidia-vllm-0.22.1-net.v1/) | nvidia | vllm | 0.22.1 | nvidia/v1 | `…/vllm:0.22.1-alps.net.v1` | **verified** | pass (2-node) |
+| Image (slug) | Vendor | Node | Backend | Version | Netstack | Tag | Status | Sanity |
+|---|---|---|---|---|---|---|---|---|
+| [`nvidia-gh200-vllm-0.22.1-net.v1`](nvidia-gh200-vllm-0.22.1-net.v1/) | nvidia | gh200 | vllm | 0.22.1 | nvidia/v1 | `…/vllm:0.22.1-alps.net.v1-gh200` | **verified** | pass (2-node, 129 GB/s) |
 
 <!-- Keep this table in sync with each image's manifest.yaml (status + sanity). -->
 
@@ -36,7 +39,7 @@ tools/images/
     common/                      generic, version-agnostic env/warning installers
     nvidia/netstack/v1/          NVIDIA Alps stack v1: Containerfile + phases/ + patches/
       runtime/                   the env tuning (NCCL/FI_CXI/NVSHMEM/...) + rdzv warning
-  <vendor>-<backend>-<ver>-net.<n>/   one directory per image
+  <vendor>-<node>-<backend>-<ver>-net.<n>/  one directory per image (node = gh200/a100/mi300a)
     manifest.yaml                identity, base, pins, status, provenance
     variant/hooks.d/             optional per-image late build hooks
     tests/                       post-push sanity (component-load + collectives)

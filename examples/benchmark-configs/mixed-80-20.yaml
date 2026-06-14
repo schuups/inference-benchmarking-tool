@@ -14,7 +14,7 @@ deployments:
     backend_version: "0.22.1"
     # Self-contained, hook-disabled Alps netstack image (§9.1): works on both SLURM
     # and K8s. Other backends / netstacks publish sibling tags under ml/inference/.
-    image: jfrog.svc.cscs.ch/ml/inference/vllm:0.22.1-alps.net.v1
+    image: jfrog.svc.cscs.ch/ml/inference/vllm:0.22.1-alps.net.v1-gh200
     model: moonshotai/Kimi-K2.6
     backend_config:
       tensor_parallel_size: 4          # §6.1: must not exceed gpus_per_node (4)

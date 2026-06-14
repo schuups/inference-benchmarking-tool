@@ -6,8 +6,11 @@
 # catalogue table in ../README.md.
 
 # ---- identity ----
-slug: nvidia-vllm-0.22.1-net.v1
+slug: nvidia-gh200-vllm-0.22.1-net.v1
 vendor: nvidia
+node_type: gh200                    # GPU/platform target (arch aarch64). Part of the
+                                    # identity: disambiguates the otherwise-identically-named
+                                    # A100 (x86_64) and MI300A (AMD) builds. -> tag suffix.
 backend: vllm
 backend_version: "0.22.1"
 netstack: nvidia/v1                 # -> core/nvidia/netstack/v1
@@ -22,11 +25,13 @@ description: >-
 #   verified    = netstack sanity green (components load + Slingshot reference
 #                 bandwidth); usable, but inference performance scaling not yet tested.
 #   benchmarked = additionally validated in inference performance-scaling experiments.
-status: verified         # built + pushed + 2-node sanity green on clariden 2026-06-13
+status: verified         # built + pushed + 2-node sanity green under the …-gh200 tag,
+                         # clariden 2026-06-14 (peak inter-node all_reduce busbw 129.2 GB/s).
+                         # Supersedes the arch-ambiguous …net.v1 tag verified 2026-06-13.
 
 # ---- source base + published tag ----
 base_image: docker.io/vllm/vllm-openai:v0.22.1-aarch64-ubuntu2404
-image_tag: jfrog.svc.cscs.ch/ml/inference/vllm:0.22.1-alps.net.v1
+image_tag: jfrog.svc.cscs.ch/ml/inference/vllm:0.22.1-alps.net.v1-gh200
 
 # ---- baked-in netstack component pins ("what it contains") ----
 # Mirror core/nvidia/netstack/v1 Containerfile ARG defaults; override per-image
@@ -55,7 +60,8 @@ netstack_pins:
 # ---- provenance (filled at build time by build.sh) ----
 provenance:
   containerfile: core/nvidia/netstack/v1/Containerfile
-  netstack_git_sha: null     # repo SHA of core/nvidia/netstack/v1 at build
+  netstack_git_sha: ead9905ad6943f5f6c5484365760d349279450b2  # core/nvidia/netstack/v1 subtree clean at build
+
   base_digest: sha256:adced27d9aebd8355fe90b4546aa715ee169b2e5abdad437d0f48d1ee1fd3c06
   base_probe:                # observed in the base on 2026-06-13 (drives the pins above)
     os: Ubuntu 24.04.3 LTS
@@ -68,26 +74,25 @@ provenance:
     hpcx_efa: absent
     entrypoint: ["vllm", "serve"]
   built_by: stefschu
-  built_at: "2026-06-13T20:17:30+02:00"
-  image_id: sha256:75147c238b2d803a31b79bc1fe487e5d464d09c630f603e1acea48a9cd7d7837
-  registry_digest: sha256:f3188394e0720aecf6da6ce892bc6a281a3ecbff060860cf40b0a5f1d775921a
+  built_at: "2026-06-14T20:48:13+02:00"
+  image_id: sha256:da11b0db990ee7ac45a3337b99c1ce801b563bded61ac96c6be24d90c9a02ed9
+  registry_digest: sha256:949c5cdfeaf096b93af6b52cb5dbfdb78549263635059e0d663cce4b83407034
   # No durable build_log: build/staging under /capstor/.../ibt is EPHEMERAL (can be
   # reclaimed anytime). Reproducibility = netstack_git_sha + the pins above +
   # base_digest + registry_digest.
 
 # ---- post-push sanity (filled by tests/, see tests/README) ----
 sanity:
-  status: pass               # 1-node + 2-node NCCL green on clariden 2026-06-13
-  ran_at: "2026-06-13T21:00+02:00"
+  status: pass               # 2-node NCCL/OSU/NVSHMEM green under the …-gh200 tag, clariden 2026-06-14
+  ran_at: "2026-06-14T20:52:01+02:00"
   nodes: 2
   notes: >-
-    GH200, self-contained (EDF cxi hook off, no aws-ofi hook, srun
-    --network=disable_rdzv_get). 1-node 4-GPU: fi_info -p cxi = 4 NICs (cxi0-3),
-    NCCL loads aws-ofi-nccl 1.17.3 over libfabric 2.5/CXI, all_reduce busbw 79.2
-    GB/s (NVLink-C2C). 2-node 8-rank over Slingshot: all ranks "Selected provider
-    cxi (4 nics)" + "Using network AWS Libfabric"; all_reduce busbw 131.9 GB/s @
-    128 MiB, 151.4 GB/s @ 1 GiB (above the ~122 GB/s CSCS reference). OSU osu_bw
-    inter-node 23.9 GB/s (Slingshot single-NIC). NVSHMEM v3.6.5 over CXI:
-    shmem_put_bw 23.45 GB/s, alltoall_latency 8-PE inter-node OK. All components
-    (NCCL/aws-ofi/CXI, libfabric, NVSHMEM, OMPI, OSU) load + run with no errors.
+    Re-verified under the disambiguated …-gh200 tag (digest-pinned EDF
+    @sha256:949c5cdf). GH200, self-contained (EDF cxi hook off, no aws-ofi hook,
+    srun --network=disable_rdzv_get). 2-node 8-rank over Slingshot: peak
+    inter-node all_reduce busbw 129.2 GB/s (clears the ~122 GB/s CSCS reference;
+    far above the ~5 GB/s "plugin didn't fire" floor). OSU osu_bw, NVSHMEM
+    shmem_put_bw + alltoall_latency green; all components (NCCL/aws-ofi/CXI,
+    libfabric, NVSHMEM, OMPI, OSU) load + run with no errors. Consistent with the
+    2026-06-13 run on the old tag (131.9 GB/s @ 128 MiB, 79.2 GB/s intra-node).
   todo_inter_node: false

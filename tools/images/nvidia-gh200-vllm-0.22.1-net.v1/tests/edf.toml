@@ -6,7 +6,7 @@
 # (see core/nvidia/netstack/v1/runtime/alps-runtime.env; otherwise the runtime emits a warning).
 #
 # `#` separates the registry host from the repo path in CE EDF image refs.
-image = "jfrog.svc.cscs.ch#ml/inference/vllm:0.22.1-alps.net.v1"
+image = "jfrog.svc.cscs.ch#ml/inference/vllm:0.22.1-alps.net.v1-gh200"
 mounts = ["/users", "/capstor", "/iopsstor"]
 
 [annotations]

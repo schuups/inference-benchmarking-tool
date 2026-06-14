@@ -12,7 +12,7 @@
 #   tools/images/build.sh <image-slug> --jobid <HOLDER_JOBID> [--no-push]
 #
 # Env overrides: IB_CLUSTER (default clariden), IB_REMOTE_BASE
-#   (default /capstor/scratch/cscs/$USER/ib/image-builds, $USER expanded remotely).
+#   (default /capstor/scratch/cscs/$USER/ibt/image-builds, $USER expanded remotely).
 #
 # Prereqs on the cluster (operator, once): ~/.config/containers/{storage.conf,
 # auth.json} (§3). See the project_image_build_env memory for the full recipe.
@@ -21,7 +21,7 @@ set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 PY="${REPO}/.venv/bin/python"
 CLUSTER="${IB_CLUSTER:-clariden}"
-REMOTE_BASE_TMPL='${IB_REMOTE_BASE:-/capstor/scratch/cscs/$USER/ib/image-builds}'
+REMOTE_BASE_TMPL='${IB_REMOTE_BASE:-/capstor/scratch/cscs/$USER/ibt/image-builds}'
 
 SLUG="" ; JOBID="" ; DO_PUSH=1
 while [[ $# -gt 0 ]]; do
