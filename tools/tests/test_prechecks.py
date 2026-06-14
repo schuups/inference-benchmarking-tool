@@ -18,6 +18,7 @@ from tools.benchmarker.prechecks.grade import (
     grade,
     load_reference,
     metric_id,
+    nvshmem_max_busbw,
     outcome_exit_code,
     parse_dd_output,
     parse_nccl_output,
@@ -35,11 +36,43 @@ NCCL_FIXTURE = """\
 # Avg bus bandwidth    : 95.21
 """
 
+# Real NVSHMEM perftest layout, captured on the Alps gh200 image at E2a (2026-06-14):
+# a preamble then one or more tables headed "size(B) count type scope latency(us) ...".
+# A genuine multi-PE run: busbw is non-zero (it is 0 only when a single PE wired up).
 NVSHMEM_LATENCY_FIXTURE = """\
-#  alltoall_latency
-#  size(B)        latency(us)
-       1024           8.12
-     131072          19.46
+Runtime options after parsing command line arguments
+NVSHMEM v3.6.5
+mype: 0 mype_node: 0 device name: NVIDIA GH200 120GB bus id: 1
+#alltoall_device
+size(B)     count     type      scope     latency(us)       algbw(GB/s)   busbw(GB/s)
+1024        256       32-bit    thread    8.120000          0.119         0.089
+131072      32768     32-bit    thread    19.460000         12.760        19.140
+"""
+
+NVSHMEM_PUT_BW_FIXTURE = """\
+#shmem_put_bw
+size(B)     count     type      scope     latency(us)       algbw(GB/s)   busbw(GB/s)
+1048576     1         32-bit    -         45.000000         12.300        12.300
+134217728   1         32-bit    -         120.000000        23.450        23.450
+"""
+
+# Degenerate single-PE alltoall (PMIx wire-up failed): busbw ≡ 0 across the table.
+# Captured at E2a run 2, before the run-nvshmem.sh PMIx-reset fix. The latency
+# column is a local copy, not a collective — grading must SKIP it, not record it.
+NVSHMEM_DEGENERATE_FIXTURE = """\
+NVSHMEM v3.6.5
+mype: 0 mype_node: 0 device name: NVIDIA GH200 120GB bus id: 1
+#alltoall_device
+size(B)     count     type      scope     latency(us)       algbw(GB/s)   busbw(GB/s)
+131072      16384     64-bit    block     10.256000         12.780        0.000
+4194304     524288    64-bit    block     197.980797        21.185        0.000
+"""
+
+# pt-to-pt put_bw launched with a single PE: the binary aborts before any table.
+NVSHMEM_PUTBW_1PE_FIXTURE = """\
+[nvshmem] using /opt/nvshmem/bin/perftest
+This test requires exactly two processes
+[/tmp/nvshmem-src/perftest/common/utils.cu:614] cuda failed with invalid argument
 """
 
 DD_FIXTURE = "4096+0 records in\n4096+0 records out\n4294967296 bytes (4.3 GB, 4.0 GiB) copied, 2.951 s, 1.5 GB/s\n"
@@ -60,8 +93,12 @@ def test_parse_nccl_output_busbw_at_target():
 
 
 def test_parse_nvshmem_output():
+    # latency column at the target size (128 KiB)
     assert parse_nvshmem_output(NVSHMEM_LATENCY_FIXTURE, 131072) == pytest.approx(19.46)
+    assert parse_nvshmem_output(NVSHMEM_LATENCY_FIXTURE, 1024) == pytest.approx(8.12)
     assert parse_nvshmem_output(NVSHMEM_LATENCY_FIXTURE, 7) is None
+    # bandwidth column (busbw) at the target size (128 MiB)
+    assert parse_nvshmem_output(NVSHMEM_PUT_BW_FIXTURE, 134217728, "bw") == pytest.approx(23.45)
 
 
 def test_parse_dd_output_units():
@@ -90,12 +127,19 @@ def test_reference_loads_real_yaml():
     refs = load_reference("clariden", REFERENCE_PATH)
     assert len(refs) == 12
     assert all(r["cluster"] == "clariden" for r in refs)
-    # all clariden entries are still TBD placeholders -> informational grading
+    # clariden 4× GH200 1-node NCCL is characterised at E2a -> enforceable grading
     rows = build_rows(
-        [{"benchmark": "NCCL all_reduce", "scope": "4× GH200, 1 node", "size": "128 MiB", "measured": 128.1}],
+        [{"benchmark": "NCCL all_reduce", "scope": "4× GH200, 1 node", "size": "128 MiB", "measured": 100.0}],
         refs,
     )
-    assert rows[0]["expected"] is None and rows[0]["status"] == "pass"
+    assert rows[0]["expected"] == pytest.approx(317.7)
+    assert rows[0]["status"] == "fail"  # 100 < 0.5 × 317.7
+    # still-TBD scopes (e.g. the 2-node ladder) remain informational
+    rows_tbd = build_rows(
+        [{"benchmark": "NCCL all_reduce", "scope": "8× GH200, 2 nodes", "size": "128 MiB", "measured": 100.0}],
+        refs,
+    )
+    assert rows_tbd[0]["expected"] is None and rows_tbd[0]["status"] == "pass"
 
 
 def test_outcome_exit_codes():
@@ -138,6 +182,36 @@ def test_collect_measurements_maps_files_to_reference_rows(tmp_path):
     assert "NVSHMEM shmem_put_bw" not in by_benchmark
 
 
+def test_nvshmem_max_busbw():
+    assert nvshmem_max_busbw(NVSHMEM_LATENCY_FIXTURE) == pytest.approx(19.14)
+    assert nvshmem_max_busbw(NVSHMEM_DEGENERATE_FIXTURE) == 0.0
+    assert nvshmem_max_busbw("garbage with no table\n") == 0.0
+
+
+def test_nvshmem_degenerate_single_pe_skipped(tmp_path):
+    """busbw ≡ 0 (collective) or "requires exactly two processes" (pt-to-pt) means
+    the perftest wired up a single PE — the value is not a real measurement and
+    must be skipped, not recorded (§8.1)."""
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    (out_dir / "nvshmem_alltoall_latency.out").write_text(NVSHMEM_DEGENERATE_FIXTURE)
+    (out_dir / "nvshmem_put_bw.out").write_text(NVSHMEM_PUTBW_1PE_FIXTURE)
+    refs = load_reference("clariden", REFERENCE_PATH)
+    measurements = collect_measurements(out_dir, "clariden", "4× GH200, 1 node", "", refs)
+    assert not any("NVSHMEM" in m["benchmark"] for m in measurements)
+
+
+def test_nvshmem_put_bw_collected_when_multi_pe(tmp_path):
+    """A genuine 2-PE put_bw run (non-zero busbw) is parsed and recorded."""
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    (out_dir / "nvshmem_put_bw.out").write_text(NVSHMEM_PUT_BW_FIXTURE)
+    refs = load_reference("clariden", REFERENCE_PATH)
+    measurements = collect_measurements(out_dir, "clariden", "4× GH200, 1 node", "", refs)
+    by_benchmark = {m["benchmark"]: m for m in measurements}
+    assert by_benchmark["NVSHMEM shmem_put_bw"]["measured"] == pytest.approx(23.45)
+
+
 def test_nvshmem_skip_detected_by_content(tmp_path):
     """E1 attempt #4: the runner tees the §8.1 skip warning INTO the capture
     file, so a 'skipped' NVSHMEM must not grade as fail."""
@@ -159,14 +233,15 @@ def test_grade_cli_end_to_end(tmp_path):
     proc = subprocess.run(
         [
             sys.executable, "tools/benchmarker/prechecks/grade.py",
-            "--out-dir", str(out_dir), "--cluster", "clariden",
-            "--scope", "4× GH200, 1 node",
+            "--out-dir", str(out_dir), "--cluster", "bristen",
+            "--scope", "4× A100, 1 node",
             "--storage-scope", "capstor weights mount (Lustre, HDD)",
             "--results", str(results), "--smoke",
         ],
         capture_output=True, text=True, cwd=Path(__file__).resolve().parents[2],
     )
-    assert proc.returncode == 0, proc.stderr  # all TBD references -> informational pass
+    # bristen is still fully TBD -> informational pass (clariden 1-node is now enforceable)
+    assert proc.returncode == 0, proc.stderr
     payload = json.loads(results.read_text())
     assert payload["smoke_test_mode"] is True
     assert len(payload["rows"]) == 5

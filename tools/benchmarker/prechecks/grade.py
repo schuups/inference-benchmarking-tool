@@ -59,19 +59,39 @@ def parse_nccl_output(text: str, target_bytes: int) -> float | None:
     return None
 
 
-def parse_nvshmem_output(text: str, target_bytes: int) -> float | None:
-    """Second numeric column at the target size row (latency µs or bandwidth GB/s)."""
+def parse_nvshmem_output(text: str, target_bytes: int, want: str = "latency") -> float | None:
+    """Value at the target message-size row of an NVSHMEM perftest table.
+
+    The perftest prints one or more tables under a header like:
+        size(B)  count  type  scope  latency(us)  algbw(GB/s)  busbw(GB/s)
+    `want` selects the column: "latency" -> latency(us); "bw" -> busbw/bandwidth.
+    The column index is taken from the header (robust to spacing/layout), and the
+    last matching table wins (the final / most-representative scope).
+    """
+    col = None
+    found = None
     for line in text.splitlines():
         parts = line.split()
-        if len(parts) >= 2:
-            try:
-                size = int(float(parts[0]))
-                value = float(parts[1])
-            except ValueError:
-                continue
-            if size == target_bytes:
-                return value
-    return None
+        if not parts:
+            continue
+        if parts[0].startswith("size("):  # header row -> (re)locate the wanted column
+            col = next(
+                (i for i, name in enumerate(parts)
+                 if (want == "latency" and name.startswith("latency"))
+                 or (want == "bw" and ("busbw" in name or name.startswith("bw")))),
+                None,
+            )
+            continue
+        if col is None:
+            continue
+        try:
+            size = int(float(parts[0]))
+            value = float(parts[col])
+        except (ValueError, IndexError):
+            continue
+        if size == target_bytes:
+            found = value
+    return found
 
 
 def parse_dd_output(text: str) -> float | None:
@@ -80,6 +100,32 @@ def parse_dd_output(text: str) -> float | None:
     if not m:
         return None
     return float(m.group(1)) * _BW_TO_GBS[m.group(2)]
+
+
+def nvshmem_max_busbw(text: str) -> float:
+    """Largest busbw(GB/s) across every NVSHMEM perftest row.
+
+    busbw is derived from algbw and the PE count, so it is identically 0 when the
+    run wired up a single PE (the 2(n-1)/n factor is 0 at n=1). A whole-table max
+    of 0 is therefore a reliable "degenerate single-PE run" signal — the latency
+    column is then a local copy, not a real collective (see parse_nvshmem_output
+    for the table layout)."""
+    col = None
+    best = 0.0
+    for line in text.splitlines():
+        parts = line.split()
+        if not parts:
+            continue
+        if parts[0].startswith("size("):
+            col = next((i for i, n in enumerate(parts) if "busbw" in n), None)
+            continue
+        if col is None:
+            continue
+        try:
+            best = max(best, float(parts[col]))
+        except (ValueError, IndexError):
+            continue
+    return best
 
 
 # ------------------------------------------------------------------- grading
@@ -176,8 +222,10 @@ def collect_measurements(out_dir: Path, cluster: str, scope: str, storage_scope:
             {"benchmark": benchmark, "scope": scope, "size": size_label,
              "measured": parse_nccl_output(path.read_text(), target)}
         )
-    for path, suffix in [(out_dir / "nvshmem_alltoall_latency.out", "alltoall_latency"),
-                         (out_dir / "nvshmem_put_bw.out", "shmem_put_bw")]:
+    for path, suffix, want, default_size in [
+        (out_dir / "nvshmem_alltoall_latency.out", "alltoall_latency", "latency", "128 KiB"),
+        (out_dir / "nvshmem_put_bw.out", "shmem_put_bw", "bw", "128 MiB"),
+    ]:
         if not path.exists():
             continue  # skipped-with-warning path (§8.1) — no row, orchestrator logs it
         text = path.read_text()
@@ -185,13 +233,21 @@ def collect_measurements(out_dir: Path, cluster: str, scope: str, storage_scope:
             # §8.1 skip: the runner tees the warning into the capture file, so
             # absence-of-file is not the only skip signal — content is.
             continue
+        if "requires exactly" in text or nvshmem_max_busbw(text) == 0.0:
+            # Degenerate single-PE run: the perftest wired up only 1 PE (PMIx
+            # bootstrap failed). A collective then reports busbw ≡ 0 and a
+            # pt-to-pt test aborts with "requires exactly two processes" — either
+            # way the value is not a real multi-PE measurement, so skip the row
+            # rather than record a misleading number (§8.1). run-nvshmem.sh logs
+            # the cause into the captured .out.
+            continue
         benchmark = f"{shmem_prefix} {suffix}"
         ref = find_reference(refs, benchmark, scope)
-        size_label = ref["size"] if ref else "128 KiB"
-        target = size_label_to_bytes(size_label) or 128 * 1024
+        size_label = ref["size"] if ref else default_size
+        target = size_label_to_bytes(size_label) or size_label_to_bytes(default_size)
         measurements.append(
             {"benchmark": benchmark, "scope": scope, "size": size_label,
-             "measured": parse_nvshmem_output(path.read_text(), target)}
+             "measured": parse_nvshmem_output(text, target, want)}
         )
     storage = out_dir / "storage_read.out"
     if storage.exists():

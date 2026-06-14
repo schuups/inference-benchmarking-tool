@@ -13,9 +13,11 @@
 # Until populated, the foundation gate is unenforceable — measurements log as informational.
 
 # ── clariden (NVIDIA GH200 — 4 GPUs / node) ─────────────────────────────────────
-- { cluster: clariden, scope: "4× GH200, 1 node",  benchmark: NCCL all_reduce,           size: 128 MiB, expected: TBD GB/s busbw, tolerance_pct: -10, source: TBD }
-- { cluster: clariden, scope: "4× GH200, 1 node",  benchmark: NCCL all_gather,           size: 128 MiB, expected: TBD GB/s busbw, tolerance_pct: -10, source: TBD }
-- { cluster: clariden, scope: "4× GH200, 1 node",  benchmark: NCCL alltoall,             size: 128 MiB, expected: TBD GB/s busbw, tolerance_pct: -10, source: TBD }
+- { cluster: clariden, scope: "4× GH200, 1 node",  benchmark: NCCL all_reduce,           size: 128 MiB, expected: 317.7 GB/s busbw, tolerance_pct: -10, source: "E2a 2026-06-14 (first characterisation, mean of 2 runs: 316.73, 318.65)" }
+- { cluster: clariden, scope: "4× GH200, 1 node",  benchmark: NCCL all_gather,           size: 128 MiB, expected: 283.5 GB/s busbw, tolerance_pct: -10, source: "E2a 2026-06-14 (first characterisation, mean of 2 runs: 283.55, 283.43)" }
+- { cluster: clariden, scope: "4× GH200, 1 node",  benchmark: NCCL alltoall,             size: 128 MiB, expected: 306.2 GB/s busbw, tolerance_pct: -10, source: "E2a 2026-06-14 (first characterisation, mean of 2 runs: 307.75, 304.57)" }
+# NVSHMEM stays TBD: perftest needs a dedicated multi-task `srun --mpi=pmix` step it cannot get
+# inside the engine's single-task session — uncharacterised pending that step (TODOs.md, §8.1).
 - { cluster: clariden, scope: "4× GH200, 1 node",  benchmark: NVSHMEM alltoall_latency,  size: 128 KiB, expected: TBD µs,         tolerance_pct: +20, source: TBD }
 - { cluster: clariden, scope: "4× GH200, 1 node",  benchmark: NVSHMEM shmem_put_bw,      size: 128 MiB, expected: TBD GB/s,       tolerance_pct: -10, source: TBD }
 - { cluster: clariden, scope: "8× GH200, 2 nodes", benchmark: NCCL all_reduce,           size: 128 MiB, expected: TBD GB/s busbw, tolerance_pct: -10, source: TBD }
@@ -23,7 +25,12 @@
 - { cluster: clariden, scope: "8× GH200, 2 nodes", benchmark: NCCL alltoall,             size: 128 MiB, expected: TBD GB/s busbw, tolerance_pct: -10, source: TBD }
 - { cluster: clariden, scope: "8× GH200, 2 nodes", benchmark: NVSHMEM alltoall_latency,  size: 128 KiB, expected: TBD µs,         tolerance_pct: +20, source: TBD }
 - { cluster: clariden, scope: "8× GH200, 2 nodes", benchmark: NVSHMEM shmem_put_bw,      size: 128 MiB, expected: TBD GB/s,       tolerance_pct: -10, source: TBD }
-- { cluster: clariden, scope: "capstor weights mount (Lustre, HDD)",  benchmark: Sequential read, size: 1 MiB blocks, expected: TBD GB/s, tolerance_pct: -15, source: TBD }
+# Single-stream O_DIRECT read of a real Apertus-8B safetensors blob (4 GiB). Measured 62.9 MB/s
+# at E2a, but capstor was under general slowness then (operator-confirmed), so this is NOT a
+# representative baseline — a conservative floor only, pending re-characterisation in a later
+# phase (TODOs.md). A healthy capstor reads faster, so the -15% band won't false-fail; vLLM's
+# parallel shard loads also aggregate higher than this single-stream floor.
+- { cluster: clariden, scope: "capstor weights mount (Lustre, HDD)",  benchmark: Sequential read, size: 1 MiB blocks, expected: 0.063 GB/s, tolerance_pct: -15, source: "E2a 2026-06-14 (single sample during capstor degradation — re-characterise)" }
 - { cluster: clariden, scope: "iopsstor weights mount (Lustre, flash)", benchmark: Sequential read, size: 1 MiB blocks, expected: TBD GB/s, tolerance_pct: -15, source: TBD }
 
 # ── bristen (NVIDIA A100 — 4 GPUs / node) ──────────────────────────────────────

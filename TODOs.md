@@ -105,7 +105,27 @@
 - [ ] **Characterise pre-check reference values** for `tools/system_prechecks_reference.yaml`
   on each cluster (clariden GH200, bristen A100, beverin MI300A, breithorn gh200) — the
   TBD placeholders in §8.3 must be replaced with measured medians plus tolerances before
-  the foundation gate (§8.4) becomes enforceable.
+  the foundation gate (§8.4) becomes enforceable. **Done so far:** clariden "4× GH200, 1 node"
+  NCCL all_reduce/all_gather/alltoall (E2a, mean of 2 runs). **Re-characterise next phase:**
+  the clariden capstor `Sequential read` (0.063 GB/s = 62.9 MB/s) was a single sample taken
+  while capstor was under general slowness — replace with a healthy-mount median (a few
+  samples; consider `lfs getstripe` / stripe-count sensitivity, and an iopsstor/flash sample).
+  NVSHMEM rows stay TBD until the dedicated multi-task step lands (see below).
+- [ ] **Dedicated NVSHMEM pre-check srun step** (§8.1) — NVSHMEM perftest is multi-PROCESS
+  (1 PE per task, bootstrapped by SLURM's PMIx; CSCS guidance:
+  docs.cscs.ch/software/communication/nvshmem), so it **cannot** run inside the engine's
+  single-task `srun` session. Confirmed at E2a (2026-06-14): in-session it collapses to
+  npes=1 — `alltoall` reports busbw≡0, `put_bw` aborts "requires exactly two processes".
+  `run-nvshmem.sh` now skips cleanly in a single-task step and `grade.py` skips degenerate
+  npes=1 results, so no bogus number is recorded — but NVSHMEM is therefore **uncharacterised**.
+  To characterise it, add a pre-engine step to `engine.sbatch.j2`:
+  `srun --ntasks-per-node=N --mpi=pmix --environment=engine.toml bash run-nvshmem.sh`
+  (N PEs for `alltoall_latency`, exactly 2 for `shmem_put_bw` — two steps, set `NVSHMEM_TESTS`
+  per step), writing captures to `PRECHECK_OUT`, with `grade.py` run after. Keep the host CXI /
+  `aws_ofi_nccl` hooks **disabled** — the self-contained Alps net image (§9.1) provides its own
+  libfabric/cxi; verify on-image that NVSHMEM bootstraps without host injection (intra-node
+  NVLink P2P first, then inter-node). Also rework the `NVSHMEM_REQUIRED=1` path: a single-PE
+  engine session must surface as "needs a dedicated step", not silently pass the `|| true`.
 
 ## Candidate models
 
