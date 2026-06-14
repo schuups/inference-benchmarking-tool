@@ -107,6 +107,13 @@ class Deployment(StrictModel):
     model: str
     backend_config: BackendConfig = BackendConfig()
     image: str | None = None  # canonical JFrog tag (§8.1); derived from global.yaml when absent
+    # Repo-built engine images extend an NGC base with the Alps HPC network stack
+    # (libfabric / NCCL / aws-ofi-nccl / NVSHMEM over CXI) — the alps-extended-images
+    # pattern. Such images MUST run with the host CXI hook DISABLED so their own
+    # network libraries take priority over the host's (§9.0; docs.cscs.ch
+    # /software/alps-extended-images "Danger"). Set False only for a stock vendor
+    # image that relies on the host hook (e.g. the E1 stock-NGC §8.2 exemption).
+    alps_extended_image: bool = True
 
 
 class MixEntry(StrictModel):

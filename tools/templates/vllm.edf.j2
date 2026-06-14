@@ -9,6 +9,13 @@ mounts = [
 ]
 
 workdir = "{{ run_dir_remote }}"
-
+{% if disable_cxi_hook %}
+[annotations]
+# Alps-extended image: it bundles its own libfabric / NCCL / aws-ofi-nccl over
+# CXI, so disable the host CXI hook to give the image's network libraries
+# priority over the host's (§9.0; docs.cscs.ch/software/alps-extended-images).
+# Do NOT add the aws_ofi_nccl hook annotation.
+com.hooks.cxi.enabled = "false"
+{% endif %}
 [env]
 HF_HOME = "{{ scratch_base }}/hf-cache"

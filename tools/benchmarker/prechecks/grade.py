@@ -180,6 +180,11 @@ def collect_measurements(out_dir: Path, cluster: str, scope: str, storage_scope:
                          (out_dir / "nvshmem_put_bw.out", "shmem_put_bw")]:
         if not path.exists():
             continue  # skipped-with-warning path (§7.1) — no row, orchestrator logs it
+        text = path.read_text()
+        if "perftest not found" in text or not text.strip():
+            # §7.1 skip: the runner tees the warning into the capture file, so
+            # absence-of-file is not the only skip signal — content is.
+            continue
         benchmark = f"{shmem_prefix} {suffix}"
         ref = find_reference(refs, benchmark, scope)
         size_label = ref["size"] if ref else "128 KiB"

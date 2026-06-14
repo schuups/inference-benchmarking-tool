@@ -56,6 +56,16 @@ def _first_host(nodelist: str) -> str:
     return nodelist.split(",")[0].strip()
 
 
+async def _resolve_host(nodelist: str) -> str:
+    """Rank-0 host of a SLURM nodelist. Prefer `scontrol show hostnames` (it
+    expands every nodelist syntax — ranges, comma lists, multi-prefix); fall
+    back to the regex only if scontrol is unavailable or yields nothing."""
+    code, out, _ = await _run("scontrol", "show", "hostnames", nodelist)
+    if code == 0 and out.split():
+        return out.split()[0]  # rank-0 node serves the endpoint (multi-node: Ray head)
+    return _first_host(nodelist)
+
+
 class SlurmEngineLauncher:
     def __init__(
         self, engine_sbatch: Path, run_dir: Path, run_id: str, *, node_poll_timeout_s: float = 600.0
@@ -81,7 +91,7 @@ class SlurmEngineLauncher:
             code, out, _ = await _run("squeue", "-j", self._job_id, "-h", "-o", "%N")
             line = out.strip().splitlines()[0].strip() if out.strip() else ""
             if line and line != "(null)":
-                return _first_host(line)
+                return await _resolve_host(line)
             await asyncio.sleep(5.0)
             waited += 5.0
         raise RuntimeError(f"engine job {self._job_id} not assigned a node within {self._poll_timeout}s")

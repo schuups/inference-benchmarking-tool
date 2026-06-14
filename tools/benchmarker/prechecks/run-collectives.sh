@@ -45,7 +45,9 @@ for c in ${COLLECTIVES}; do
         continue
     fi
     rank0 && echo "===== ${c} ====="
-    "${bin}" -b 8 -e "${MSG_END}" -f 2 -g 1 \
+    # PRECHECK_GPUS: GPUs driven by this process — the deployment's GPU count
+    # for single-node MPI-less builds; 1 per rank for MPI builds (§7.2).
+    "${bin}" -b 8 -e "${MSG_END}" -f 2 -g "${PRECHECK_GPUS:-1}" \
         || { rank0 && echo "[nccl] ${c} failed (non-zero exit)" >&2; fail=1; }
 done
 

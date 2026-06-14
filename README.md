@@ -74,9 +74,8 @@ The operational set under active measurement — kept aligned with the authorita
 | **Apertus-70B** (Swiss AI / EPFL / ETHZ / CSCS) | target | Yes — multilingual (1000+ languages, incl. Swiss German, Romansh) | No dedicated thinking mode (base model) | Yes — image input | Yes — tool-use |
 | **Apertus-8B** (Swiss AI / EPFL / ETHZ / CSCS) | draft — paired with Apertus-70B for speculative decoding (same family, identical tokenizer) | Yes — multilingual | No | — | — |
 | **Kimi-K2.6** (Moonshot AI) | target | Yes | Yes — deeper reasoning and planning; strong on agentic, multi-step workflows | Yes — text + image + video (MoonViT encoder; multimodal performance comparatively weak) | Yes — strong tool-use reliability; leads open weights on HLE-with-tools |
-| **DeepSeek-V4-Pro** | target | Yes — 1M-token context | Yes — three modes: Non-think / Think High / Think Max; toggled via `thinking_mode` runtime parameter; `<think>` / `</think>` delimiters in output | No — text only | Yes — tool-use supported via the model's custom encoding (`encoding_dsv4`); 1.6T MoE / 49B activated |
 
-Candidate future models are tracked in [`TODOs.md`](TODOs.md) and enter the §8.2 operational table when they come under active measurement.
+Candidate future models (e.g. DeepSeek-V4-Pro, GLM-5.1) are tracked in [`TODOs.md`](TODOs.md) and enter the §8.2 operational table when they come under active measurement.
 
 ## Future roadmap
 

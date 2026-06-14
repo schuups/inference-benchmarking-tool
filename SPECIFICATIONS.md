@@ -94,7 +94,7 @@ The repository root also carries `SPECIFICATIONS.md`, `CLAUDE.md`, `TODOs.md`, `
 
 ### 2.2 Remote (cluster scratch)
 
-On SLURM clusters, the operator's scratch base is `/capstor/scratch/cscs/$USER/` (Lustre, HDD; see §5.1). Each experiment creates a run-specific subdirectory holding the Benchmarker's working files (sbatch + EDF copies), the dataset generator's prompt pool, and the inference deployment's container working directory. A shared `nccl-tests-cache/` lives at the same level — one entry per stack fingerprint (§7.2).
+On SLURM clusters, **all project files live under a single folder** — `/capstor/scratch/cscs/$USER/ib/` (Lustre, HDD; see §5.1), the configured `scratch_base` (§2.3) — keeping the operator's scratch root uncluttered. Each experiment creates a run-specific subdirectory there holding the Benchmarker's working files (sbatch + EDF copies), the dataset generator's prompt pool, and the inference deployment's container working directory. Alongside the run dirs live the shared `collective-tests-cache/` (one entry per stack fingerprint, §7.2), `hf-cache/`, the host-side `venv/` (Benchmarker runtime), and `image-builds/` staging.
 
 On Kubernetes (`breithorn`), the equivalent layout lives under Ceph-backed PVCs scoped per experiment.
 
@@ -281,8 +281,8 @@ discovered and reclaimed later:
 
 - Cancel the Benchmarker SLURM job (`scancel <job_id>`).
 - Delete the Benchmarker's capstor scratch run directory
-  (`/capstor/scratch/cscs/$USER/<run_id>/`), which holds the dataset, working files, and
-  load-gen state.
+  (`/capstor/scratch/cscs/$USER/ib/<run_id>/`), which holds the dataset, working files,
+  and load-gen state.
 
 The Benchmarker spawned the inference deployment(s) but its cancellation does **not**
 automatically cancel them — the per-target sections below handle that explicitly.
@@ -325,7 +325,7 @@ Resource classes the Cleaner identifies (and, on approval, prunes):
 | Class | Discovery | Notes |
 |---|---|---|
 | K8s objects (Deployment, Service, Ingress, TLS Secret) | `kubectl get ... -l app.kubernetes.io/managed-by=inference-benchmarking` | Skip Model-cache PVCs (§6.6 keeps them intentionally). |
-| SLURM scratch dirs under `/capstor/scratch/cscs/$USER/` | Match the run-ID pattern (§6.2); skip dirs owned by an active job. | |
+| SLURM scratch dirs under `/capstor/scratch/cscs/$USER/ib/` | Match the run-ID pattern (§6.2); skip dirs owned by an active job. | |
 | JFrog images tagged for benchmark runs | JFrog API filtered by the benchmark tag prefix (§6.1). | Skip the most recent N tags per repository. |
 
 Cleaner actions are logged on the laptop but are not persisted to the per-run results DB.
@@ -382,18 +382,22 @@ test adds maintenance without adding signal.
   - `collective_tests_version` — git tag to build (e.g. `nccl-tests` `2.17.1` or the
     matching `rccl-tests` tag). Pinned per experiment.
   - `collective_tests_cache_dir` — persistent path where compiled binaries live (default
-    `/capstor/scratch/cscs/$USER/collective-tests-cache` on SLURM; a PVC mount on K8s).
+    `/capstor/scratch/cscs/$USER/ib/collective-tests-cache` on SLURM; a PVC mount on K8s).
     Shared across experiments; safe to delete to force a rebuild.
 
   The pre-check script attempts to **install missing build tools** (`make`, `g++`, OpenMPI
   dev, `curl`, `tar`) inside the engine container via `apt-get` / `dnf` / `yum`, rank 0 only
   (other ranks wait on a sentinel, so apt is not hammered by `N` ranks). **This fallback
   only works when the container runs as root.** On the CSCS Container Engine the container
-  runs as the invoking user (non-root), so the install does not succeed and the
-  `nccl-tests` build aborts on a missing `mpi.h` (observed at E1 on the stock vLLM image).
-  Therefore the **engine image must pre-ship the MPI/NCCL build toolchain** — the repo-built
-  Alps image (§8.1) does; stock vendor images (§8.2) do not, so `skip_system_prechecks: true`
-  is required when running on them (§7.5, §17.1).
+  runs as the invoking user (non-root), so the install does not succeed and the build fails
+  for want of the toolchain (a missing `mpi.h` / `g++` / NCCL headers — observed at E1 on the
+  stock vLLM image). To minimise that surface, the collective build defaults to an **MPI-less
+  single-process flavor** (`NCCL_TESTS_MPI=0`; one process drives all GPUs of a node via
+  `-g N`), so single-node scopes need no MPI runtime at all; multi-node scopes set
+  `NCCL_TESTS_MPI=1` (one rank per GPU) and require the image's MPI built against the Alps
+  libfabric/CXI stack. Either way the **engine image must pre-ship the build toolchain** — the
+  repo-built Alps image (§8.1) does; stock vendor images (§8.2) do not, so
+  `skip_system_prechecks: true` is required when running on them (§7.5).
 - The NVSHMEM benchmark uses the perftest binaries that ship with the engine image's
   NVSHMEM SDK (no separate build). If NVSHMEM is absent the row is skipped with a warning;
   set `nvshmem_required: true` in the benchmark YAML to make absence a failure.
@@ -494,35 +498,76 @@ backends, are both first-class experiment shapes.
 #### Image lifecycle and registry
 
 Every inference-engine image the framework tests is **built from sources checked into
-this repository**. For each backend:
+this repository**, organised as a small catalogue under `tools/images/`
+(`tools/images/README.md` carries the operational detail):
 
-- The **Dockerfile** lives at `tools/images/<backend>/Dockerfile`.
-- Any source-level **patches** applied at build time (e.g. the CXI / Slingshot-11
-  integration patches for `vllm-cxi`) live under `tools/images/<backend>/patches/`,
-  tracked in the repo with the same review discipline as the rest of the code.
-- A **build-args metadata file** captures the upstream version pin, the patch list, the
-  base image, and the canonical image tag the build produces.
+- **Shared `core/`** holds the vendor-scoped, **version-tagged Alps network stack** at
+  `core/<vendor>/netstack/<v>/` — the Containerfile, per-component build `phases/`,
+  source `patches/`, and the baked `runtime/` env tuning — plus generic env/warning
+  installers in `core/common/`. The netstack version (`v1`, `v2`, …) is a **maturity
+  axis independent of the engine**: bumping a component pin, a Slingshot release, or a
+  tuning choice (e.g. re-enabling NCCL LL128) lands as a new `vN` sibling so the prior
+  one stays reproducible, and the same engine can be built on two netstacks to isolate
+  the stack's contribution.
+- **Each image is a thin per-image directory** — a `manifest.yaml` (identity = vendor ×
+  backend × backend-version × netstack-version; base image; baked-in component pins;
+  published tag; provenance; sanity status), an optional `variant/`, and `tests/`. The
+  Containerfile lives once per netstack version; the manifest selects the base and any
+  pin overrides.
 
-The image **registry** is the **CSCS JFrog Artifactory**. Built images are pushed there
-and referenced from the engine EDF / K8s manifest via their canonical tag.
+**Self-contained images.** The network libraries (libfabric/CXI, patched NCCL +
+aws-ofi-nccl, NVSHMEM, UCX/UCC/OpenMPI) **and** the runtime tuning env are baked into the
+image, so it is correct under any launch — login shell, non-login `bash -c` on SLURM, or
+a K8s pod — with **no container-engine hook and no `--environment` injection**. This is
+essential for the K8s target, where there is nowhere to inject such adjustments. The
+launch contract for a self-contained image is:
+
+- EDF / pod annotation **`com.hooks.cxi.enabled = "false"`** and **no** `aws_ofi_nccl`
+  hook annotation — the libraries are in the image, not injected by the engine. With the
+  CXI hook disabled the devices remain accessible (`fi_info -p cxi` still enumerates the
+  NICs), so disabling it costs nothing.
+- Launch collectives with **`srun --network=disable_rdzv_get`**, matching the baked
+  `FI_CXI_RDZV_PROTO=alt_read` (a runtime warning fires otherwise).
+- The baked env (`NCCL_NET=AWS Libfabric`, `FI_PROVIDER=cxi`, `FI_CXI_*`, `OMPI_MCA_*`,
+  `PMIX_MCA_psec`, `NVSHMEM_*`) applies via `/etc/profile.d` and `BASH_ENV` as *defaults*
+  (set-if-unset), so any knob can be overridden per launch.
+
+This **supersedes the older hook-injection model** in `examples/nccl-tests/README.md`
+(which enables the `aws_ofi_nccl` hook and relies on host libraries); that guidance
+applies only to stock images that ship without the Alps stack.
+
+**Build, push, sanity.** Builds run under podman in node-local `/dev/shm` — a
+RAM-resident layer cache, lost when the node is released — driven over **SSH +
+`srun --overlap` into a held SLURM allocation** (FirecREST exposes no `srun`). The
+per-phase Containerfile makes a failed or edited phase rebuild only from that layer down,
+so a held node is reused across iterations. `tools/images/build.sh` reads a manifest,
+stages the composed context, and runs `podman build` + `podman push`; one hard
+constraint — the **built NCCL version must match the base image's torch-bundled NCCL**,
+so the aws-ofi-nccl plugin is ABI-compatible with the NCCL actually loaded at runtime.
+
+**Post-push acceptance gate + maturity.** Before an image is used, a short-lived 2-node
+job (`tools/images/sanity.sbatch`) validates that the baked stack loads and **inter-node
+collectives reach the Slingshot reference bandwidth** — NCCL `all_reduce` busbw near the
+per-system reference (§7.3), *not* the ~5 GB/s "plugin didn't fire" floor — plus OSU and
+NVSHMEM over CXI. Image status then distinguishes **`verified`** (sanity green —
+functionally usable, performance scaling not yet characterised) from **`benchmarked`**
+(additionally validated in inference performance-scaling experiments). To re-test a
+rebuilt image under an unchanged tag, the sanity EDF is pinned by the **registry digest**
+to bypass the engine's stale image cache (§17.1).
+
+The image **registry** is the **CSCS JFrog Artifactory** (`registry.jfrog_base` in
+`tools/common/global.yaml`, §2.3); images are referenced from the engine EDF / K8s
+manifest by canonical tag or digest. Full build provenance — netstack source revision,
+component pins, base image digest, published registry digest, build date — lives in each
+image's `manifest.yaml` (durable; the `/capstor/.../ib` build scratch is ephemeral) and
+is recorded per experiment alongside the BackendConfig, so the exact stack any experiment
+ran on is recoverable.
 
 **Build-when-needed.** Most experiments deploy a pre-built image straight from JFrog.
-When an experiment requires changes to the image — a new patch, a new upstream pin, a
-new backend variant — Claude carries the build through as part of the experiment-
-preparation phase:
-
-1. Updates the Dockerfile / patches under `tools/images/<backend>/`.
-2. Submits the build (SLURM-based Docker build workflow per TODOs.md *Support building
-   Docker images via SLURM jobs*, or the operator's local Docker).
-3. Pushes the resulting image to JFrog with a canonical tag.
-4. Updates the planner template's image reference to the new tag.
-
-The full build provenance — Dockerfile commit SHA, patch revisions, base image, build
-date, JFrog tag — is recorded per experiment alongside the BackendConfig so the exact
-stack any experiment ran on is recoverable. The canonical JFrog path and other
-shared cluster-side constants are deferred to a global configuration location — see
-TODOs.md *Establish a global configuration location for shared values* and *Define and
-configure JFrog folder/path for publishing built images*.
+When an experiment requires a change — a new pin, patch, base, or backend variant —
+Claude carries the build through during experiment preparation: update the netstack /
+manifest, build + push via `build.sh`, run the sanity gate, and update the planner
+template's image reference to the new tag.
 
 ### 8.2 Models
 
@@ -540,7 +585,6 @@ subset**.
 | **Apertus-70B** | target | `swiss-ai/Apertus-70B-Instruct-2509` | Apertus family (multilingual, 1000+ languages) | 65,536 tokens | No dedicated thinking mode (base model) | No | `long-context-followup`, `chat-short-turns` (with the caveat below on `thinking: true`). Excluded from `agentic-coding` — Apertus is not used by operators as a coding model. |
 | **Apertus-8B**     | draft (same-family with Apertus-70B) | `swiss-ai/Apertus-8B-Instruct-2509` | Apertus family — **identical to the 70B**, tokenizer loaded once (§10.6) | 65,536 tokens | No | No | Always paired with Apertus-70B as the draft for speculative-decoding experiments |
 | **Kimi-K2.6**      | target | `moonshotai/Kimi-K2.6` | Kimi family | 262,144 tokens (256K) | Yes — deeper reasoning and planning; strong on agentic, multi-step workflows | Yes (MoE; expert routing exercised by §15.1 *MoE expert routing* row) | `agentic-coding`, `chat-short-turns`, `long-context-followup`. `thinking: true` scenarios are most representative on Kimi-K2.6 because the widened output distribution matches the model's actual think+answer behaviour. |
-| **DeepSeek-V4-Pro** | target | `deepseek-ai/DeepSeek-V4-Pro` | DeepSeek custom (`encoding_dsv4`; `<think>` / `</think>` reasoning delimiters) | 1,048,576 tokens (1M) | Yes — three modes: *Non-think* / *Think High* / *Think Max*, toggled via the `thinking_mode` runtime parameter (to be exposed as a BackendConfig knob when DeepSeek experiments are wired) | Yes (MoE; 1.6 T total parameters / 49 B activated; expert routing exercised by §15.1 *MoE expert routing* row) | `agentic-coding`, `chat-short-turns`, `long-context-followup`. `thinking: true` scenarios match the model's native thinking modes directly. *Think Max* requires context ≥ 384 K — align `max_model_len` accordingly when sweeping it. License: MIT. Recommended sampling: `temperature=1.0`, `top_p=1.0`. Precision: FP4 (MoE expert params) + FP8 (other params) mixed. |
 
 **Notes on scenario / model pairing:**
 
@@ -553,9 +597,9 @@ subset**.
   would ordinarily be shorter.
 - Speculative-decoding experiments require a draft/target pair from this table. Only
   the **Apertus-8B → Apertus-70B** pairing is in scope for v1 (same-family, identical
-  tokenizer). Kimi-K2.6 and DeepSeek-V4-Pro have no in-scope draft; cross-family
-  pairings (e.g. a smaller open model as draft for an MoE target) are deferred until
-  acceptance-rate baselines are characterised.
+  tokenizer). Kimi-K2.6 has no in-scope draft; cross-family pairings (e.g. a smaller
+  open model as draft for an MoE target) are deferred until acceptance-rate baselines
+  are characterised.
 - Tokenizer-loading consequences for these pairings are documented in §10.6.
 - Adding a new model to this set is a planner-template + benchmark-YAML change; no spec
   edit is required unless the model introduces a new capability dimension (e.g. native
@@ -568,7 +612,7 @@ subset**.
   image**: a pipeline-validation run may deploy a stock vendor image (e.g. NGC vLLM)
   while the repo-built lineage iterates; every graded run uses repo-built JFrog images
   per §8.1. Such stock-image runs must set `skip_system_prechecks: true` — stock images
-  lack the MPI/NCCL build toolchain the §7 collective checks need (§7.2, §17.1).
+  lack the build toolchain the §7 collective checks need (§7.2).
 
 ---
 
@@ -628,7 +672,7 @@ one-time compilation is the dominant cold-start cost on first request after a se
   **capped to `max_model_len`** so it never exceeds the served context — with `max_tokens=1`)
   to the engine's HTTP endpoint before the sweep begins, and wait up to 300 s for it to
   complete. An over-long primer prompt is rejected (http_400) and silently fails to warm the
-  compile (observed at E1 with `max_model_len=16384`; see §17.2).
+  compile (observed at E1 with `max_model_len=16384`; follow-up tracked in `TODOs.md`).
 - After the primer completes, the first measurement request should exhibit genuine
   steady-state TTFT (not the cold compile delay). If it does not, **warn the operator**
   that the primer missed its target.
@@ -1704,23 +1748,36 @@ Total concurrent        ≈ 80 slots
 
 ## 17. Known Issues & Workarounds
 
-Issues discovered during experiment runs — and the workarounds that resolved them — are
-tracked here as they arise.
+Issues discovered during image builds and experiment runs — and the workarounds that
+resolved them — are tracked here as they arise.
 
-### 17.1 §7 pre-checks require the engine image to pre-ship the build toolchain (E1, 2026-06-14)
+### 17.1 Engine image cache is stale across rebuilds under the same tag
 
-The §7.2 "install missing build tools via `apt-get`" fallback assumes a root container. On
-the **CSCS Container Engine the container runs non-root**, so the install does not succeed
-and the `nccl-tests` build aborts on `mpi.h: No such file or directory` (seen at E1 on the
-stock `vllm-openai:0.22.1` image). **Requirement / workaround:** the engine image must
-pre-ship the MPI/NCCL build toolchain — the repo-built Alps image (§8.1) does. On stock
-vendor images (pipeline-validation only, §8.2) set `skip_system_prechecks: true` (§7.5); a
-single GPU has no meaningful collective to check anyway. §7 is validated on the Alps image
-at E2.
+The container engine (enroot/pyxis) caches an imported image keyed by reference, so
+rebuilding and re-pushing under the **same tag** leaves the cached squashfs pointing at
+the old digest — a sanity or experiment run then silently uses the *previous* image.
+**Workaround:** pin the launch EDF by the **registry manifest digest**
+(`image = "<host>#<repo>@sha256:…"`), captured from `podman push --digestfile`. Do **not**
+use `podman image inspect {{.Digest}}` — that is the *local* manifest digest, which a
+format-converting push can change, and the registry returns `404` for it.
+`tools/images/build.sh` writes the digest-pinned EDF that `sanity.sbatch` consumes.
 
-### 17.2 Inductor primer prompt must fit `max_model_len` (E1, 2026-06-14)
+### 17.2 Slim Ubuntu/CUDA bases need extra netstack steps vs NGC
 
-The §9.3 primer's ~20K-token prompt exceeds a smaller `max_model_len` and is rejected
-(http_400), silently skipping the compile warm-up (seen at E1 with `max_model_len=16384`).
-**Workaround:** cap the primer prompt to the served context (tracked in `TODOs.md`), or set
-`max_model_len` ≥ the primer prompt when exact warm-up matters.
+NGC bases ship a complete CUDA toolkit, an HPC-X stack, and `/bin/sh`→bash; slim engine
+bases (e.g. `vllm/vllm-openai`, Ubuntu 24.04 / CUDA 13) do not. Building the Alps network
+stack on them therefore requires, as a principle (the exact steps live in the netstack
+phase scripts and Containerfile):
+
+- installing the CUDA dev components the stack links against but the slim toolkit omits —
+  `cuda-nvml-dev` (libfabric `nvml.h`), `cuda-nvrtc-dev` (NVSHMEM `CUDA::nvrtc`), and a
+  `libnvJitLink` runtime (present only in a pip wheel) symlinked into the toolkit;
+- a `python`→`python3` alias (the slim base ships only `python3`);
+- `ENV BASH_ENV=/etc/bash.bashrc` so the baked env reaches non-login `bash -c` (NGC bases
+  set it; the slim base leaves it unset);
+- a **POSIX-sh-safe** runtime env file — the container init sources it under **dash**,
+  which rejects bash-only `${!x}` / `printf -v` / `[[ ]]` with "Bad substitution" and
+  aborts container start.
+
+The §8.1 post-push acceptance gate is what catches a base that silently lacks one of
+these (e.g. collectives that fall back off the Slingshot path).

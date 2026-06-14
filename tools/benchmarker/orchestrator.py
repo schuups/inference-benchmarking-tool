@@ -222,6 +222,9 @@ def _ingest_hardware(
     return total
 
 
+DEAD_ENGINE_GRACE_S = 10.0  # let Lustre surface results.json after a §7.4 abort
+
+
 async def _await_ready(
     http: aiohttp.ClientSession,
     base_url: str,
@@ -248,6 +251,15 @@ async def _await_ready(
         except aiohttp.ClientError:
             pass
         if not launcher.is_alive():
+            # The §7.4 gate may have aborted the engine job *after* writing its
+            # results.json (run_system_prechecks.sh && exec <engine>): the job
+            # exits before /health ever comes up. Give the shared filesystem
+            # (Lustre) a moment to surface the file, then disambiguate a clean
+            # gate abort from a genuine engine crash.
+            await asyncio.sleep(DEAD_ENGINE_GRACE_S)
+            gate_code = _read_precheck(results_path).get("gate_exit_code", 0)
+            if gate_code != 0:
+                raise _PrecheckAbort(gate_code)
             raise RunAborted(
                 "engine job exited before readiness — last engine log lines:\n"
                 + _tail(launcher.engine_log_text())

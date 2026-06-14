@@ -17,8 +17,8 @@
 export HUGGING_FACE_HUB_TOKEN=$(cat ~/.hf_token 2>/dev/null || true)
 export HF_HOME={{ scratch_base }}/hf-cache
 
-# Runtime (open decision 3): deps from a staged uv venv on capstor, built once;
-# the live tools/ code is mounted from capstor at {{ tools_remote }} (staged by the
+# Runtime (decision 3): deps from a staged uv venv on capstor, built once; the
+# live tools/ code is mounted from capstor at {{ tools_remote }} (staged by the
 # Coordinator) and put on PYTHONPATH, so code iterates without rebuilding the venv.
 VENV="{{ benchmarker_venv }}"
 if [ ! -x "$VENV/bin/python" ]; then

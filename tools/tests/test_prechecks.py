@@ -138,6 +138,20 @@ def test_collect_measurements_maps_files_to_reference_rows(tmp_path):
     assert "NVSHMEM shmem_put_bw" not in by_benchmark
 
 
+def test_nvshmem_skip_detected_by_content(tmp_path):
+    """E1 attempt #4: the runner tees the §7.1 skip warning INTO the capture
+    file, so a 'skipped' NVSHMEM must not grade as fail."""
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    (out_dir / "nvshmem_alltoall_latency.out").write_text(
+        "[nvshmem] NVSHMEM perftest not found in this engine image\n"
+        "[nvshmem]   tried: /opt/nvshmem/bin/perftest ...\n"
+    )
+    refs = load_reference("clariden", REFERENCE_PATH)
+    measurements = collect_measurements(out_dir, "clariden", "4× GH200, 1 node", "", refs)
+    assert not any("NVSHMEM" in m["benchmark"] for m in measurements)
+
+
 def test_grade_cli_end_to_end(tmp_path):
     out_dir = tmp_path / "out"
     _write_fixture_outputs(out_dir)
