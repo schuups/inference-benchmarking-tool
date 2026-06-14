@@ -21,11 +21,12 @@ from pathlib import Path
 
 import pandas as pd
 
-from tools.benchmarker.db import SCHEMA
+from tools.common.results_db import SCHEMA, json_columns
 
 _PERCENTILES = (50, 90, 95, 99)
-_JSON_COLS = ("backend_config", "dataset_config", "scenario_mix", "scenario_manifest",
-              "slos", "quality_eval", "rate_levels")
+# JSON-encoded columns of the experiments row to decode on load — derived from
+# the schema's single source of truth (results_db.json_columns), never re-listed.
+_JSON_COLS = json_columns("experiments")
 
 
 @dataclass
@@ -135,7 +136,9 @@ def failure_rate_vs_lambda(req: pd.DataFrame, by_scenario: bool = False) -> pd.D
         rec["error_rate_pct"] = 100.0 * int((grp["success"] == 0).sum()) / total if total else 0.0
         rec["n"] = int(total)
         rows.append(rec)
-    return pd.DataFrame(rows).sort_values(keys).reset_index(drop=True)
+    return pd.DataFrame(rows).sort_values(keys).reset_index(drop=True) if rows else pd.DataFrame(
+        columns=[*keys, "error_rate_pct", "n"]
+    )
 
 
 # --------------------------------------------------------------- session metrics
@@ -162,7 +165,7 @@ def session_metrics(req: pd.DataFrame) -> pd.DataFrame:
     ).reset_index()
     agg = agg[agg["completed"] == 1]  # §12.2 boundary: keep only completed sessions
     agg["session_e2e_ms"] = agg["end_ms"] - agg["start_ms"]
-    return agg[[*keys, "session_e2e_ms", "session_turns", "session_success", "start_ms"]]
+    return agg[[*keys, "session_e2e_ms", "session_turns", "session_success"]]
 
 
 # --------------------------------------------------------------------- SLOs / λ*

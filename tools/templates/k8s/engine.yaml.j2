@@ -47,6 +47,11 @@ spec:
         - { name: NCCL_TESTS_VERSION, value: "{{ prechecks.collective_tests_version or '2.17.1' }}" }
         - { name: NCCL_TESTS_CACHE, value: "/results/collective-tests-cache" }
         - { name: NVSHMEM_REQUIRED, value: "{{ '1' if prechecks.shmem_required else '0' }}" }
+        # Parity with the SLURM engine template: a single pod holds all GPUs, and
+        # there is no multi-node MPI launch (so the collective check spans the whole
+        # pod, not just 1 GPU). See tools/templates/engine.sbatch.j2.
+        - { name: PRECHECK_GPUS, value: "{{ total_gpus }}" }
+        - { name: NCCL_TESTS_MPI, value: "0" }
         - { name: MSG_END, value: "128M" }
         ports:
         - { containerPort: 8000, name: http, protocol: TCP }

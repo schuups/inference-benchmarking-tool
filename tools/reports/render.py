@@ -59,11 +59,20 @@ def render_report(
     })
     # The executing kernel must import `tools.*`; give it the repo root absolutely
     # (a relative PYTHONPATH would resolve against the kernel's cwd = out_dir).
-    os.environ["PYTHONPATH"] = str(REPO_ROOT) + os.pathsep + os.environ.get("PYTHONPATH", "")
-    NotebookClient(
-        nb, timeout=timeout_s, kernel_name=kernel_name,
-        resources={"metadata": {"path": str(out_dir)}},
-    ).execute()
+    # Restore the caller's environment afterwards so render_report leaves no global
+    # side effect when called as a library function.
+    prev_pythonpath = os.environ.get("PYTHONPATH")
+    os.environ["PYTHONPATH"] = str(REPO_ROOT) + os.pathsep + (prev_pythonpath or "")
+    try:
+        NotebookClient(
+            nb, timeout=timeout_s, kernel_name=kernel_name,
+            resources={"metadata": {"path": str(out_dir)}},
+        ).execute()
+    finally:
+        if prev_pythonpath is None:
+            os.environ.pop("PYTHONPATH", None)
+        else:
+            os.environ["PYTHONPATH"] = prev_pythonpath
     executed = out_dir / "report.ipynb"
     nbformat.write(nb, str(executed))
     log.info("rendered %s (PNGs in %s)", executed, out_dir)

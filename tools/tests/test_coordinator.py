@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from tools.benchmarker.db import ResultsDB
+from tools.common.results_db import ResultsDB
 from tools.coordinator.backend import FakeClusterBackend
 from tools.coordinator.coordinator import Coordinator, CoordinatorError
 from tools.coordinator.merge import merge_run_db

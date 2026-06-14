@@ -4,7 +4,7 @@ import json
 import threading
 from datetime import datetime, timedelta, timezone
 
-from tools.benchmarker.db import ResultsDB
+from tools.common.results_db import ResultsDB
 from tools.benchmarker.load_gen.scheduler import RequestRow
 
 # Independent copy of the §13 column lists — catches silent drift in db.SCHEMA.

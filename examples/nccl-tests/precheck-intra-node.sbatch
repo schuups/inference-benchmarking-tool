@@ -27,10 +27,13 @@
 : "${COLLECTIVES:=all_reduce all_gather alltoall}"
 : "${MSG_END:=8G}"
 : "${NVSHMEM_REQUIRED:=0}"
+: "${NCCL_TESTS_MPI:=1}"   # this example launches one rank per GPU via srun --mpi=pmix
 : "${ENGINE_EDF:?point ENGINE_EDF at the engine EDF path, e.g. /capstor/scratch/cscs/USER/experiment/engine.toml}"
-export NCCL_TESTS_VERSION NCCL_TESTS_CACHE COLLECTIVES MSG_END NVSHMEM_REQUIRED
+export NCCL_TESTS_VERSION NCCL_TESTS_CACHE COLLECTIVES MSG_END NVSHMEM_REQUIRED NCCL_TESTS_MPI
 
-PRECHECK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Canonical §7 pre-check scripts (single source of truth — this directory no longer
+# keeps its own copies; see README.md).
+PRECHECK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../tools/benchmarker/prechecks" && pwd)"
 export PRECHECK_DIR
 
 # One srun, one container session per rank. Each rank runs the full chain:

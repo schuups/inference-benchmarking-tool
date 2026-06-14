@@ -102,14 +102,10 @@ class _SessionRunner:
     async def run(self, sess: PoolSession) -> None:
         transcript: list[dict] = []  # completed exchanges, in turn order
         transcript_tokens = 0
-        prev_send: float | None = None
-        prev_done: asyncio.Event | None = None
         turn_tasks: list[asyncio.Task] = []
 
-        async def run_turn(turn, send_at: float | None, wait_for: asyncio.Event | None, done: asyncio.Event):
+        async def run_turn(turn, send_at: float | None):
             nonlocal transcript, transcript_tokens
-            if wait_for is not None:  # sequential: previous response first
-                await wait_for.wait()
             if turn.think_time_ms and turn.turn_idx > 0:
                 anchor_wait = (
                     send_at - time.perf_counter() if send_at is not None else turn.think_time_ms / 1000
@@ -153,21 +149,18 @@ class _SessionRunner:
             if outcome.success:
                 transcript = messages + [{"role": "assistant", "content": outcome.output_text}]
                 transcript_tokens = input_tokens + outcome.output_tokens
-            done.set()
 
         if sess.mode == "sequential":
             for turn in sess.turns:
-                done = asyncio.Event()
-                await run_turn(turn, send_at=None, wait_for=None, done=done)
+                await run_turn(turn, send_at=None)
         else:  # open_loop: sends anchored on previous send + think (§10.7)
             send_at = time.perf_counter()
             for turn in sess.turns:
                 if turn.turn_idx > 0:
                     send_at += (turn.think_time_ms or 0.0) / 1000
-                done = asyncio.Event()
                 turn_tasks.append(
                     asyncio.create_task(
-                        run_turn(turn, send_at=send_at if turn.turn_idx > 0 else None, wait_for=None, done=done)
+                        run_turn(turn, send_at=send_at if turn.turn_idx > 0 else None)
                     )
                 )
             await asyncio.gather(*turn_tasks)

@@ -1,4 +1,9 @@
-"""Per-run results database (SPECIFICATIONS.md §13) — seven tables.
+"""Results database schema + access (SPECIFICATIONS.md §13) — seven tables.
+
+Canonical home for the shared §13 contract. The Benchmarker writes it (cluster
+side); the Coordinator's central-DB merge and the Reports generator read it
+(laptop side). It lives under `tools/common/` so every component depends on the
+schema without a laptop-side module reaching into the cluster-side package.
 
 Concurrency design (plan M3): WAL journal mode + a single-writer lock. All DB
 writers live in the Benchmarker process (load gen + scrapers run on one asyncio
@@ -134,6 +139,13 @@ _JSON_COLUMNS = {
     "backend_config", "dataset_config", "scenario_mix", "scenario_manifest",
     "slos", "quality_eval", "rate_levels", "sampling_params",
 }
+
+
+def json_columns(table: str) -> tuple[str, ...]:
+    """JSON-encoded columns of `table`, in schema order — the single source of
+    truth for which columns to JSON-decode on read (used by the reports layer so
+    it never maintains its own copy of this list)."""
+    return tuple(name for name, _ in SCHEMA[table] if name in _JSON_COLUMNS)
 
 
 class ResultsDB:

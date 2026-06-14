@@ -111,6 +111,7 @@ def test_hardware_vs_lambda(fixture_db):
 # ----------------------------------------------------------- notebook execution
 
 
+@pytest.mark.slow
 def test_notebook_executes_headless(tmp_path, fixture_db):
     import nbformat
 

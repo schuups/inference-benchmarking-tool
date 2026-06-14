@@ -6,12 +6,10 @@ the cluster half, validated at E1/E5.
 
 import re
 from datetime import datetime, timezone
-from pathlib import Path
 
-import pytest
 import yaml
 
-from tools.common.config import BenchmarkConfig, Deployment, load_global_config
+from tools.common.config import Deployment
 from tools.planner.render import (
     precheck_scope,
     render_experiment,
@@ -19,14 +17,8 @@ from tools.planner.render import (
     vllm_command,
 )
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-CANONICAL = REPO_ROOT / "examples" / "benchmark-configs" / "mixed-80-20.yaml"
+# globals_cfg, canonical_dict fixtures come from conftest.py
 NOW = datetime(2026, 6, 12, 14, 0, 0, tzinfo=timezone.utc)
-
-
-@pytest.fixture(scope="module")
-def globals_cfg():
-    return load_global_config()
 
 
 def _render(tmp_path, cfg_dict, globals_cfg):
@@ -35,12 +27,6 @@ def _render(tmp_path, cfg_dict, globals_cfg):
     exp_dir = render_experiment(path, tmp_path / "experiments", globals_cfg, now=NOW)
     run_dirs = [d for d in exp_dir.iterdir() if d.is_dir()]
     return exp_dir, run_dirs
-
-
-@pytest.fixture()
-def canonical_dict():
-    with open(CANONICAL) as f:
-        return yaml.safe_load(f)
 
 
 def test_vllm_command_flag_mapping():
@@ -118,7 +104,7 @@ def test_slurm_render_canonical(tmp_path, canonical_dict, globals_cfg):
     assert "--safetensors-load-strategy prefetch" in engine
     # EDF
     assert 'workdir = ' in edf and "hf-cache" in edf
-    # §9.0 Alps-extended image (default): CXI hook disabled in the EDF, and the
+    # §8.1 Alps-extended image (default): CXI hook disabled in the EDF, and the
     # srun carries --network=disable_rdzv_get + --mpi=pmix.
     assert 'com.hooks.cxi.enabled = "false"' in edf
     assert "--network=disable_rdzv_get" in engine
@@ -162,7 +148,7 @@ def test_k8s_render(tmp_path, canonical_dict, globals_cfg):
 
 
 def test_stock_image_keeps_cxi_hook(tmp_path, canonical_dict, globals_cfg):
-    # §9.0/§8.2: a stock vendor image relies on the host CXI hook, so it stays
+    # §8.1/§8.2: a stock vendor image relies on the host CXI hook, so it stays
     # enabled (no annotation) and the srun drops --network=disable_rdzv_get;
     # --mpi=pmix is always present.
     canonical_dict["deployments"][0]["alps_extended_image"] = False

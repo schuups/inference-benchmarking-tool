@@ -12,7 +12,7 @@ import logging
 import sqlite3
 from pathlib import Path
 
-from tools.benchmarker.db import SCHEMA, ResultsDB
+from tools.common.results_db import SCHEMA, ResultsDB
 
 log = logging.getLogger("coordinator.merge")
 

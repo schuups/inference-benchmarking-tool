@@ -15,7 +15,6 @@ Status is normalised to: "pending" | "running" | "completed" | "failed".
 
 from __future__ import annotations
 
-import asyncio
 import gzip
 import hashlib
 import json
@@ -23,6 +22,8 @@ import logging
 import shutil
 from pathlib import Path
 from typing import Protocol
+
+from tools.common.proc import kubectl as _kubectl
 
 log = logging.getLogger("coordinator.backend")
 
@@ -144,15 +145,6 @@ class FakeClusterBackend:
 
 
 # ----------------------------------------------------------------- kubernetes
-
-
-async def _kubectl(*args: str) -> tuple[int, str, str]:
-    proc = await asyncio.create_subprocess_exec(
-        "kubectl", *args,
-        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-    )
-    out, err = await proc.communicate()
-    return proc.returncode, out.decode(errors="replace"), err.decode(errors="replace")
 
 
 _K8S_PHASE = {"Pending": "pending", "Running": "running", "Succeeded": "completed", "Failed": "failed"}

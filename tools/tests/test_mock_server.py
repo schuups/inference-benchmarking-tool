@@ -1,6 +1,5 @@
 """Mock-server ground truth: latency shape, canned answers, metrics, faults."""
 
-import asyncio
 import json
 import time
 
@@ -8,7 +7,7 @@ import aiohttp
 import pytest
 import pytest_asyncio
 
-from tools.testing.mock_openai_server import MockConfig, MockServer, run_server
+from tools.testing.mock_openai_server import MockConfig, run_server
 
 PORT = 8779
 

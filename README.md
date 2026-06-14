@@ -34,7 +34,7 @@ Procurement-grade evidence must anticipate workloads that will dominate in 3–5
 |---|---|---|
 | 💬 Conversational chat (short turns) | 🪨 `established` | Multi-turn prefix-cache hits; high request rate; small per-turn token counts. |
 | 💻 AI-assisted coding (long context + follow-ups) | 🪨 `established` | KV-cache reuse, prefix caching, returning-user locality, long-context decoding. |
-| 🖼️ Multimodal prompts (text + image) | 🪨 `established` | Mixed-modality token streams; vision encoder coupled to the LLM. |
+| 🖼️ Multimodal prompts (text + image) | 🪨 `established` | Mixed-modality token streams; vision encoder coupled to the LLM. **Not yet covered by this tool — v1 is text-only (see roadmap).** |
 | 🧠 Reasoning-intensive workloads (chain-of-thought) | 🪨 `established` | Decode-heavy traffic; speculative-acceptance rates over real reasoning traces. |
 | 🛠️ Agentic tool-calling (think → tool → think) | 🪨 `established` | Multi-turn fan-out as a session of model invocations (v1); precise per-tool modelling deferred. |
 | 📦 Code-execution sandboxes interleaved with reasoning | 🪨 `established` | Large injected tool results; tight observe-think-act loops. |
@@ -53,7 +53,7 @@ MLPerf Inference: Datacenter is a valuable, fair, reproducible cross-platform be
 3. **Agentic-workload approximation.** Agentic workloads are modelled as multi-turn sessions with bursty fan-out — enough to derive supportable-user-count from the SLO-attained rate λ* (SPECIFICATIONS.md §12.4, §14.1); precise per-tool modelling deferred (see `TODOs.md`).
 4. **Open-loop queueing dynamics.** Poisson and burst-aware arrivals expose backlog growth, tail-latency amplification, scheduler collapse, admission control, and autoscaling responsiveness — invisible to closed-loop measurement.
 5. **Service-oriented evaluation.** Captures schedulers, batching, routing, distributed runtimes, heterogeneous accelerators, interconnects, autoscaling, and orchestration overhead — not just kernel execution.
-6. **Modern LLM and multimodal workloads.** Long-context, reasoning-heavy, multimodal, and heterogeneous request mixes (mixed prefill/decode pressure, mixed latency sensitivity) — exposing memory-hierarchy, scheduling, and interconnect bottlenecks rather than peak FLOPs.
+6. **Modern LLM workloads.** Long-context, reasoning-heavy, and heterogeneous request mixes (mixed prefill/decode pressure, mixed latency sensitivity) — exposing memory-hierarchy, scheduling, and interconnect bottlenecks rather than peak FLOPs. (Multimodal request mixes are on the roadmap; v1 is text-only.)
 7. **Forward-looking scenario taxonomy.** Workload taxonomy reviewed on cadence against leading indicators; scenarios carry maturity tags so procurement evidence distinguishes validated patterns from emerging trends.
 8. **Quality-disclosed capacity.** Capacity gains from quality-impacting configurations (quantization, KV dtype) are paired in the same report with measured response-quality deltas — graded evals against the deployed endpoint (SPECIFICATIONS.md §12.5) — and a pre-sweep sanity gate protects every sweep from measuring a corrupted deployment.
 
@@ -62,18 +62,17 @@ MLPerf Inference: Datacenter is a valuable, fair, reproducible cross-platform be
 - [`CLAUDE.md`](CLAUDE.md) — architecture (components and their boundaries), targeted clusters, repo layout, environment constants, working agreement.
 - [`SPECIFICATIONS.md`](SPECIFICATIONS.md) — authoritative requirements, schema definitions, cluster-specific constraints, and known workarounds.
 - [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) — build order: component milestones, experiments track, dependencies, definitions of done.
-- [`COMPARATIVE_REVIEW.md`](COMPARATIVE_REVIEW.md) — methodology comparison against SemiAnalysis InferenceMAX / InferenceX (strengths, weaknesses, quality-measurement gap).
 - [`TODOs.md`](TODOs.md) — tracked future work.
 
 ## Current models of interest
 
-The operational set under active measurement — kept aligned with the authoritative table in [`SPECIFICATIONS.md`](SPECIFICATIONS.md) §8.2 (HF IDs, tokenizers, context lengths, scenario pairings). Capability columns indicate whether the model natively supports each modality/feature.
+The operational set under active measurement; [`SPECIFICATIONS.md`](SPECIFICATIONS.md) §8.2 remains authoritative for HF IDs, tokenizers, context lengths, and scenario pairings. **v1 exercises these models on text-only workloads** (multimodality is on the roadmap); the capability columns below are model-level context, not a statement of what the tool measures today.
 
-| Model | Role (§8.2) | Text | Reasoning / Thinking | Multimodal | Tools |
-|---|---|---|---|---|---|
-| **Apertus-70B** (Swiss AI / EPFL / ETHZ / CSCS) | target | Yes — multilingual (1000+ languages, incl. Swiss German, Romansh) | No dedicated thinking mode (base model) | Yes — image input | Yes — tool-use |
-| **Apertus-8B** (Swiss AI / EPFL / ETHZ / CSCS) | draft — paired with Apertus-70B for speculative decoding (same family, identical tokenizer) | Yes — multilingual | No | — | — |
-| **Kimi-K2.6** (Moonshot AI) | target | Yes | Yes — deeper reasoning and planning; strong on agentic, multi-step workflows | Yes — text + image + video (MoonViT encoder; multimodal performance comparatively weak) | Yes — strong tool-use reliability; leads open weights on HLE-with-tools |
+| Model | Role (§8.2) | Text | Reasoning / Thinking | Tools |
+|---|---|---|---|---|
+| **Apertus-70B** (Swiss AI / EPFL / ETHZ / CSCS) | target | Yes — multilingual (1000+ languages, incl. Swiss German, Romansh) | No dedicated thinking mode (base model) | Yes — tool-use |
+| **Apertus-8B** (Swiss AI / EPFL / ETHZ / CSCS) | draft — paired with Apertus-70B for speculative decoding (same family, identical tokenizer) | Yes — multilingual | No | — |
+| **Kimi-K2.6** (Moonshot AI) | target | Yes | Yes — deeper reasoning and planning; strong on agentic, multi-step workflows | Yes — strong tool-use reliability; leads open weights on HLE-with-tools |
 
 Candidate future models (e.g. DeepSeek-V4-Pro, GLM-5.1) are tracked in [`TODOs.md`](TODOs.md) and enter the §8.2 operational table when they come under active measurement.
 
@@ -90,6 +89,6 @@ Resources consulted to develop the methodology in this tool.
 
 - *MLPerf Inference Benchmark* — Reddi et al., 2019 — [arXiv:1911.02549](https://arxiv.org/abs/1911.02549). The MLPerf Inference: Datacenter scenario definitions (Server / Offline) and metric conventions.
 - *InferenceMAX: open-source inference benchmarking* — SemiAnalysis newsletter — [newsletter post](https://newsletter.semianalysis.com/p/inferencemax-open-source-inference) and [project site](https://inferencex.semianalysis.com/).
-- *InferenceX v2: NVIDIA Blackwell vs AMD* — SemiAnalysis newsletter — [newsletter post](https://newsletter.semianalysis.com/p/inferencex-v2-nvidia-blackwell-vs). Source of the endpoint-eval quality-gate architecture adapted in SPECIFICATIONS.md §12.5; see [`COMPARATIVE_REVIEW.md`](COMPARATIVE_REVIEW.md).
+- *InferenceX v2: NVIDIA Blackwell vs AMD* — SemiAnalysis newsletter — [newsletter post](https://newsletter.semianalysis.com/p/inferencex-v2-nvidia-blackwell-vs). Source of the endpoint-eval quality-gate architecture adapted in SPECIFICATIONS.md §12.5.
 - *DeepSeek-V4 1.6T: Day 0 to Day 43 performance* — SemiAnalysis newsletter — [newsletter post](https://newsletter.semianalysis.com/p/deepseekv4-16t-day-0-to-day-43-performance). Software-maturity-over-time methodology and day-0 kernel-correctness case studies.
 - *InferenceX repository* — [SemiAnalysisAI/InferenceX](https://github.com/SemiAnalysisAI/InferenceX). Reference implementation of lm-eval-based quality gates (`utils/evals/`) and closed-loop concurrency benchmarking.

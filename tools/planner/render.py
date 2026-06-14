@@ -16,7 +16,6 @@ from pathlib import Path
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
 from tools.common.config import (
-    BenchmarkConfig,
     Deployment,
     GlobalConfig,
     load_benchmark_config,
@@ -28,7 +27,7 @@ TEMPLATES_DIR = Path(__file__).resolve().parents[1] / "templates"
 
 
 def vllm_command(deployment: Deployment) -> str:
-    """BackendConfig -> vLLM launch command (§15.2 flag mapping, vllm-cxi v0.20.x)."""
+    """BackendConfig -> vLLM launch command (§15.2 flag mapping)."""
     bc = deployment.backend_config
     parts = [
         "vllm serve", deployment.model,
@@ -128,7 +127,7 @@ def render_experiment(
             "cluster": deployment.target,
             "image": default_image(deployment, glob),
             # Alps-extended images bundle their own CXI/libfabric stack → disable
-            # the host CXI hook so the image's libraries win (§9.0). Drives the EDF
+            # the host CXI hook so the image's libraries win (§8.1). Drives the EDF
             # annotation + the srun --network=disable_rdzv_get flag.
             "disable_cxi_hook": deployment.alps_extended_image,
             "engine_command": vllm_command(deployment),

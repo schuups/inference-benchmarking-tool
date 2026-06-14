@@ -2,13 +2,12 @@
 
 The model-load regexes target vLLM's structured log lines. They are seeded from
 upstream-vLLM message shapes and MUST be re-validated against a captured log of
-the pinned vllm-cxi image at E1 (parser-fixture discipline per plan M2 DoD);
+the pinned vLLM image at E1 (parser-fixture discipline per plan M2 DoD);
 components a log does not expose stay None -> stored as NULL (§9.2).
 """
 
 from __future__ import annotations
 
-import asyncio
 import re
 import time
 from dataclasses import dataclass
@@ -31,25 +30,6 @@ def parse_model_load(log_text: str) -> dict[str, float | None]:
         m = pattern.search(log_text)
         out[column] = float(m.group(1)) if m else None
     return out
-
-
-async def wait_ready(
-    http: aiohttp.ClientSession, url: str, timeout_s: float, poll_interval_s: float = 2.0
-) -> float:
-    """Polls /health until 200; returns seconds waited (-> model_load_total_s input)."""
-    start = time.perf_counter()
-    while True:
-        try:
-            async with http.get(f"{url}/health") as resp:
-                if resp.status == 200:
-                    return time.perf_counter() - start
-        except aiohttp.ClientError:
-            pass
-        if time.perf_counter() - start > timeout_s:
-            raise TimeoutError(
-                f"instance at {url} not ready within server_ready_timeout_s={timeout_s} (§11.1)"
-            )
-        await asyncio.sleep(poll_interval_s)
 
 
 @dataclass

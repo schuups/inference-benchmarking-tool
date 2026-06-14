@@ -170,4 +170,17 @@ class Coordinator:
         if self.state.is_done("torn_down"):
             return
         self.teardown_results = await execute_teardown(self.state, self.backend)
+        failed = [(a, detail) for a, ok, detail in self.teardown_results if not ok]
+        if failed:
+            # Don't record teardown as complete on partial failure (§6 "leave no
+            # orphans"): keep the phase so a later --resume retries the actions,
+            # and surface the failures to the operator without clobbering any
+            # pre-existing run error.
+            msg = "; ".join(f"teardown {a.kind} {a.target}: {detail}" for a, detail in failed)
+            self.state.error = f"{self.state.error}; {msg}" if self.state.error else msg
+            log.warning(
+                "[%s] teardown incomplete: %d/%d actions failed — leaving phase=%r for retry",
+                self.state.run_id, len(failed), len(self.teardown_results), self.state.phase,
+            )
+            return
         self.state.advance("torn_down")

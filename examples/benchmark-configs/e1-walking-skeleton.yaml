@@ -47,7 +47,12 @@ slos:                      # exercises the λ* machinery; thresholds deliberatel
   - { scenario: smoke-synthetic, metric: ttft_ms, percentile: p95, threshold: 2000 }
   - { scenario: all, metric: error_rate_pct, threshold: 1.0 }
 
+quality_eval:                          # E1 is a pure pipeline shakeout — quality deferred to E2+
+  skip_quality_gate: true              # lm-eval/torch intentionally not in the E1 venv
+  skip_quality_compare: true           # (graded quality comes online at E2+)
+
 system_prechecks:
-  collective_tests_version: "2.18.5"
+  skip_system_prechecks: true          # stock NGC image lacks the MPI/NCCL build toolchain (§7.5)
+  collective_tests_version: "2.17.1"   # reconciled with the other E1 config (moot while skipped)
 
 server_time_limit: "01:30:00"

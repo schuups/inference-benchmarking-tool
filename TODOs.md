@@ -286,3 +286,48 @@ benchmark-YAML change per §8.2).
 - [ ] Show distributions in every plot
 - [ ] Include all collected percentiles (p50/p75/p90/p95/p99) in reports; initially only p90 visible, others commented out for the user to enable
 - [ ] Each experiment directory must contain all artifacts used to run it (Dockerfiles, sbatch scripts, Kubernetes YAML)
+
+## Code quality & test coverage
+
+Surfaced by the post-merge audit + E1 re-run (2026-06-14).
+
+- [ ] **Cap the Inductor primer prompt to `max_model_len`** (§9.3) — `run_primer`
+  (`load_gen/readiness.py`) sends a fixed ~20k-token prompt regardless of the served
+  context, so on small-context models (e.g. the E1 8192-ctx Apertus-8B) the primer is
+  rejected `http_400` and never warms the engine (non-fatal warning). The orchestrator
+  should pass `prompt_tokens = min(target, max_model_len − margin)`. Surfaced by the E1 re-run.
+- [ ] **Unit/dry-run test for `tools/benchmarker/launchers.py`** — the real SLURM/K8s
+  engine-spawn logic is only exercised via `MockLauncher` in `test_orchestrator`; add a
+  construction/dry-run test asserting the rendered `srun`/`kubectl` invocation shape
+  (distinct from the E1/E5 cluster validation already tracked under *Architecture & Engine*).
+- [ ] **Make `tools/pre-flight-checks.py` importable for testing** — the hyphenated
+  filename blocks `import`, so the §3 pre-flight logic has no unit test. Rename to
+  `pre_flight_checks.py` (keep a thin CLI shim if the hyphenated invocation is relied on).
+- [ ] **Direct unit test for `load_gen/client.py`** — the streaming/SSE `_failure`
+  classification (§12.1) is only covered indirectly via the mock server; isolate it.
+- [ ] **Deferred low-priority simplifications** (audit, low value / refactor risk on paths
+  validated only on-cluster): (a) shared reader for the `prechecks/results.json` contract
+  consumed by both `orchestrator` (inline gate enforcement) and `coordinator/policy`
+  (observe/surface) — today they parse the same `rows`/`status`/`gate_exit_code` keys
+  independently; (b) replace the fragile `default_image`-string surgery in
+  `planner.render.benchmarker_image` with a direct registry-path composer; (c) factor the
+  duplicated TTFT/TPOT math in `load_gen/client.py` success vs `_failure` paths into one helper.
+- [ ] **Multi-node pre-check reference scopes** (§7.3/§7.4) — `find_reference` matches the
+  planner's `precheck_scope` string exactly, but `system_prechecks_reference.yaml` only
+  enumerates 1- and 2-node scopes, so larger multi-node deployments grade as
+  "pass (informational)" silently. Enumerate every node-count scope a config can render
+  (or interpolate) when populating the reference values.
+
+## Documentation & spec consistency
+
+Minor SPECIFICATIONS.md self-consistency follow-ups from the post-merge audit (2026-06-14):
+
+- [ ] **`request_timeout_s` scope** — §11.2/§12.1 describe it as a TTFT cutoff; §13.3's
+  `success` column describes a whole-request completion cutoff. State once whether it bounds
+  TTFT or end-to-end and make the other references consistent.
+- [ ] **ITL ≡ TPOT terminology** — inter-token latency is called "ITL" in §11.2/§14.1 plot
+  labels and "TPOT" (the `tpot_ms` schema field) elsewhere. Standardise on one term, or add
+  an explicit "ITL ≡ TPOT (`tpot_ms`)" note.
+- [ ] **§13.4 composite-key claim** — §13.4 (`server_stats`) asserts its key "matches"
+  §13.5/§13.6, which don't declare matching composite keys. Either declare the keys or soften
+  the wording to "shares the run_id/instance_id scoping".

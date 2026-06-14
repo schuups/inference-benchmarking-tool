@@ -13,19 +13,12 @@ import random
 
 from .registry import Distribution
 
-AXES = ("header", "length_input", "length_output", "selection", "turns", "thinktime")
-
 THINKING_MEAN_FACTOR = 2.5  # §10.6 thinking widening
 THINKING_SIGMA_FACTOR = 1.5
 
 
 def sub_seed(seed: int, scenario: str, axis: str) -> int:
     digest = hashlib.blake2b(f"{seed}:{scenario}:{axis}".encode(), digest_size=8)
-    return int.from_bytes(digest.digest(), "big")
-
-
-def mix_seed(seed: int) -> int:
-    digest = hashlib.blake2b(f"{seed}:mix".encode(), digest_size=8)
     return int.from_bytes(digest.digest(), "big")
 
 

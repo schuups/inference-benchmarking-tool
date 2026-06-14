@@ -27,18 +27,16 @@ import argparse
 import asyncio
 import json
 import logging
-import re
-import subprocess
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Protocol
+
+from tools.common.proc import run_cmd
+from tools.common.runid import parse_run_id as _parse_run_id_parts
 
 log = logging.getLogger("cleaner")
 
 MANAGED_BY = "inference-benchmarking"
-# §6.2 run-ID shape: <YYYYMMDD-HHMMSS>_<model-slug>_<backend>_<target>_<4hex>
-RUN_ID_RE = re.compile(r"^\d{8}-\d{6}_[a-z0-9.-]+_[a-z0-9]+_[a-z0-9-]+_[0-9a-f]{4}$")
 
 DEFAULT_AGE_THRESHOLD_H = 24.0
 DEFAULT_KEEP_RECENT_JFROG = 3
@@ -46,8 +44,11 @@ DEFAULT_REMINDER_INTERVAL_H = 168.0  # weekly
 
 
 def parse_run_id(name: str) -> str | None:
-    """Return the name if it matches the §6.2 run-ID pattern, else None."""
-    return name if RUN_ID_RE.match(name) else None
+    """Return the name if it matches the §6.2 run-ID pattern, else None.
+
+    Thin wrapper over the canonical parser in tools.common.runid so the §6.2
+    field layout is defined in exactly one place."""
+    return name if _parse_run_id_parts(name) else None
 
 
 @dataclass
@@ -77,11 +78,12 @@ class CleanReport:
 def _skip_reason(c: Candidate, age_threshold_h: float, jfrog_keep: set[str], active_run_ids) -> str | None:
     if c.kind == "k8s" and "model-cache" in c.ident:
         return "model-cache PVC retained (§6.6)"
-    if c.kind == "scratch":
-        if c.run_id is None:
-            return "not a benchmark run dir (§6.2 pattern)"
-        if c.run_id in active_run_ids:
-            return "owned by an active job"
+    if c.kind == "scratch" and c.run_id is None:
+        return "not a benchmark run dir (§6.2 pattern)"
+    # Protect anything owned by a still-running job — scratch dirs AND K8s objects
+    # (the run-id comes from the §6.1 label for K8s, the dir name for scratch).
+    if c.run_id is not None and c.run_id in active_run_ids:
+        return "owned by an active job"
     if c.kind == "jfrog" and c.ident in jfrog_keep:
         return f"among the {len(jfrog_keep)} most recent tags"
     if c.age_hours < age_threshold_h:
@@ -157,14 +159,6 @@ def scratch_candidates(entries: list[dict], now: datetime | None = None) -> list
     return out
 
 
-async def _run(*args: str) -> tuple[int, str, str]:
-    proc = await asyncio.create_subprocess_exec(
-        *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-    )
-    out, err = await proc.communicate()
-    return proc.returncode, out.decode(errors="replace"), err.decode(errors="replace")
-
-
 def _age_hours(iso_ts: str, now: datetime) -> float:
     try:
         return (now - datetime.fromisoformat(iso_ts.replace("Z", "+00:00"))).total_seconds() / 3600
@@ -181,7 +175,7 @@ class KubectlCleanerBackend:
         self._ns = namespace
 
     async def list_candidates(self) -> list[Candidate]:
-        code, out, err = await _run(
+        code, out, err = await run_cmd(
             "kubectl", "get", self.KINDS, "-n", self._ns,
             "-l", f"app.kubernetes.io/managed-by={MANAGED_BY}", "-o", "json",
         )
@@ -203,7 +197,7 @@ class KubectlCleanerBackend:
 
     async def delete(self, candidate: Candidate) -> None:
         kind_name = candidate.ident.split("/", 1)
-        code, _, err = await _run("kubectl", "delete", kind_name[0], kind_name[1], "-n", self._ns)
+        code, _, err = await run_cmd("kubectl", "delete", kind_name[0], kind_name[1], "-n", self._ns)
         if code != 0:
             raise RuntimeError(err.strip())
 
@@ -225,9 +219,10 @@ class FakeCleanerBackend:
 # ----------------------------------------------------------------------- CLI
 
 
-async def _cli_identify(backend: CleanerBackend, age_threshold_h: float, keep_recent: int) -> CleanReport:
+async def _cli_identify(backend: CleanerBackend, age_threshold_h: float, keep_recent: int,
+                        active_run_ids=frozenset()) -> CleanReport:
     return identify(await backend.list_candidates(), age_threshold_h=age_threshold_h,
-                    keep_recent_jfrog=keep_recent)
+                    keep_recent_jfrog=keep_recent, active_run_ids=active_run_ids)
 
 
 def main() -> int:
@@ -235,6 +230,9 @@ def main() -> int:
     parser.add_argument("--namespace", default="ml", help="K8s namespace (breithorn)")
     parser.add_argument("--age-threshold-h", type=float, default=DEFAULT_AGE_THRESHOLD_H)
     parser.add_argument("--keep-recent-jfrog", type=int, default=DEFAULT_KEEP_RECENT_JFROG)
+    parser.add_argument("--active-run-id", action="append", default=[], metavar="RUN_ID",
+                        help="run_id to protect from pruning (repeatable); scratch dirs and "
+                             "K8s objects owned by these are skipped")
     parser.add_argument("--prune", action="store_true", help="delete the prunable candidates")
     parser.add_argument("--yes", action="store_true", help="confirm pruning (required with --prune)")
     args = parser.parse_args()
@@ -243,7 +241,8 @@ def main() -> int:
     # K8s is the headless class here; SLURM scratch + JFrog discovery is assistant-driven
     # via the FirecREST MCP / jf and feeds identify() the same way (decision 5).
     backend = KubectlCleanerBackend(args.namespace)
-    report = asyncio.run(_cli_identify(backend, args.age_threshold_h, args.keep_recent_jfrog))
+    active = frozenset(args.active_run_id)
+    report = asyncio.run(_cli_identify(backend, args.age_threshold_h, args.keep_recent_jfrog, active))
     print(report.render())
 
     if args.prune:

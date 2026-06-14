@@ -17,9 +17,10 @@ engine EDF carries the right annotation.
 > described here is the **hook-injection** model, for stock images that ship *without*
 > the Alps network stack. The framework's repo-built engine images are
 > **self-contained** — the stack is baked in, so they run with the CXI hook
-> **disabled** and **no** aws-ofi hook (see `SPECIFICATIONS.md` §8.1). The
-> `nccl-tests` build/run scripts in this directory are still the basis for the §7
-> in-container pre-checks; only the EDF hook annotations differ.
+> **disabled** and **no** aws-ofi hook (see `SPECIFICATIONS.md` §8.1). The live §7
+> in-container pre-checks are implemented in `tools/benchmarker/prechecks/` (rendered
+> into the engine launch by the Planner); the scripts in *this* directory are a
+> standalone manual example / historical seed and may lag the canonical copies.
 
 ## Operating model: same container, concatenated commands
 
@@ -57,20 +58,22 @@ inputs.
 
 ## Install-on-missing build dependencies
 
-`build-nccl-tests.sh` installs `make`, `g++`, OpenMPI dev headers, `curl`, and
-`tar` via `apt-get` / `dnf` / `yum` if they are not in the engine image —
-**the engine image is not required to ship them**. Only the rank holding the
-build lock performs the install, so apt is not hammered by `N` concurrent
-ranks. Install is skipped on cache-hit.
+`build-nccl-tests.sh` tries to install `make`, `g++`, OpenMPI dev headers, `curl`,
+and `tar` via `apt-get` / `dnf` / `yum` if they are missing. Only the rank holding
+the build lock performs the install, so apt is not hammered by `N` concurrent ranks.
+Install is skipped on cache-hit.
+
+> **Limitation surfaced at E1.** The CSCS Container Engine runs containers
+> **non-root**, so this apt/dnf fallback fails (`mpi.h: No such file or directory`)
+> on a stock image that lacks the toolchain. The §7 pre-check therefore requires the
+> MPI/NCCL build toolchain **baked into the engine image** — which the framework's
+> self-contained Alps image provides (see `SPECIFICATIONS.md` §7.5 and `TODOs.md`).
 
 ## Files
 
 | File | Role |
 |---|---|
-| `_stack-fingerprint.sh` | Shared helper — sourced by build + run scripts to derive the cache directory from the engine container's tool versions. |
-| `build-nccl-tests.sh` | Rank-0 build of `nccl-tests` `v$NCCL_TESTS_VERSION`. Sentinel-gated, install-on-missing, atomic-publish. Other ranks wait on the sentinel. |
-| `run-collectives.sh` | Per-rank entrypoint executed under `srun --mpi=pmix`. Loops over `$COLLECTIVES`, runs each `<name>_perf -b 8 -e $MSG_END -f 2 -g 1`. |
-| `run-nvshmem.sh` | Per-rank NVSHMEM perftest. Discovers binaries shipped with the engine image's NVSHMEM SDK; skip-with-warning if NVSHMEM is absent (`NVSHMEM_REQUIRED=1` to enforce). |
+| `_stack-fingerprint.sh`, `build-nccl-tests.sh`, `run-collectives.sh`, `run-nvshmem.sh` | **Canonical copies live in `tools/benchmarker/prechecks/`** — the §7 pre-check scripts the tool actually runs. The sbatch files below source them from there via `PRECHECK_DIR`; no copies are kept in this directory. |
 | `precheck-intra-node.sbatch` | 1 node × 4 GH200 (NVLink-C2C). `MSG_END=8G`. |
 | `precheck-inter-node.sbatch` | 2 nodes × 4 GH200 (Slingshot 11). `MSG_END=128M` (CSCS reference). |
 

@@ -16,7 +16,6 @@ import argparse
 import asyncio
 import json
 import random
-import time
 from dataclasses import dataclass, field
 
 from aiohttp import web

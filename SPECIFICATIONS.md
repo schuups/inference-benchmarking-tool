@@ -486,12 +486,12 @@ sweepable configuration knobs live in §15.2.
 
 | Backend | Planner template | Status |
 |---|---|---|
-| **vLLM** | `tools/templates/vllm.edf.j2` (TBD) | active |
+| **vLLM** | `tools/templates/vllm.edf.j2` | active |
 | **SGLang** | `tools/templates/sglang.edf.j2` (TBD) | planned |
 | **Nvidia Dynamo** | `tools/templates/dynamo.edf.j2` (TBD) | planned |
 
-The specific backend version and variant (e.g. `vllm-cxi` v0.20.x vs v0.21.x, CSCS-fork
-vs upstream vLLM) is declared **per experiment** in the benchmark YAML and sweeps as a
+The specific backend version and variant (e.g. one vLLM release vs a newer one, or
+upstream vs a CSCS-patched build) is declared **per experiment** in the benchmark YAML and sweeps as a
 deployment-sweep dimension — comparing versions of one backend, or comparing across
 backends, are both first-class experiment shapes.
 
@@ -662,7 +662,7 @@ per-instance breakdown and the totals aggregated across instances.
 
 ### 9.3 Inductor pre-compilation primer
 
-vLLM v1 (vllm-cxi v0.20+) uses `torch.inductor` to JIT-compile CUDA kernels for large prefill
+vLLM v1 (v0.20+) uses `torch.inductor` to JIT-compile CUDA kernels for large prefill
 sequences (> 512 tokens) **lazily** — on the first request that triggers the path. This
 one-time compilation is the dominant cold-start cost on first request after a server start.
 
@@ -1576,8 +1576,8 @@ full picture lives.
 
 Each experiment is composed from the features being measured (§15.1), the **deployment
 target** (SLURM vs Kubernetes — frequently a sweep dimension in its own right, §5), the
-**backend and its version / variant** under test (§8.1; v0.20.x vs v0.21.x, or
-CSCS-fork vs upstream — comparing two versions of the same backend is a first-class
+**backend and its version / variant** under test (§8.1; e.g. one vLLM release vs
+another, or upstream vs a CSCS-patched build — comparing two versions of the same backend is a first-class
 experiment shape), the BackendConfig knobs that vary across deployments within the
 experiment (§15.2), and the model(s) under test (§8.2). The benchmark YAML specifies
 all five, plus the workload mix the deployment is loaded with (`scenario_mix`, §10.4),
@@ -1658,7 +1658,7 @@ added per-experiment as the operator requests them. Claude extends the surface
 (BackendConfig field + Jinja template branch + the relevant table here) when a new knob
 or version comes into scope.
 
-#### vLLM — `vllm-cxi` v0.20.x
+#### vLLM — v0.22.x
 
 | Field | vLLM flag | Notes |
 |---|---|---|
@@ -1678,7 +1678,7 @@ or version comes into scope.
 | `speculative_decoding.num_speculative_tokens` | part of `--speculative-config` JSON | |
 | `speculative_decoding.draft_tensor_parallel_size` | part of `--speculative-config` JSON | Draft tensor-parallel size. Shared- vs dedicated-GPU guidance in §16.2. |
 
-**Flag compatibility.** The vLLM flag names above are stable on the current vllm-cxi pin.
+**Flag compatibility.** The vLLM flag names above are stable on the current vLLM pin.
 The table below records flags that were removed, renamed, or made mandatory in this
 release, so that planner templates don't regress to deprecated syntax when the pin moves.
 

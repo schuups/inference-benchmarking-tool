@@ -4,7 +4,7 @@ Stage-A pass/fail logic, Stage-B score collection, and quality_evals row shape.
 
 import pytest
 
-from tools.benchmarker.db import ResultsDB
+from tools.common.results_db import ResultsDB
 from tools.benchmarker.orchestrator import Instance
 from tools.benchmarker.quality_eval.base import QualityEvalError
 from tools.benchmarker.quality_eval.grader import BuiltinEvalBackend

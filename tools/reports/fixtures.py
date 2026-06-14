@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from tools.benchmarker.db import ResultsDB
+from tools.common.results_db import ResultsDB
 
 SCENARIO = "chat-short-turns"
 RATE_LEVELS = [1.0, 2.0, 3.0]

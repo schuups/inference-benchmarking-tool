@@ -43,7 +43,7 @@ import aiohttp
 
 from tools.common.config import BenchmarkConfig, Deployment
 
-from .db import ResultsDB
+from tools.common.results_db import ResultsDB
 from .dataset_gen.generator import POOL_FILENAME, generate
 from .dataset_gen.tokenizers import Tokenizer
 from .load_gen.pool import load_pool

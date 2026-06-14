@@ -43,7 +43,7 @@ RAY_CMD='if [ "$SLURM_NODEID" = "0" ]; then ray start --head --port=6379; else s
 
 {# Alps-extended images require --network=disable_rdzv_get alongside the CXI    #}
 {# hook being disabled in the EDF, and PMIx for the MPI-built pre-check         #}
-{# collectives (§9.0; docs.cscs.ch/software/alps-extended-images "Danger").     #}
+{# collectives (§8.1; docs.cscs.ch/software/alps-extended-images "Danger").     #}
 srun --environment={{ run_dir_remote }}/engine.toml{% if disable_cxi_hook %} --network=disable_rdzv_get{% endif %} --mpi=pmix bash -c '
 set -eo pipefail
 bash {{ tools_remote }}/benchmarker/prechecks/run_system_prechecks.sh && {

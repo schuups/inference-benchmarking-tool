@@ -263,6 +263,7 @@ async def test_no_quality_evaluator_skips_stages(tmp_path):
     assert _counts(run_dir / f"run_{summary.run_id}.db")["quality_evals"] == 0
 
 
+@pytest.mark.slow
 @pytest.mark.asyncio
 async def test_dead_engine_before_readiness_aborts(tmp_path):
     run_dir = tmp_path / "run"

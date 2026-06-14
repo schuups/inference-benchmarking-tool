@@ -1,32 +1,17 @@
 """M0 DoD: canonical example accepted; every violation class rejected."""
 
 import copy
-from pathlib import Path
 
 import pytest
-import yaml
 
 from tools.common.config import (
     BenchmarkConfig,
     load_benchmark_config,
-    load_global_config,
     validate_against_globals,
     validate_scenarios_registered,
 )
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-CANONICAL = REPO_ROOT / "examples" / "benchmark-configs" / "mixed-80-20.yaml"
-
-
-@pytest.fixture(scope="module")
-def globals_cfg():
-    return load_global_config()
-
-
-@pytest.fixture()
-def canonical_dict():
-    with open(CANONICAL) as f:
-        return yaml.safe_load(f)
+# globals_cfg, canonical_dict, canonical_path fixtures come from conftest.py
 
 
 def _validate(d, globals_cfg):
@@ -42,8 +27,8 @@ def test_global_config_loads(globals_cfg):
     assert all(c.gpus_per_node == 4 for c in globals_cfg.clusters.values())
 
 
-def test_canonical_example_accepted(globals_cfg):
-    cfg = load_benchmark_config(CANONICAL, globals_cfg)
+def test_canonical_example_accepted(globals_cfg, canonical_path):
+    cfg = load_benchmark_config(canonical_path, globals_cfg)
     assert cfg.dataset_config.output_length_mode == "forced"
     assert len(cfg.dataset_config.scenario_mix) == 2
     assert cfg.quality_eval.gate.on_fail == "abort"

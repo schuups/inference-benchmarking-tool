@@ -26,7 +26,7 @@ def decide_on_precheck(results: dict, on_warn: str, on_fail: str) -> PrecheckDec
     rows = results.get("rows", [])
     statuses = {r.get("status") for r in rows}
     code = results.get("gate_exit_code", 0)
-    offending = [f"{r['metric']}={r.get('measured')}" for r in rows if r.get("status") in ("warn", "fail")]
+    offending = [f"{r.get('metric')}={r.get('measured')}" for r in rows if r.get("status") in ("warn", "fail")]
     detail = f" ({', '.join(offending)})" if offending else ""
     if "fail" in statuses:
         return PrecheckDecision(

@@ -4,7 +4,6 @@ Timing assertions use generous tolerances — they verify *ordering and shape*,
 not microsecond precision.
 """
 
-import asyncio
 import json
 from collections import deque
 
@@ -17,7 +16,6 @@ from tools.benchmarker.load_gen.pool import PoolSession, Turn, load_pool
 from tools.benchmarker.load_gen.readiness import (
     parse_model_load,
     run_primer,
-    wait_ready,
 )
 from tools.benchmarker.load_gen.scheduler import (
     PoolExhaustedError,
@@ -275,15 +273,6 @@ def test_parse_model_load_fixture():
     assert parsed["model_load_engine_init_s"] == pytest.approx(61.20)
     assert parsed["model_load_cuda_graph_capture_s"] == pytest.approx(23)
     assert parsed["model_load_inductor_compile_s"] is None  # NULL per §9.2
-
-
-@pytest.mark.asyncio
-async def test_wait_ready_and_timeout(mock):
-    async with aiohttp.ClientSession() as http:
-        waited = await wait_ready(http, f"http://127.0.0.1:{mock}", timeout_s=5)
-        assert waited < 5
-        with pytest.raises(TimeoutError, match="not ready"):
-            await wait_ready(http, f"http://127.0.0.1:{BASE_PORT + 9}", timeout_s=0.5, poll_interval_s=0.1)
 
 
 @pytest.mark.asyncio

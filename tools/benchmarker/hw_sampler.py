@@ -9,7 +9,7 @@ stored as NULL (§12.3).
 
 Output: NDJSON, one node-scoped row (gpu_index=null) plus one row per GPU per
 tick. Ingested into `hardware_stats` by the Benchmarker at finalisation
-(tools/benchmarker/db.py ingest_hardware_ndjson).
+(tools/common/results_db.py ingest_hardware_ndjson).
 
 Usage:
     python3 hw_sampler.py --out /scratch/<run>/hw-$(hostname).ndjson \
@@ -56,7 +56,9 @@ def parse_proc_stat(text: str) -> tuple[int, int, int] | None:
     for line in text.splitlines():
         if line.startswith("cpu "):
             parts = [int(x) for x in line.split()[1:]]
-            idle, iowait = parts[3], parts[4] if len(parts) > 4 else 0
+            if len(parts) < 5:
+                return None  # malformed aggregate cpu line
+            idle, iowait = parts[3], parts[4]
             total = sum(parts)
             return total - idle - iowait, iowait, total
     return None

@@ -19,7 +19,7 @@ import sys
 from pathlib import Path
 
 from tools.common.config import REPO_ROOT, load_global_config
-from tools.common.runid import run_id_slug
+from tools.common.runid import parse_run_id, run_id_slug
 
 from .backend import KubectlClusterBackend
 from .coordinator import Coordinator
@@ -31,11 +31,10 @@ DEFAULT_CENTRAL_DB = REPO_ROOT / "experiments" / "results.db"
 
 
 def _target_from_run_id(run_id: str) -> str:
-    # run_id = <ts>_<model-slug>_<backend>_<target>_<hex>; slugs carry no underscores.
-    parts = run_id.split("_")
-    if len(parts) != 5:
-        raise SystemExit(f"cannot parse target from run_id {run_id!r} (expected 5 _-fields)")
-    return parts[3]
+    parts = parse_run_id(run_id)
+    if parts is None:
+        raise SystemExit(f"cannot parse target from run_id {run_id!r} (expected §6.2 format)")
+    return parts.target
 
 
 def _sole_run_id(exp_dir: Path) -> str:

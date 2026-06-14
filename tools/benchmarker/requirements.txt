@@ -6,9 +6,9 @@
 # Versions floored, not pinned; capture `uv pip freeze` after the first build and pin.
 
 # --- E1 core (synthetic dataset + load gen + orchestration; torch-free, fast) ---
-pydantic>=2          # benchmark-YAML schema (tools/common/config.py)
-pyyaml               # config + scenario registry
-aiohttp              # load generator + quality grader (streaming client)
+pydantic>=2.11       # benchmark-YAML schema (tools/common/config.py); floor matches tools/requirements.txt
+pyyaml>=6            # config + scenario registry
+aiohttp>=3.12        # load generator + quality grader (streaming client)
 transformers         # target-model tokenizer (dataset_gen.tokenizers.HFTokenizer)
                      # (pulls huggingface_hub, tokenizers, numpy — but NOT torch)
 
