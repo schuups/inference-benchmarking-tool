@@ -17,14 +17,14 @@ engine EDF carries the right annotation.
 > described here is the **hook-injection** model, for stock images that ship *without*
 > the Alps network stack. The framework's repo-built engine images are
 > **self-contained** — the stack is baked in, so they run with the CXI hook
-> **disabled** and **no** aws-ofi hook (see `SPECIFICATIONS.md` §8.1). The live §7
+> **disabled** and **no** aws-ofi hook (see `SPECIFICATIONS.md` §9.1). The live §8
 > in-container pre-checks are implemented in `tools/benchmarker/prechecks/` (rendered
 > into the engine launch by the Planner); the scripts in *this* directory are a
 > standalone manual example / historical seed and may lag the canonical copies.
 
 ## Operating model: same container, concatenated commands
 
-Per `SPECIFICATIONS.md` §7.2, the pre-check runs in the **same container instance**
+Per `SPECIFICATIONS.md` §8.2, the pre-check runs in the **same container instance**
 as the engine launch that follows it — not in a separate image, not in an init
 container. On both SLURM and Kubernetes the pattern is identical:
 
@@ -65,15 +65,15 @@ Install is skipped on cache-hit.
 
 > **Limitation surfaced at E1.** The CSCS Container Engine runs containers
 > **non-root**, so this apt/dnf fallback fails (`mpi.h: No such file or directory`)
-> on a stock image that lacks the toolchain. The §7 pre-check therefore requires the
+> on a stock image that lacks the toolchain. The §8 pre-check therefore requires the
 > MPI/NCCL build toolchain **baked into the engine image** — which the framework's
-> self-contained Alps image provides (see `SPECIFICATIONS.md` §7.5 and `TODOs.md`).
+> self-contained Alps image provides (see `SPECIFICATIONS.md` §8.5 and `TODOs.md`).
 
 ## Files
 
 | File | Role |
 |---|---|
-| `_stack-fingerprint.sh`, `build-nccl-tests.sh`, `run-collectives.sh`, `run-nvshmem.sh` | **Canonical copies live in `tools/benchmarker/prechecks/`** — the §7 pre-check scripts the tool actually runs. The sbatch files below source them from there via `PRECHECK_DIR`; no copies are kept in this directory. |
+| `_stack-fingerprint.sh`, `build-nccl-tests.sh`, `run-collectives.sh`, `run-nvshmem.sh` | **Canonical copies live in `tools/benchmarker/prechecks/`** — the §8 pre-check scripts the tool actually runs. The sbatch files below source them from there via `PRECHECK_DIR`; no copies are kept in this directory. |
 | `precheck-intra-node.sbatch` | 1 node × 4 GH200 (NVLink-C2C). `MSG_END=8G`. |
 | `precheck-inter-node.sbatch` | 2 nodes × 4 GH200 (Slingshot 11). `MSG_END=128M` (CSCS reference). |
 
@@ -158,7 +158,7 @@ If a multi-node run reports ≈ 5 GB/s, the AWS OFI hook didn't fire. Check:
 - The image the EDF references is the one you actually pushed.
 
 NVSHMEM `alltoall_latency` reports microseconds; `shmem_put_bw` reports GB/s.
-Reference values are per-image and tracked in `SPECIFICATIONS.md` §7.3.
+Reference values are per-image and tracked in `SPECIFICATIONS.md` §8.3.
 
 ## References
 

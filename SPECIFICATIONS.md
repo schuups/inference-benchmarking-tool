@@ -1,26 +1,27 @@
-# Inference Benchmarking — Specification
+# Inference Benchmarking Tool - Specifications
 
 This document enumerates all requirements captured so far.
 
 ## Table of Contents
 
 1. [Guiding Principles](#1-guiding-principles)
-2. [Project folder structure](#2-project-folder-structure)
-3. [Pre-flight checks](#3-pre-flight-checks)
-4. [Planner](#4-planner)
-5. [Deployment Targets](#5-deployment-targets)
-6. [Resources Lifecycle and Cleanup](#6-resources-lifecycle-and-cleanup)
-7. [System Performance Pre-checks](#7-system-performance-pre-checks)
-8. [Backends and models under test](#8-backends-and-models-under-test)
-9. [Inference Engine Bring-up](#9-inference-engine-bring-up)
-10. [Prompt Generation](#10-prompt-generation)
-11. [Load Generation](#11-load-generation)
-12. [Measurement](#12-measurement)
-13. [Results](#13-results)
-14. [Reporting](#14-reporting)
-15. [Experiment Plans](#15-experiment-plans)
-16. [Findings Records](#16-findings-records)
-17. [Known Issues & Workarounds](#17-known-issues--workarounds)
+2. [Architecture](#2-architecture)
+3. [Project folder structure](#3-project-folder-structure)
+4. [Pre-flight checks](#4-pre-flight-checks)
+5. [Planner](#5-planner)
+6. [Deployment Targets](#6-deployment-targets)
+7. [Resources Lifecycle and Cleanup](#7-resources-lifecycle-and-cleanup)
+8. [System Performance Pre-checks](#8-system-performance-pre-checks)
+9. [Backends and models under test](#9-backends-and-models-under-test)
+10. [Inference Engine Bring-up](#10-inference-engine-bring-up)
+11. [Prompt Generation](#11-prompt-generation)
+12. [Load Generation](#12-load-generation)
+13. [Measurement](#13-measurement)
+14. [Results](#14-results)
+15. [Reporting](#15-reporting)
+16. [Experiment Plans](#16-experiment-plans)
+17. [Findings Records](#17-findings-records)
+18. [Known Issues & Workarounds](#18-known-issues--workarounds)
 
 ---
 
@@ -34,40 +35,40 @@ This document enumerates all requirements captured so far.
 - **Backend-agnostic**: vLLM, sglang, and NVIDIA Dynamo are first-class backends. Others
   can be added later by providing blueprint / example files.
 - **Open-loop stochastic load generation**: sessions arrive at mean rate λ via Poisson or
-  burst-aware processes (§11.3), independent of server completions (λ counts **session
-  starts** — see §11.3 *What λ counts*). This captures the
+  burst-aware processes (§12.3), independent of server completions (λ counts **session
+  starts** — see §12.3 *What λ counts*). This captures the
   **queuing dimension** of real load — backlog, saturation, latency amplification. It is
   one of two axes of realism. The other — semantic realism: prompt content, multi-turn
-  structure, fan-out, modality mix — lives in the scenario registry (§10) and is equally
+  structure, fan-out, modality mix — lives in the scenario registry (§11) and is equally
   necessary.
 - **Mixed workloads by default**: an experiment's traffic is a weighted blend of
-  scenarios declared in `scenario_mix` (§10.4) — e.g. 80% agentic-coding + 20% chat —
+  scenarios declared in `scenario_mix` (§11.4) — e.g. 80% agentic-coding + 20% chat —
   so cross-class interference (long agentic prefills inflating chat TTFT on a shared
   instance) is part of every measurement rather than an afterthought. Per-class SLOs
-  (§12.4) and per-class report panels (§14.1) keep each class's experience separately
+  (§13.4) and per-class report panels (§15.1) keep each class's experience separately
   visible. A single-scenario run is the degenerate mix with one entry.
 - **Reproducible by config**: a single YAML file fully specifies the experiment and its
   parameter sweep. Re-running the same file must produce comparable results.
 - **Scenario-disclosed results**: every plot is published with its scenario manifest,
   which describes the experimental context — including the assumptions made — so the
-  reader can readily interpret the results (§13.7, §14.1).
+  reader can readily interpret the results (§14.7, §15.1).
 - **Quality-disclosed capacity**: capacity gains from quality-impacting configurations
   (weight quantization, KV dtype, …) are published alongside the measured
   response-quality change **in the same report** — a faster deployment whose answers
   degraded is not an improvement. A pre-sweep sanity gate also protects every sweep
-  from measuring a corrupted deployment (§12.5, §14.1).
+  from measuring a corrupted deployment (§13.5, §15.1).
 - **Separation of concerns**: the **Benchmarker** runs as its own SLURM allocation,
   sequencing three phases — **dataset generation**, then spawning the **inference
   deployment** on a separate GPU allocation, then **load generation**. GPUs are not
   occupied until the dataset is ready (no idle during prompt prep), and the Benchmarker's
   separate allocation keeps its CPU work from competing with engine GPU inference.
 - **Validated foundation**: every experiment is preceded by micro-benchmarks
-  (NCCL / RCCL collectives, NVSHMEM, storage — §7) checked against per-system references.
+  (NCCL / RCCL collectives, NVSHMEM, storage — §8) checked against per-system references.
   They run in the engine's container session — same libfabric / CUDA / NCCL / mounts /
   NUMA — so the measured foundation is the one the engine sits on. A degraded foundation
   pauses the sweep and offers the operator an abort.
 - **Observed execution**: GPU, CPU, memory, storage, network, and power telemetry is
-  sampled per inference-server node throughout every sweep (§12.3), so untapped headroom
+  sampled per inference-server node throughout every sweep (§13.3), so untapped headroom
   is distinguishable from saturation.
 - **Clean cluster state**: all deployed resources must be cleaned up after every run — on both
   success and failure paths. No orphaned jobs, pods, services, secrets, or scratch directories.
@@ -77,9 +78,99 @@ This document enumerates all requirements captured so far.
 
 ---
 
-## 2. Project folder structure
+## 2. Architecture
 
-### 2.1 Laptop (repository root)
+The framework is **laptop-orchestrated, cluster-executed**. The operator's laptop carries
+orchestration and the results database; a dedicated **Benchmarker** — always its own
+**SLURM** allocation — spawns the inference deployment(s) under test, drives load against
+them, and measures. The deployment under test runs on **SLURM or Kubernetes**, one engine
+or many, a single GPU through many nodes; the Benchmarker spawns it with `sbatch` or
+`kubectl` accordingly. The numbered sections that follow specify each piece in detail (the
+component roster also lives in `CLAUDE.md`); this section gives the overall shape and the
+engineering forces that drive it.
+
+```
+  LAPTOP — orchestration + results database (never allocated on a cluster)
+  ═══════════════════════════════════════════════════════════════════════════════
+     Pre-flight (§4) ──▶ Planner (§5) ──▶ Coordinator (§7) ──▶ Reports (§15)
+     creds & capacity    renders the      submit · monitor ·   reads central DB
+                         experiment dir   collect · teardown   ──▶ notebook + plots
+
+     Cleaner (§7.7) — operator-approved sweep of whatever teardown missed
+                             │
+                             │  FirecREST MCP — the Coordinator always reaches the
+                             ▼  Benchmarker over SLURM (decision 5)
+  BENCHMARKER — one allocation per experiment · ALWAYS SLURM · runs from a staged venv
+  ═══════════════════════════════════════════════════════════════════════════════
+     ① dataset generation (CPU, §11)   — prompt pool built first, so the GPUs the
+                                          engine will hold sit idle as briefly as possible
+     ② spawn the engine under test ─────────────────┐   via  sbatch (SLURM target)
+     ③ load generation + quality eval (§12, §13.5)   │    or  kubectl (K8s target)
+            │ writes                                 ▼
+     per-run SQLite DB (§14)             ENGINE DEPLOYMENT UNDER TEST — SLURM *or* K8s
+            │                            ═══════════════════════════════════════════
+            │ downloaded                 engine vLLM / SGLang / Dynamo × replicas
+            ▼  (staged, compressed)      + ingress / routing (§10, §16.2)
+     central results DB                  §8 pre-checks + hw sampler (§13.3) run in
+            │                            the SAME container session as the engine
+            ▼
+     report notebook (§15)
+```
+
+### Constraints the architecture addresses
+
+- **Measurement must not perturb the system under test.** The Benchmarker runs as its
+  **own allocation**, separate from the inference deployment, so its CPU-bound dataset and
+  load-generation work never competes with the engine's GPUs (§1 *Separation of concerns*).
+- **GPU time is the scarce, costly resource.** The three Benchmarker phases are
+  **sequential** — the CPU-bound prompt pool is built *before* any GPU deployment is
+  spawned, so accelerators are never idle during prompt prep (§1, §11).
+- **The deployment under test is highly variable.** Backend (vLLM / SGLang / Dynamo),
+  topology (1 GPU → multi-node), replica count, and platform all change per experiment, so
+  deployment artifacts are **rendered from templates** by the Planner (§5) and the
+  Benchmarker spawns them as SLURM jobs or K8s manifests; multi-instance deployments map to
+  `instances` rows (§14.2, §16.2).
+- **The Benchmarker is always SLURM; only the engine target varies.** The Coordinator
+  always reaches the Benchmarker over **SLURM / FirecREST** (decision 5); the
+  SLURM-vs-Kubernetes choice is a property of the **engine deployment under test**, which
+  the Benchmarker spawns with `sbatch` or `kubectl` from inside its allocation (§7, §10).
+  One control path, two engine-deployment targets.
+- **The measured foundation must be the one actually served.** The §8 collective / storage
+  pre-checks run **in the engine's own container session** (identical libfabric / CUDA /
+  NCCL / mounts / NUMA) and gate the sweep on a degraded foundation (§1, §8.2).
+- **One image, both platforms.** Engine images are **self-contained** — the network stack
+  is baked in and container-engine hooks are disabled — so the same image is correct on
+  SLURM and K8s with no host-injection dependency (§9.1).
+- **Runs are long; laptop links are flaky.** Coordinator state is **resumable**, the per-run
+  DB moves over the **staged, compressed** transfer path (direct transfer is ~5 MB-capped),
+  and the central-DB merge is **idempotent** and `run_id`-keyed, so a reattach never
+  double-counts (§7, §14).
+- **No orphaned cluster state, ever.** Teardown runs on **both success and failure paths**;
+  a manual, operator-approved **Cleaner** reclaims anything that escaped (§1, §7.3–7.7).
+- **Real load has queueing dynamics.** Load is **open-loop** — arrivals (Poisson /
+  burst-aware) are independent of completions — so backlog, saturation, and tail
+  amplification are observed rather than truncated away (§1, §12.3).
+- **Evidence must compose across experiments.** Each run writes a self-contained per-run
+  SQLite DB on the §14 schema; these fold into **one central results DB** from which reports
+  are synthesised (§14, §15).
+- **Reproducible and self-describing.** A single YAML fully specifies an experiment;
+  datasets are **seeded** (§11.8) and engine versions / image provenance are pinned (§9.1);
+  every plot ships with its scenario manifest (§1, §14.7).
+- **Capacity claims are quality-disclosed.** A default-on pre-sweep **sanity gate** plus a
+  post-sweep **quality comparison** against the deployed endpoint are reported alongside
+  capacity, so a faster-but-degraded config cannot masquerade as a win (§1, §13.5).
+- **Headroom must be distinguishable from saturation.** Per-node GPU / CPU / memory /
+  network / power telemetry is sampled throughout each sweep by a stdlib-only sampler
+  backgrounded in the engine container (§1, §13.3).
+- **Operable by an assistant, yet fully scriptable.** Every step is also a plain CLI /
+  Python entry point; the assistant drives the SLURM / FirecREST path in-session — there is
+  no hidden autonomous daemon (§5, §7).
+
+---
+
+## 3. Project folder structure
+
+### 3.1 Laptop (repository root)
 
 | Folder | Purpose |
 |---|---|
@@ -87,20 +178,20 @@ This document enumerates all requirements captured so far.
 | `examples/` | Reference deployments and build scripts (Docker image builds, K8s and SLURM deployments, NCCL pre-checks). Claude consults these when building the benchmarking tool itself. |
 | `firecrest-mcp/` | FirecREST MCP server. **Started manually by the operator** before a session — not auto-managed. |
 | `tools/` | Implementation of the laptop-side components (Coordinator, Planner, Pre-flight checker, Cleaner, Reports generator). |
-| `experiments/` | Per-experiment folders (`YYYY-MM-DD_description/`) with config, deployment artifacts, raw results. See §6.2 for the run-ID format and §13.8 for the directory contents. |
-| `reports/` | Curated, audience-facing reports synthesised from one or many `experiments/` runs (§14.3). |
+| `experiments/` | Per-experiment folders (`YYYY-MM-DD_description/`) with config, deployment artifacts, raw results. See §7.2 for the run-ID format and §14.8 for the directory contents. |
+| `reports/` | Curated, audience-facing reports synthesised from one or many `experiments/` runs (§15.3). |
 
 The repository root also carries `SPECIFICATIONS.md`, `CLAUDE.md`, `TODOs.md`, `README.md`, and `IMPLEMENTATION_PLAN.md` as the five authoritative documents.
 
-### 2.2 Remote (cluster scratch)
+### 3.2 Remote (cluster scratch)
 
-On SLURM clusters, **all project files live under a single folder** — `/capstor/scratch/cscs/$USER/ib/` (Lustre, HDD; see §5.1), the configured `scratch_base` (§2.3) — keeping the operator's scratch root uncluttered. Each experiment creates a run-specific subdirectory there holding the Benchmarker's working files (sbatch + EDF copies), the dataset generator's prompt pool, and the inference deployment's container working directory. Alongside the run dirs live the shared `collective-tests-cache/` (one entry per stack fingerprint, §7.2), `hf-cache/`, the host-side `venv/` (Benchmarker runtime), and `image-builds/` staging.
+On SLURM clusters, **all project files live under a single folder** — `/capstor/scratch/cscs/$USER/ibt/` (Lustre, HDD; see §6.1), the configured `scratch_base` (§3.3) — keeping the operator's scratch root uncluttered. Each experiment creates a run-specific subdirectory there holding the Benchmarker's working files (sbatch + EDF copies), the dataset generator's prompt pool, and the inference deployment's container working directory. Alongside the run dirs live the shared `collective-tests-cache/` (one entry per stack fingerprint, §8.2), `hf-cache/`, the host-side `venv/` (Benchmarker runtime), and `image-builds/` staging.
 
 On Kubernetes (`breithorn`), the equivalent layout lives under Ceph-backed PVCs scoped per experiment.
 
-Remote scratch is **transient** for a given run: per-run subdirectories are reclaimed by the cleanup phases in §6.
+Remote scratch is **transient** for a given run: per-run subdirectories are reclaimed by the cleanup phases in §7.
 
-### 2.3 Global configuration (`tools/common/global.yaml`)
+### 3.3 Global configuration (`tools/common/global.yaml`)
 
 A single version-controlled YAML holding the **environmental constants shared by every
 experiment** — values that are properties of the operating environment, not of any one
@@ -108,30 +199,30 @@ experiment:
 
 | Key | Content |
 |---|---|
-| `clusters` | Cluster catalogue: type (`slurm` / `k8s`), FirecREST platform, partition / namespace, `gpus_per_node`. Drives per-cluster validation (e.g. the §5.1 TP ≤ `gpus_per_node` rule). |
-| `slurm.account` | The only permitted account (§5.1). |
-| `scratch_base` | Capstor scratch base (§2.2) under which run directories, prompt pools, and caches live. |
-| `collective_tests_cache_dir` | Persistent compiled-binaries cache for §7.2. |
-| `registry.jfrog_base` | JFrog publish base for built images (§8.1): `https://jfrog.svc.cscs.ch/artifactory/ml/inference`. |
+| `clusters` | Cluster catalogue: type (`slurm` / `k8s`), FirecREST platform, partition / namespace, `gpus_per_node`. Drives per-cluster validation (e.g. the §6.1 TP ≤ `gpus_per_node` rule). |
+| `slurm.account` | The only permitted account (§6.1). |
+| `scratch_base` | Capstor scratch base (§3.2) under which run directories, prompt pools, and caches live. |
+| `collective_tests_cache_dir` | Persistent compiled-binaries cache for §8.2. |
+| `registry.jfrog_base` | JFrog publish base for built images (§9.1): `https://jfrog.svc.cscs.ch/artifactory/ml/inference`. |
 
 What deliberately does **not** belong here: anything swept or experiment-specific —
 model, BackendConfig, `scenario_mix`, SLOs, `quality_eval`, rate levels, image tags.
 Those live in each experiment's benchmark YAML so a run stays fully reproducible from
 that one file. The global values consumed by a run are copied into the experiment
-directory (§13.8) for provenance.
+directory (§14.8) for provenance.
 
 Loaded and validated by `tools/common/config.py`; every component (Planner, Coordinator,
 Cleaner, pre-flight checks) reads constants from it rather than duplicating literals.
 
 ---
 
-## 3. Pre-flight checks
+## 4. Pre-flight checks
 
 A laptop-side **Pre-flight checker** runs at the start of every new session to verify
 that the target systems are ready to accept work. It catches operator-environment problems
 (missing credentials, unreachable APIs, exhausted K8s capacity) early.
 
-Distinct from the *System Performance Pre-checks* in §7: those run **inside the engine
+Distinct from the *System Performance Pre-checks* in §8: those run **inside the engine
 container on the cluster** and validate hardware; the Pre-flight checks run **on the
 laptop** and validate access to the targets.
 
@@ -140,28 +231,29 @@ failing check):
 
 | Plane | Check | Validates |
 |---|---|---|
-| Auth — ML Platform | FirecREST MCP "ML Platform" server responds | Credentials for `clariden` and `bristen` (both SLURM clusters under MLP — one credential set covers both, per §5.1) |
+| Auth — ML Platform | FirecREST MCP "ML Platform" server responds | Credentials for `clariden` and `bristen` (both SLURM clusters under MLP — one credential set covers both, per §6.1) |
 | Auth — HPC Platform | FirecREST MCP "HPC Platform" server responds | Credentials for `beverin` |
 | Auth — K8s | `kubectl get nodes` against `breithorn` succeeds | kubeconfig present; Rancher cluster reachable |
 | K8s capacity (`breithorn` only) | At least one node has all GPUs free | Schedulability. If free GPUs are fragmented (scattered across nodes with none aggregated per-node), the operator defrags via external K8s tools before retrying. |
 | Filesystem | The capstor scratch dir (`/capstor/scratch/cscs/$USER/`) exists and is writable | The dataset generator can write the prompt pool to capstor scratch. |
 | Podman storage config | `~/.config/containers/storage.conf` is present (or `$XDG_CONFIG_HOME/containers/storage.conf` if `XDG_CONFIG_HOME` is set) | Required for podman container operations on Alps (image build, EDF import). Contents per the [CSCS container docs](https://docs.cscs.ch/build-install/containers/). |
-| Auth — JFrog | `jf rt ping` succeeds against the configured `cscs-jfrog` server | Credentials and a correct Artifactory URL for image push/pull (§8.1, §2.3). Catches the doubled-URL misconfiguration observed 2026-06-12. |
+| Auth — JFrog | `jf rt ping` succeeds against the configured `cscs-jfrog` server | Credentials and a correct Artifactory URL for image push/pull (§9.1, §3.3). Catches the doubled-URL misconfiguration observed 2026-06-12. |
 
 Implementation: `tools/pre-flight-checks.py`.
 
 ---
 
-## 4. Planner
+## 5. Planner
 
 A laptop-side **Planner** prepares the artifacts the rest of the workflow consumes — it
 takes the operator's intent and produces a self-contained experiment directory:
 
 - The backend container EDF (SLURM `--environment=` TOML) or K8s deployment / service /
-  ingress manifests, with §15.2 server-config knobs rendered into engine flags.
-- The Benchmarker sbatch (SLURM) or pod spec (K8s), with the concatenated pre-check →
-  dataset prep → engine spawn → load gen chain (§7.2) wired up.
-- The benchmark YAML's `dataset_config` block (§10.4), including the resolved scenario
+  ingress manifests, with §16.2 server-config knobs rendered into engine flags.
+- The Benchmarker sbatch — **always SLURM** (the Benchmarker is never a K8s pod) — with the
+  dataset prep → engine spawn → load gen chain wired up; the engine spawn it performs is
+  `sbatch` or `kubectl` depending on the engine's target (§6, §8.2).
+- The benchmark YAML's `dataset_config` block (§11.4), including the resolved scenario
   references (one per `scenario_mix` entry).
 
 The Planner runs entirely on the laptop, against Jinja2 templates checked into the repo,
@@ -171,29 +263,29 @@ CLI entry point; both paths produce the same artifacts. Planner output is then h
 to the Coordinator at submission time.
 
 The Planner does **not** persist any state of its own — every artifact it produces lives
-in the experiment directory (§13.8), so a re-render is fully reproducible from the
+in the experiment directory (§14.8), so a re-render is fully reproducible from the
 benchmark YAML alone.
 
 ---
 
-## 5. Deployment Targets
+## 6. Deployment Targets
 
-### 5.1 SLURM
+### 6.1 SLURM
 
 Applies to all three SLURM clusters (`clariden`, `bristen`, `beverin`).
 
 - All jobs (inference deployment, Benchmarker, image builds) submit to the cluster's
   default partition: **`normal`** on `clariden` and `bristen`, **`mi300`** on `beverin`.
   NCCL/RCCL benchmarks are **not** a separate job — they run inside the engine's container
-  instance as part of the System Performance Pre-checks (§7).
+  instance as part of the System Performance Pre-checks (§8).
 - Account: `csstaff` (or `a-csstaff`). Never use other accounts.
 - **Time-limit alignment**: every SLURM job in a single experiment — inference deployment
   and Benchmarker — must be configured with the **same** time limit, set conservatively
   enough to cover (chronologically): dataset generation + model load + CUDA graph capture +
-  inductor compilation primer + quality gate (§12.5 Stage A) + full sweep + quality
-  comparison (§12.5 Stage B) + results finalisation (writing the per-run DB and staging
+  inductor compilation primer + quality gate (§13.5 Stage A) + full sweep + quality
+  comparison (§13.5 Stage B) + results finalisation (writing the per-run DB and staging
   outputs into the experiment directory). Coordinator-driven cleanup runs
-  *after* the SLURM job exits and is outside the time limit (§6).
+  *after* the SLURM job exits and is outside the time limit (§7).
 - **Multi-node support via Ray.** Total GPUs = `tensor_parallel_size` × `pipeline_parallel_size`
   × `data_parallel_size` (× `expert_parallel_size` for MoE); node count = total GPUs /
   `gpus_per_node`. On Alps, **`tensor_parallel_size` must not exceed `gpus_per_node`** (= 4):
@@ -212,7 +304,7 @@ clusters that share a platform share the same FirecREST credentials and MCP serv
 
 `bristen` runs A100 (sm_80) — vLLM kernels that assume Hopper (sm_90) features (e.g. FP8
 data paths, certain FlashAttention-3 paths) do not apply there; treat any GH200-specific
-guidance (§16.1, §16.2, §9.3) as not portable to `bristen`.
+guidance (§17.1, §17.2, §10.3) as not portable to `bristen`.
 
 **Weight-storage mounts.** Both `capstor` and `iopsstor` are CSCS-managed parallel
 **Lustre** filesystems exposed to SLURM jobs (Kubernetes uses Ceph-backed PVCs instead).
@@ -229,7 +321,7 @@ They differ in storage tier:
   delivers a similar or larger gain when shard files are small or many.
 - Choose `iopsstor` over `capstor` when first-byte / metadata latency dominates startup.
 
-### 5.2 Kubernetes (`breithorn`)
+### 6.2 Kubernetes (`breithorn`)
 
 `breithorn` is the single Kubernetes target. It currently hosts one GPU node type:
 
@@ -246,18 +338,26 @@ decode, with KV transferred over Slingshot 11).
   mi300a is available, see above). The deployment manifest sets the `nodeSelector` per
   component.
 - Time limit on K8s-deployed components must match the SLURM `server_time_limit` /
-  `benchmarker_time_limit` of the same experiment (see §5.1).
+  `benchmarker_time_limit` of the same experiment (see §6.1).
+
+**The Benchmarker stays on SLURM even for a K8s engine target.** Only the engine deployment
+lives on `breithorn`; the Benchmarker is still a SLURM allocation that deploys the engine
+via `kubectl` and drives load against it. This requires (a) the engine to expose an endpoint
+reachable from the Benchmarker — a NodePort / LoadBalancer / Ingress, **not** the in-cluster
+`*.svc` Service DNS — and (b) a `kubectl` context for `breithorn` usable from the SLURM job.
+Both are E5 deliverables; the cross-platform endpoint / credentials mechanics are tracked in
+`TODOs.md`.
 
 ---
 
-## 6. Resources Lifecycle and Cleanup
+## 7. Resources Lifecycle and Cleanup
 
-Resources created during a run are labelled at creation (§6.1) and assigned a unique
-run ID (§6.2). Per-run teardown (§6.3 → §6.6) runs on both success and failure paths at
-end-of-run. Periodic operator-driven cleanup (§6.7) reclaims state that escaped per-run
+Resources created during a run are labelled at creation (§7.1) and assigned a unique
+run ID (§7.2). Per-run teardown (§7.3 → §7.6) runs on both success and failure paths at
+end-of-run. Periodic operator-driven cleanup (§7.7) reclaims state that escaped per-run
 teardown.
 
-### 6.1 Resource identification
+### 7.1 Resource identification
 
 All benchmark-created resources must be labelled / tagged at creation so they can be
 discovered and reclaimed later:
@@ -271,37 +371,37 @@ discovered and reclaimed later:
   API can list them by prefix.
 - K8s discovery: `kubectl get all,ingress,secret -n ml -l app.kubernetes.io/managed-by=inference-benchmarking`.
 
-### 6.2 Run ID uniqueness
+### 7.2 Run ID uniqueness
 
 - Run IDs include: timestamp + model slug + backend + deployment + 4-hex random suffix.
 - The random suffix prevents collision when multiple Coordinators start within the same
   second.
 
-### 6.3 Benchmarker teardown
+### 7.3 Benchmarker teardown
 
 - Cancel the Benchmarker SLURM job (`scancel <job_id>`).
 - Delete the Benchmarker's capstor scratch run directory
-  (`/capstor/scratch/cscs/$USER/ib/<run_id>/`), which holds the dataset, working files,
+  (`/capstor/scratch/cscs/$USER/ibt/<run_id>/`), which holds the dataset, working files,
   and load-gen state.
 
 The Benchmarker spawned the inference deployment(s) but its cancellation does **not**
 automatically cancel them — the per-target sections below handle that explicitly.
 
-### 6.4 Inference deployment teardown — SLURM
+### 7.4 Inference deployment teardown — SLURM
 
 - Cancel all inference-deployment SLURM jobs (`scancel`).
 
-### 6.5 Inference deployment teardown — Kubernetes
+### 7.5 Inference deployment teardown — Kubernetes
 
 - Delete: Deployment, Service, Ingress, TLS Secret (`<name>-cert`).
 
-### 6.6 K8s PVC retention
+### 7.6 K8s PVC retention
 
 Model-cache PVCs (`model-cache-<model-slug>`) are **intentionally kept** across runs to
 avoid repeated 20–30 min weight downloads. The Coordinator's per-run teardown leaves
 them in place.
 
-### 6.7 Periodic cleanup (Cleaner)
+### 7.7 Periodic cleanup (Cleaner)
 
 State that escapes the Coordinator's per-run teardown — Coordinator killed mid-run,
 network failure during teardown, older runs predating a teardown fix — is reclaimed by
@@ -311,7 +411,7 @@ by the Coordinator automatically.
 Each Cleaner invocation has **two stages**:
 
 1. **Identification** (always executed, read-only). Lists candidate resources discovered
-   via the §6.1 labels / tags and a configurable age threshold (default 24 h). Output is
+   via the §7.1 labels / tags and a configurable age threshold (default 24 h). Output is
    a candidate report shown to the operator; nothing is modified.
 2. **Cleanup / pruning execution** (requires **manual operator approval**). Once the
    operator confirms the candidate list, the script deletes the resources.
@@ -324,23 +424,23 @@ Resource classes the Cleaner identifies (and, on approval, prunes):
 
 | Class | Discovery | Notes |
 |---|---|---|
-| K8s objects (Deployment, Service, Ingress, TLS Secret) | `kubectl get ... -l app.kubernetes.io/managed-by=inference-benchmarking` | Skip Model-cache PVCs (§6.6 keeps them intentionally). |
-| SLURM scratch dirs under `/capstor/scratch/cscs/$USER/ib/` | Match the run-ID pattern (§6.2); skip dirs owned by an active job. | |
-| JFrog images tagged for benchmark runs | JFrog API filtered by the benchmark tag prefix (§6.1). | Skip the most recent N tags per repository. |
+| K8s objects (Deployment, Service, Ingress, TLS Secret) | `kubectl get ... -l app.kubernetes.io/managed-by=inference-benchmarking` | Skip Model-cache PVCs (§7.6 keeps them intentionally). |
+| SLURM scratch dirs under `/capstor/scratch/cscs/$USER/ibt/` | Match the run-ID pattern (§7.2); skip dirs owned by an active job. | |
+| JFrog images tagged for benchmark runs | JFrog API filtered by the benchmark tag prefix (§7.1). | Skip the most recent N tags per repository. |
 
 Cleaner actions are logged on the laptop but are not persisted to the per-run results DB.
 
 ---
 
-## 7. System Performance Pre-checks
+## 8. System Performance Pre-checks
 
 Synthetic micro-benchmarks executed in the engine's own container instance immediately
-before the engine binary starts (mechanism in §7.2) — so the foundation measured is the
+before the engine binary starts (mechanism in §8.2) — so the foundation measured is the
 one the engine actually sits on. Without this gate, a degraded NCCL fabric or slow
 weight storage would silently bias benchmark results: good throughput / latency numbers
 measured on top of a degraded foundation are misleading.
 
-### 7.1 Scope
+### 8.1 Scope
 
 Pre-checks cover the three planes whose performance directly bounds LLM serving:
 
@@ -348,14 +448,14 @@ Pre-checks cover the three planes whose performance directly bounds LLM serving:
 |---|---|---|
 | Collective communication | NCCL / RCCL `all_reduce`, `all_gather`, and `alltoall` (see `examples/nccl-tests/`), run at the engine's rank topology | Intra-node (NVLink / NVLink-C2C on GH200, Infinity Fabric on MI300A) and inter-node (Slingshot 11 on Alps) bandwidth in one pass. The three-collective set covers TP all-reduce, sequence-parallel / weight-gather, and MoE expert dispatch; add `reduce_scatter` / `sendrecv` / `broadcast` for PP. |
 | GPU-initiated one-sided RMA (vendor SHMEM) | SHMEM perftest binaries shipped with the engine image — **NVSHMEM** on NVIDIA targets, **ROCm SHMEM** on AMD targets (e.g. `device/coll/alltoall_latency`, `device/pt-to-pt/shmem_put_bw`) — run at the engine's rank topology | Put / get bandwidth and one-sided all-to-all latency. Used by MoE engines that bypass NCCL / RCCL for expert dispatch (DeepEP and equivalents). Skipped with a warning if the engine image lacks the relevant SHMEM library; `shmem_required: true` to enforce. |
-| Storage | Sequential read against the engine's model-weights mount (`capstor` / `iopsstor` on SLURM, Ceph PVC on K8s) | Read throughput as seen by the engine — **contextualises the model-loading times collected later** (§9.2), so a slow `model_load_weights_s` can be attributed to either storage or engine overhead. On Lustre also validates that `safetensors_load_strategy=prefetch` is taking effect (see §5.1). |
+| Storage | Sequential read against the engine's model-weights mount (`capstor` / `iopsstor` on SLURM, Ceph PVC on K8s) | Read throughput as seen by the engine — **contextualises the model-loading times collected later** (§10.2), so a slow `model_load_weights_s` can be attributed to either storage or engine overhead. On Lustre also validates that `safetensors_load_strategy=prefetch` is taking effect (see §6.1). |
 
 GPU memory bandwidth (`bandwidthTest`) and host DRAM bandwidth (STREAM) are intentionally
 **not** in the pre-check suite — they are stable per-SKU characteristics that rarely
 degrade in isolation without also degrading the NCCL / RCCL bandwidth above, so a separate
 test adds maintenance without adding signal.
 
-### 7.2 Execution
+### 8.2 Execution
 
 - Pre-checks run in the **same container instance** the LLM engine will run in — not a
   sibling container, not an init container. Pre-check + engine commands are **concatenated
@@ -382,7 +482,7 @@ test adds maintenance without adding signal.
   - `collective_tests_version` — git tag to build (e.g. `nccl-tests` `2.17.1` or the
     matching `rccl-tests` tag). Pinned per experiment.
   - `collective_tests_cache_dir` — persistent path where compiled binaries live (default
-    `/capstor/scratch/cscs/$USER/ib/collective-tests-cache` on SLURM; a PVC mount on K8s).
+    `/capstor/scratch/cscs/$USER/ibt/collective-tests-cache` on SLURM; a PVC mount on K8s).
     Shared across experiments; safe to delete to force a rebuild.
 
   The pre-check script attempts to **install missing build tools** (`make`, `g++`, OpenMPI
@@ -396,8 +496,8 @@ test adds maintenance without adding signal.
   `-g N`), so single-node scopes need no MPI runtime at all; multi-node scopes set
   `NCCL_TESTS_MPI=1` (one rank per GPU) and require the image's MPI built against the Alps
   libfabric/CXI stack. Either way the **engine image must pre-ship the build toolchain** — the
-  repo-built Alps image (§8.1) does; stock vendor images (§8.2) do not, so
-  `skip_system_prechecks: true` is required when running on them (§7.5).
+  repo-built Alps image (§9.1) does; stock vendor images (§9.2) do not, so
+  `skip_system_prechecks: true` is required when running on them (§8.5).
 - The NVSHMEM benchmark uses the perftest binaries that ship with the engine image's
   NVSHMEM SDK (no separate build). If NVSHMEM is absent the row is skipped with a warning;
   set `nvshmem_required: true` in the benchmark YAML to make absence a failure.
@@ -411,13 +511,13 @@ test adds maintenance without adding signal.
   afterwards.
 - The `run_system_prechecks` script owns the full result lifecycle: running each
   benchmark, **collecting** its output, **parsing** it into per-metric values, comparing
-  against `tools/system_prechecks_reference.yaml` (§7.3), and **storing** one row per
-  metric in the `system_prechecks` table (§13.6). Streaming a verbose log alongside is
+  against `tools/system_prechecks_reference.yaml` (§8.3), and **storing** one row per
+  metric in the `system_prechecks` table (§14.6). Streaming a verbose log alongside is
   fine; the table is the structured source of truth.
 
-### 7.3 Reference values
+### 8.3 Reference values
 
-The grading rule in §7.4 (pass / warn / fail) compares each measurement against an entry
+The grading rule in §8.4 (pass / warn / fail) compares each measurement against an entry
 in `tools/system_prechecks_reference.yaml` — **this is what makes pre-check results
 actionable rather than informational**, and what flags an unacceptable deviation.
 
@@ -440,10 +540,10 @@ Short example (full content lives in `tools/system_prechecks_reference.yaml`):
 ```
 
 All entries currently carry `expected: TBD` — placeholders until first characterisation
-runs on each system. Until populated the gate (§7.4) is **unenforceable** and
+runs on each system. Until populated the gate (§8.4) is **unenforceable** and
 measurements log as informational only.
 
-### 7.4 Outcome and abort flow
+### 8.4 Outcome and abort flow
 
 For each pre-check metric:
 
@@ -456,10 +556,10 @@ For each pre-check metric:
   itself errored. The experiment is aborted by default; override with `system_prechecks_on_fail:
   continue` in the benchmark YAML.
 
-All measurements (pass, warn, fail) are persisted in `system_prechecks` (§13.6) so that
+All measurements (pass, warn, fail) are persisted in `system_prechecks` (§14.6) so that
 later analysis can correlate a degraded foundation with anomalous LLM benchmark results.
 
-### 7.5 Skipping pre-checks
+### 8.5 Skipping pre-checks
 
 Pre-checks add ~120 s per experiment. They can be disabled by setting
 `skip_system_prechecks: true` in the benchmark YAML.
@@ -471,24 +571,28 @@ and the checks should be re-run.
 
 ---
 
-## 8. Backends and models under test
+## 9. Backends and models under test
 
 This section enumerates the inference engines and the LLM models the benchmarker covers.
 These are **stable system-under-test facts** — the operational reference for what the
 framework can deploy and measure. The experiment-design surfaces (which feature to
-compare, which BackendConfig knobs to sweep, which scenarios to use) live in §15.
+compare, which BackendConfig knobs to sweep, which scenarios to use) live in §16.
 
-### 8.1 Backends
+### 9.1 Backends
 
 The benchmark YAML's `backend:` field selects the inference engine. Each backend is
-wired via its own Jinja2 EDF / K8s template (§9 *Inference Engine Bring-up*); its
-sweepable configuration knobs live in §15.2.
+wired via its own Jinja2 EDF / K8s template (§10 *Inference Engine Bring-up*); its
+sweepable configuration knobs live in §16.2.
 
 | Backend | Planner template | Status |
 |---|---|---|
-| **vLLM** | `tools/templates/vllm.edf.j2` | active |
-| **SGLang** | `tools/templates/sglang.edf.j2` (TBD) | planned |
-| **Nvidia Dynamo** | `tools/templates/dynamo.edf.j2` (TBD) | planned |
+| **vLLM** | `tools/templates/slurm/vllm.edf.j2` | active |
+| **SGLang** | `tools/templates/slurm/sglang.edf.j2` (TBD) | planned |
+| **Nvidia Dynamo** | `tools/templates/slurm/dynamo.edf.j2` (TBD) | planned |
+
+(The SLURM engine EDF per backend; the SLURM job wrapper is `tools/templates/slurm/engine.sbatch.j2`
+and the Kubernetes engine manifest is `tools/templates/k8s/engine.yaml.j2`. The Benchmarker job —
+always SLURM — is the common `tools/templates/benchmarker.sbatch.j2`.)
 
 The specific backend version and variant (e.g. one vLLM release vs a newer one, or
 upstream vs a CSCS-patched build) is declared **per experiment** in the benchmark YAML and sweeps as a
@@ -548,18 +652,18 @@ so the aws-ofi-nccl plugin is ABI-compatible with the NCCL actually loaded at ru
 **Post-push acceptance gate + maturity.** Before an image is used, a short-lived 2-node
 job (`tools/images/sanity.sbatch`) validates that the baked stack loads and **inter-node
 collectives reach the Slingshot reference bandwidth** — NCCL `all_reduce` busbw near the
-per-system reference (§7.3), *not* the ~5 GB/s "plugin didn't fire" floor — plus OSU and
+per-system reference (§8.3), *not* the ~5 GB/s "plugin didn't fire" floor — plus OSU and
 NVSHMEM over CXI. Image status then distinguishes **`verified`** (sanity green —
 functionally usable, performance scaling not yet characterised) from **`benchmarked`**
 (additionally validated in inference performance-scaling experiments). To re-test a
 rebuilt image under an unchanged tag, the sanity EDF is pinned by the **registry digest**
-to bypass the engine's stale image cache (§17.1).
+to bypass the engine's stale image cache (§18.1).
 
 The image **registry** is the **CSCS JFrog Artifactory** (`registry.jfrog_base` in
-`tools/common/global.yaml`, §2.3); images are referenced from the engine EDF / K8s
+`tools/common/global.yaml`, §3.3); images are referenced from the engine EDF / K8s
 manifest by canonical tag or digest. Full build provenance — netstack source revision,
 component pins, base image digest, published registry digest, build date — lives in each
-image's `manifest.yaml` (durable; the `/capstor/.../ib` build scratch is ephemeral) and
+image's `manifest.yaml` (durable; the `/capstor/.../ibt` build scratch is ephemeral) and
 is recorded per experiment alongside the BackendConfig, so the exact stack any experiment
 ran on is recoverable.
 
@@ -569,7 +673,7 @@ Claude carries the build through during experiment preparation: update the netst
 manifest, build + push via `build.sh`, run the sanity gate, and update the planner
 template's image reference to the new tag.
 
-### 8.2 Models
+### 9.2 Models
 
 The first-pass model set the benchmarker covers. Each entry pins the operational
 information the Planner needs to render an engine launch (HuggingFace ID, tokenizer,
@@ -583,24 +687,24 @@ subset**.
 | Model | Role | HuggingFace ID | Tokenizer | Context | Thinking mode | MoE | Scenarios |
 |---|---|---|---|---|---|---|---|
 | **Apertus-70B** | target | `swiss-ai/Apertus-70B-Instruct-2509` | Apertus family (multilingual, 1000+ languages) | 65,536 tokens | No dedicated thinking mode (base model) | No | `long-context-followup`, `chat-short-turns` (with the caveat below on `thinking: true`). Excluded from `agentic-coding` — Apertus is not used by operators as a coding model. |
-| **Apertus-8B**     | draft (same-family with Apertus-70B) | `swiss-ai/Apertus-8B-Instruct-2509` | Apertus family — **identical to the 70B**, tokenizer loaded once (§10.6) | 65,536 tokens | No | No | Always paired with Apertus-70B as the draft for speculative-decoding experiments |
-| **Kimi-K2.6**      | target | `moonshotai/Kimi-K2.6` | Kimi family | 262,144 tokens (256K) | Yes — deeper reasoning and planning; strong on agentic, multi-step workflows | Yes (MoE; expert routing exercised by §15.1 *MoE expert routing* row) | `agentic-coding`, `chat-short-turns`, `long-context-followup`. `thinking: true` scenarios are most representative on Kimi-K2.6 because the widened output distribution matches the model's actual think+answer behaviour. |
+| **Apertus-8B**     | draft (same-family with Apertus-70B) | `swiss-ai/Apertus-8B-Instruct-2509` | Apertus family — **identical to the 70B**, tokenizer loaded once (§11.6) | 65,536 tokens | No | No | Always paired with Apertus-70B as the draft for speculative-decoding experiments |
+| **Kimi-K2.6**      | target | `moonshotai/Kimi-K2.6` | Kimi family | 262,144 tokens (256K) | Yes — deeper reasoning and planning; strong on agentic, multi-step workflows | Yes (MoE; expert routing exercised by §16.1 *MoE expert routing* row) | `agentic-coding`, `chat-short-turns`, `long-context-followup`. `thinking: true` scenarios are most representative on Kimi-K2.6 because the widened output distribution matches the model's actual think+answer behaviour. |
 
 **Notes on scenario / model pairing:**
 
 - A scenario's `thinking: true` flag is a **workload declaration**, not a model-capability
   query. The dataset generator widens output sampling regardless of whether the model
-  has a dedicated thinking mode (§10.6). When the model under test is **not** a thinking
+  has a dedicated thinking mode (§11.6). When the model under test is **not** a thinking
   model (e.g. Apertus-70B), `thinking: true` simulates "what happens if this model
   were forced to emit thinking-length outputs" — a useful stress-test of decode capacity,
-  but the class's `not_modelled` (§13.7) should disclose that the model's own emissions
+  but the class's `not_modelled` (§14.7) should disclose that the model's own emissions
   would ordinarily be shorter.
 - Speculative-decoding experiments require a draft/target pair from this table. Only
   the **Apertus-8B → Apertus-70B** pairing is in scope for v1 (same-family, identical
   tokenizer). Kimi-K2.6 has no in-scope draft; cross-family pairings (e.g. a smaller
   open model as draft for an MoE target) are deferred until acceptance-rate baselines
   are characterised.
-- Tokenizer-loading consequences for these pairings are documented in §10.6.
+- Tokenizer-loading consequences for these pairings are documented in §11.6.
 - Adding a new model to this set is a planner-template + benchmark-YAML change; no spec
   edit is required unless the model introduces a new capability dimension (e.g. native
   thinking mode toggle, new MoE topology) that the framework should sweep over.
@@ -611,56 +715,56 @@ subset**.
   capacity / Pareto / procurement claims. The same exemption extends to the **engine
   image**: a pipeline-validation run may deploy a stock vendor image (e.g. NGC vLLM)
   while the repo-built lineage iterates; every graded run uses repo-built JFrog images
-  per §8.1. Such stock-image runs must set `skip_system_prechecks: true` — stock images
-  lack the build toolchain the §7 collective checks need (§7.2).
+  per §9.1. Such stock-image runs must set `skip_system_prechecks: true` — stock images
+  lack the build toolchain the §8 collective checks need (§8.2).
 
 ---
 
-## 9. Inference Engine Bring-up
+## 10. Inference Engine Bring-up
 
-Once the System Performance Pre-checks (§7) pass, the Benchmarker hands control to the
+Once the System Performance Pre-checks (§8) pass, the Benchmarker hands control to the
 inference engine in the same container session. This section covers the full bring-up:
 how the launch command is constructed, how readiness is tracked, how model-loading time
 is decomposed for diagnostics, and how the Inductor JIT-compile cost is paid up front
 via a priming request — so that the sweep that follows measures steady-state behaviour.
 
-The engine launch command is rendered by the Planner (§4) from:
+The engine launch command is rendered by the Planner (§5) from:
 
 - the **backend choice** in the benchmark YAML (`backend: vllm | sglang | dynamo`),
-- the **BackendConfig** knobs (§15.2) — varied across deployments within an experiment (one deployment per combination; λ is then swept inside each deployment, see §11),
+- the **BackendConfig** knobs (§16.2) — varied across deployments within an experiment (one deployment per combination; λ is then swept inside each deployment, see §12),
 - backend-specific Jinja2 templates checked into `tools/` (one EDF template + one
   K8s manifest template per backend, per §1's *Backend-agnostic* principle).
 
-The rendered command is concatenated with `run_system_prechecks && exec <engine>` (§7.2),
+The rendered command is concatenated with `run_system_prechecks && exec <engine>` (§8.2),
 so pre-checks and the engine launch share the same container session with identical
 libfabric / CUDA / NCCL / mounts / NUMA.
 
 Backend-version compatibility of individual flags (which were removed, renamed, or made
-mandatory in which release) is captured alongside the configuration surface in §15.2.
+mandatory in which release) is captured alongside the configuration surface in §16.2.
 
-### 9.1 Health-check timeout
+### 10.1 Health-check timeout
 
 The benchmarker health check must wait at least as long as `server_ready_timeout_s`
 (default 3600 s) before giving up — long enough to cover dual model load + CUDA graph
 capture for speculative-decoding configurations, which can exceed 15 min.
 
-### 9.2 Model loading time tracking
+### 10.2 Model loading time tracking
 
 The Benchmarker records both the **total** time-to-ready and its **individual components**
 (weight load, graph capture, compilation, …) so that optimisation efforts have a
 per-component baseline to compare against and measure progress over. Components that a
 given backend cannot expose are stored as `NULL` rather than collapsed into another bucket.
 
-The schema lives in §13.2 (the `instances` table). Each `model_load_*` column is parsed
+The schema lives in §14.2 (the `instances` table). Each `model_load_*` column is parsed
 from the backend's structured logs or runtime API (per backend; for vLLM specifics see
-§15.2).
+§16.2).
 
 A single experiment may deploy **multiple instances** of the same configuration (routing
 tests, replica-sizing studies). The per-component breakdown is recorded **per instance**
-so each instance's component times are visible individually. Reports (§14) show both the
+so each instance's component times are visible individually. Reports (§15) show both the
 per-instance breakdown and the totals aggregated across instances.
 
-### 9.3 Inductor pre-compilation primer
+### 10.3 Inductor pre-compilation primer
 
 vLLM v1 (v0.20+) uses `torch.inductor` to JIT-compile CUDA kernels for large prefill
 sequences (> 512 tokens) **lazily** — on the first request that triggers the path. This
@@ -677,15 +781,15 @@ one-time compilation is the dominant cold-start cost on first request after a se
   steady-state TTFT (not the cold compile delay). If it does not, **warn the operator**
   that the primer missed its target.
 - When the backend supports persisting compilation artifacts across restarts, the path is
-  exposed as a `BackendConfig` field (§15.2); when it does not, the primer simply runs on
+  exposed as a `BackendConfig` field (§16.2); when it does not, the primer simply runs on
   every fresh start. Exploring this loading-time optimisation is tracked in `TODOs.md`.
 
 ---
 
 
-## 10. Prompt Generation
+## 11. Prompt Generation
 
-### 10.1 Location, ownership, persistence
+### 11.1 Location, ownership, persistence
 
 Prompts are produced on the **Benchmarker** SLURM allocation by its **dataset-generator**
 subcomponent, from `dataset_config` in the benchmark YAML, sequentially before the
@@ -695,10 +799,10 @@ pools — the coordinator never ships prompt data to the cluster.
 
 **Persistence.** Generated artefacts live on the Benchmarker's capstor scratch directory
 for the duration of the run, reused across every deployment and every rate-level sweep
-step, and reclaimed by the §6 teardown. They are **not** copied into `experiments/<run>/`:
+step, and reclaimed by the §7 teardown. They are **not** copied into `experiments/<run>/`:
 the manifest (persisted on `experiments.scenario_manifest`), the master seed (in
 `dataset_config`), and the scenario-registry revision (recorded alongside) are sufficient
-to regenerate. The full reproducibility contract lives in §10.8.
+to regenerate. The full reproducibility contract lives in §11.8.
 
 **Source-failure semantics.** A failure of any dataset source (LongBench download error,
 HuggingFace unreachable, reasoning-trace dataset unavailable, etc.) **aborts the run**
@@ -706,29 +810,29 @@ with a clear error. There is no silent fallback to synthetic data — this avoid
 where, e.g., a speculative-decoding experiment silently degrades to filler text and
 reports ~0% acceptance as if it were a property of the model.
 
-### 10.2 Key concepts
+### 11.2 Key concepts
 
 Three artefacts cooperate to produce a benchmark dataset:
 
 - **Scenario registry** (`tools/scenarios/<slug>.yaml`) — the canonical declaration of
-  what each scenario is: its **source** (§10.5), **length distributions** (§10.6),
-  **multi-turn structure** and **session mode** (§10.7), and the **`modelled` /
+  what each scenario is: its **source** (§11.5), **length distributions** (§11.6),
+  **multi-turn structure** and **session mode** (§11.7), and the **`modelled` /
   `not_modelled`** lists — human-authored statements describing what the scenario
   explicitly represents and what it deliberately does not, so any reader of a report
   knows in what context the numbers should be interpreted; copied verbatim into the
-  scenario manifest (§10.8, §13.7).
+  scenario manifest (§11.8, §14.7).
 - **`dataset_config`** in the benchmark YAML — the per-run knobs: the `scenario_mix`
   (workload classes and their weights), the master seed, `num_prompts`, and any
   per-class overrides to registry defaults.
 - **Dataset generator** — reads both, materializes the prompt pool on capstor scratch,
   and emits the scenario manifest as a structured side-effect for the experiment row
-  (§13.1).
+  (§14.1).
 
 The registry is data, not code: adding a new scenario does not require editing the
 generator. Registry entries are versioned with the repo; changes to a scenario's
 `modelled` / `not_modelled` lists are reviewable in PRs.
 
-### 10.3 Scenario registry
+### 11.3 Scenario registry
 
 Each registry entry is a YAML file with the schema below. Fields not relevant to a given
 scenario are omitted (e.g. `session.think_time_ms` does not apply to single-turn
@@ -736,46 +840,46 @@ scenarios).
 
 | Field | Notes |
 |---|---|
-| `name` | Slug, matches the filename. Used as the class slug in `experiments.scenario_mix`, `requests.scenario`, and the manifest (§13.7). |
+| `name` | Slug, matches the filename. Used as the class slug in `experiments.scenario_mix`, `requests.scenario`, and the manifest (§14.7). |
 | `summary` | One-line human description. |
 | `maturity` | `established` \| `emerging` \| `exploratory`. |
-| `source` | `kind` (§10.5) + per-source `config`. |
-| `input_length` | `distribution` (`lognormal` \| `normal` \| `fixed`) + `params` (§10.6). |
-| `output_length` | Same shape as `input_length`. Widened when `thinking: true` (§10.6). |
-| `thinking` | Optional boolean; widens output sampling per §10.6. Default `false`. |
-| `session.mode` | `open_loop` \| `sequential` (§10.7). |
+| `source` | `kind` (§11.5) + per-source `config`. |
+| `input_length` | `distribution` (`lognormal` \| `normal` \| `fixed`) + `params` (§11.6). |
+| `output_length` | Same shape as `input_length`. Widened when `thinking: true` (§11.6). |
+| `thinking` | Optional boolean; widens output sampling per §11.6. Default `false`. |
+| `session.mode` | `open_loop` \| `sequential` (§11.7). |
 | `session.turns_per_session` | Distribution (same shapes as `input_length`). |
-| `session.followup_input_length` | Optional distribution for the input length of follow-up turns (`turn_idx ≥ 1`); defaults to `input_length`. Lets returning-user scenarios pair a large turn-0 context with short follow-ups (§10.6). |
-| `session.prefix_strategy` | `append_delta` (only supported value; §10.7). |
-| `session.think_time_ms` | Distribution; paces follow-up turns in **both** session modes — anchored at the previous turn's send time (`open_loop`) or response time (`sequential`); see §10.7. Required for multi-turn scenarios. |
+| `session.followup_input_length` | Optional distribution for the input length of follow-up turns (`turn_idx ≥ 1`); defaults to `input_length`. Lets returning-user scenarios pair a large turn-0 context with short follow-ups (§11.6). |
+| `session.prefix_strategy` | `append_delta` (only supported value; §11.7). |
+| `session.think_time_ms` | Distribution; paces follow-up turns in **both** session modes — anchored at the previous turn's send time (`open_loop`) or response time (`sequential`); see §11.7. Required for multi-turn scenarios. |
 | `manifest.modelled` | Human-authored list of what the scenario explicitly represents. |
 | `manifest.not_modelled` | Human-authored list of what the scenario deliberately omits. |
 
 See `tools/scenarios/agentic-coding.yaml` for a worked example. `assumptions` is **not**
 stored in the registry — it is computed at runtime from the actual `dataset_config`
-consumed (§10.8).
+consumed (§11.8).
 
 Registry entries are always **single-scenario**. Workload blending happens exclusively
-in `dataset_config.scenario_mix` (§10.4): a mix references N registry entries; the
+in `dataset_config.scenario_mix` (§11.4): a mix references N registry entries; the
 registry itself never encodes a mix.
 
-### 10.4 dataset_config schema
+### 11.4 dataset_config schema
 
 The benchmark YAML's `dataset_config` block:
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
-| `scenario_mix` | list | yes | One entry per workload class. A single-scenario run is the degenerate mix with one entry at `weight: 1.0`. Weights must sum to 1.0; the Coordinator aborts otherwise (§13.7). |
-| `scenario_mix[].scenario` | string | yes | Must match a registered scenario name (§10.3). |
-| `scenario_mix[].weight` | float | yes | Fraction of **session starts** assigned to this class (§11.3). The per-request share then follows from each class's `turns_per_session` and is disclosed in the manifest (§10.8). |
+| `scenario_mix` | list | yes | One entry per workload class. A single-scenario run is the degenerate mix with one entry at `weight: 1.0`. Weights must sum to 1.0; the Coordinator aborts otherwise (§14.7). |
+| `scenario_mix[].scenario` | string | yes | Must match a registered scenario name (§11.3). |
+| `scenario_mix[].weight` | float | yes | Fraction of **session starts** assigned to this class (§12.3). The per-request share then follows from each class's `turns_per_session` and is disclosed in the manifest (§11.8). |
 | `scenario_mix[].input_length` | object | no | Per-class override of the registry's `input_length` distribution. |
 | `scenario_mix[].output_length` | object | no | Per-class override of the registry's `output_length` distribution. |
 | `scenario_mix[].session` | object | no | Per-class override of session fields. |
 | `scenario_mix[].source_overrides` | object | no | Per-class source-specific overrides (e.g. LongBench task subset). |
-| `num_prompts` | integer | yes | Total size of the generated prompt pool, split across classes proportionally to `weight × E[turns_per_session]` so no class exhausts its sub-pool early. Prompts are never recycled (the load generator raises `PoolExhaustedError`), so the pool must outlast the **whole sweep's** session-start budget — rule of thumb: `num_prompts ≥ Σ over sweep steps of λ × (warmup_s + measurement_s) × E[turns_per_session]` (summed over the mix). Undersizing aborts the run mid-sweep (observed at E1). This also keeps prompt uniqueness (§10.6) holding for every request actually issued. |
-| `seed` | integer | yes | Master seed; per-class sub-seeds derived deterministically (§10.8). |
-| `tokenizer_id` | string | no | Override the tokenizer (defaults to the target model's; see §10.6). Shared by every class in the mix — all lengths are measured with one tokenizer. |
-| `output_length_mode` | string | no | `forced` (default) or `natural` — governs `ignore_eos` on sweep traffic; see §10.6. Disclosed in `run_assumptions`; results are not comparable across modes. |
+| `num_prompts` | integer | yes | Total size of the generated prompt pool, split across classes proportionally to `weight × E[turns_per_session]` so no class exhausts its sub-pool early. Prompts are never recycled (the load generator raises `PoolExhaustedError`), so the pool must outlast the **whole sweep's** session-start budget — rule of thumb: `num_prompts ≥ Σ over sweep steps of λ × (warmup_s + measurement_s) × E[turns_per_session]` (summed over the mix). Undersizing aborts the run mid-sweep (observed at E1). This also keeps prompt uniqueness (§11.6) holding for every request actually issued. |
+| `seed` | integer | yes | Master seed; per-class sub-seeds derived deterministically (§11.8). |
+| `tokenizer_id` | string | no | Override the tokenizer (defaults to the target model's; see §11.6). Shared by every class in the mix — all lengths are measured with one tokenizer. |
+| `output_length_mode` | string | no | `forced` (default) or `natural` — governs `ignore_eos` on sweep traffic; see §11.6. Disclosed in `run_assumptions`; results are not comparable across modes. |
 
 Example — the canonical mixed workload (80% agentic coding, 20% chat):
 
@@ -792,7 +896,7 @@ dataset_config:
 
 Any field absent from a mix entry is inherited from that class's scenario registry entry.
 
-### 10.5 Dataset sources
+### 11.5 Dataset sources
 
 The `source.kind` enum, with v1 scope:
 
@@ -804,7 +908,7 @@ The `source.kind` enum, with v1 scope:
 | `wildchat` | Real user↔assistant conversations from `allenai/WildChat-1M`. Multi-turn (median ~3, long tail), multilingual. Conversation turn boundaries drive the session structure; per-turn lengths are clamped to the scenario's distributions. | `languages: [en, …]`, `min_turns: N` |
 
 Per-source suitability for the optimisations being measured (speculative-decoding
-acceptance, prefix-cache hit-rates) is summarised in §10.9. Licenses: LongBench (MIT),
+acceptance, prefix-cache hit-rates) is summarised in §11.9. Licenses: LongBench (MIT),
 WildChat (ODC-BY), reasoning-trace datasets (per-dataset, all permissive for
 benchmarking).
 
@@ -813,19 +917,19 @@ feature on the dataset-generator roadmap — see `TODOs.md`. A scenario whose re
 entry declares any `modalities` other than `[text]` is rejected at registry-load time
 until support lands.
 
-### 10.6 Per-request mechanics
+### 11.6 Per-request mechanics
 
 **Prompt uniqueness.** Every prompt must start with a distinct token block so the
 engine's prefix cache does not serve synthetic cache hits — which would collapse TTFT to
 ~100 ms regardless of load, an artefact rather than real performance. Single-turn prompts
 begin with a unique `[prompt-NNNNNN]` header; multi-turn sessions begin with a unique
 `[session-NNNNNN]` header reused across the session's turns, so the prefix cache *does*
-hit on the shared session prefix — the locality the benchmark is meant to expose (§10.7).
+hit on the shared session prefix — the locality the benchmark is meant to expose (§11.7).
 Header counters are allocated globally across all classes of the mix, so uniqueness
 holds pool-wide, not merely within one class.
 
 **Length distributions.** `input_length` shape is per-scenario, declared in the registry
-(§10.3). Supported: `lognormal` (truncated), `normal` (truncated), `fixed`. Heavy-tailed
+(§11.3). Supported: `lognormal` (truncated), `normal` (truncated), `fixed`. Heavy-tailed
 `lognormal` matches observed LLM-workload distributions and is the recommended default;
 `fixed` is for isolation studies. `input_length` governs turn 0 (and single-turn
 prompts); follow-up turns sample from `session.followup_input_length` when the scenario
@@ -833,19 +937,19 @@ declares it, falling back to `input_length` otherwise — so returning-user scen
 a heavy initial context with short follow-ups instead of repeating turn-0-sized prompts.
 
 **Output length control.** Each prompt carries a target `max_tokens` sampled from
-`output_length`. Behaviour is governed by `output_length_mode` (§10.4):
+`output_length`. Behaviour is governed by `output_length_mode` (§11.4):
 
 - **`forced` (default)**: the load generator sends `max_tokens=<sampled>` **and**
   `ignore_eos=True`, forcing the model to emit exactly that many decode tokens. Decode
   cost becomes reproducible across runs, configs, and models — measured TPOT and
   `output_tokens` no longer depend on per-model stopping behaviour. The price: responses
   are truncated / padded arbitrarily, so **sweep traffic is ungradeable for quality by
-  construction** — response quality is measured by the separate evaluation phase (§12.5).
+  construction** — response quality is measured by the separate evaluation phase (§13.5).
 - **`natural`**: `ignore_eos=False`; the sampled value acts as a cap only. Output
   lengths — and therefore decode cost — become model- and config-dependent. Use for
   token-efficiency studies and stopping-behaviour analysis. **λ\*, latency, and
   throughput results are not comparable across modes** — reports must refuse to overlay
-  them — and the active mode is disclosed in the manifest's `run_assumptions` (§13.7).
+  them — and the active mode is disclosed in the manifest's `run_assumptions` (§14.7).
 
 Sources that carry ground-truth output lengths (`reasoning_trace_replay`) override the
 sampled value with the recorded target.
@@ -857,23 +961,23 @@ think-trace-plus-answer length: `params.mean × 2.5`, `params.sigma` (or `stdev`
 (not rescaled). A precise bimodal sampler (tiny direct answers vs long deep-thinking
 outputs) is deferred — see TODOs.md *Bimodal output distribution as first-class*. The
 flag's effect is recorded in the class's `modelled` list and the simplification
-disclosed in its `not_modelled` (§13.7).
+disclosed in its `not_modelled` (§14.7).
 
 **Tokenization.** Length filtering, length-distribution sampling, and the `input_tokens`
 field all use the **target model's tokenizer**, loaded by HuggingFace ID on the
 Benchmarker at dataset-generation time. Changing the target model invalidates the dataset
 and triggers regeneration. For same-family draft/target pairs (e.g. Apertus-8B +
-Apertus-70B — the in-scope pairing for v1, see §8.2) tokenizers are identical and
+Apertus-70B — the in-scope pairing for v1, see §9.2) tokenizers are identical and
 only one is loaded. For cross-family pairs the **target's** tokenizer is authoritative;
 any draft-tokenizer mismatch is logged but does not block the run.
 
-### 10.7 Sessions and agentic approximation
+### 11.7 Sessions and agentic approximation
 
 **Multi-turn structure.** Multi-turn scenarios produce N turns per session, with N
-sampled from `session.turns_per_session` (§10.3). Each session is assigned a stable
+sampled from `session.turns_per_session` (§11.3). Each session is assigned a stable
 integer `session_idx ∈ [0, M-1]`; every turn carries the same `session_idx` (exposed to
-the load generator for session-affinity routing — §11.4), and the `[session-NNNNNN]`
-header from §10.6 encodes the same identifier in the prompt text. Single-turn scenarios
+the load generator for session-affinity routing — §12.4), and the `[session-NNNNNN]`
+header from §11.6 encodes the same identifier in the prompt text. Single-turn scenarios
 are the degenerate case M = `num_prompts`, `session_idx = prompt_idx`.
 
 **Prefix strategy** is always `append_delta`: turn K+1's prompt = full prior transcript +
@@ -882,19 +986,19 @@ real chat / agentic clients do. (A `regenerate` strategy was considered but reje
 defeats the prefix cache and is better expressed as a separate ablation by disabling
 prefix caching at the backend.)
 
-**Class membership.** In a mixed run (§10.4) every session belongs to exactly one
-workload class — its `scenario_mix` entry, assigned at session start (§11.3). The class
+**Class membership.** In a mixed run (§11.4) every session belongs to exactly one
+workload class — its `scenario_mix` entry, assigned at session start (§12.3). The class
 determines the session's source, length distributions, turn structure, and session mode;
-every request of the session carries the class slug in `requests.scenario` (§13.3),
-which is the key report-time per-class group-bys operate on (§12.2, §12.4, §14.1).
+every request of the session carries the class slug in `requests.scenario` (§14.3),
+which is the key report-time per-class group-bys operate on (§13.2, §13.4, §15.1).
 
 **Session mode** governs how follow-up turns interact with the load generator's open-loop
-arrival process (§11.3):
+arrival process (§12.3):
 
 | `session.mode` | Follow-up behaviour | Use for |
 |---|---|---|
 | `open_loop` (default) | Turn K+1 is sent at turn K's **send time** plus a `think_time_ms` sample — independent of when (or whether) turn K completed. Preserves open-loop queueing semantics within the session: a saturated server does not slow the turn stream. | RAG-style queries against a shared long-lived prefix; reasoning workloads; any scenario where turn ordering is incidental. |
-| `sequential` | Turn K+1 is sent at turn K's **response time** plus a `think_time_ms` sample. Closed-loop coupling *within a session*; cross-session arrivals remain open-loop (session starts keep arriving per §11.3 regardless of server state, so backlog growth is preserved). | Conversational chat; agentic-coding follow-ups; any scenario where a follow-up cannot meaningfully precede its predecessor's response. |
+| `sequential` | Turn K+1 is sent at turn K's **response time** plus a `think_time_ms` sample. Closed-loop coupling *within a session*; cross-session arrivals remain open-loop (session starts keep arriving per §12.3 regardless of server state, so backlog growth is preserved). | Conversational chat; agentic-coding follow-ups; any scenario where a follow-up cannot meaningfully precede its predecessor's response. |
 
 The two modes are exact mirrors — both pace follow-ups with `think_time_ms`, anchored at
 the previous turn's send time (`open_loop`) or response time (`sequential`).
@@ -904,28 +1008,28 @@ model invocations (think → tool call → tool result → …) — are approxim
 sessions with bursty fan-out**: each session = one agentic task; each turn = one model
 invocation; tool results synthesised as injected text in the next turn's prompt. No tool
 catalog, no fan-out DSL, no per-tool JSON schemas. This is enough to derive supportable
-agentic-user count from the SLO-attained rate λ* (§12.4) via the report notebook's
-supportable-users estimate (§14.1). The precise mechanism (distinct `think` / `tool_call`
+agentic-user count from the SLO-attained rate λ* (§13.4) via the report notebook's
+supportable-users estimate (§15.1). The precise mechanism (distinct `think` / `tool_call`
 / `tool_result` roles, per-tool schemas, schema-constrained-decoding validity, a
 dedicated `agent_tasks` table, first-class bimodal output, per-tool result-content
 synthesis) is deferred to TODOs.md *Precise agentic / tool-calling measurement*. Routing:
-`session_affinity` (§11.4) is the natural choice — every turn of a task lands on the same
+`session_affinity` (§12.4) is the natural choice — every turn of a task lands on the same
 instance so the prefix cache exposes the locality the workload depends on.
 
-### 10.8 Reproducibility surface
+### 11.8 Reproducibility surface
 
 **Seeding.** `dataset_config.seed` is a single integer. Per-class, per-axis sub-seeds
 derived as `blake2b(f"{seed}:{scenario}:{axis}", digest_size=8)` over axes: `header`,
 `length_input`, `length_output`, `selection`, `turns`, `thinktime`. One run-level axis,
 `mix` (`blake2b(f"{seed}:mix", digest_size=8)`), seeds the categorical assignment of
-session starts to classes (§11.3).
+session starts to classes (§12.3).
 
 **Contract.** Same `dataset_config` + same scenario-registry revision + same target
 tokenizer → identical prompt pool (byte-for-byte). Changing the target model triggers
 regeneration (different tokenizer → different length filtering and different sampled
 lengths).
 
-**Manifest.** The dataset generator emits the `scenario_manifest` (schema in §13.7) as a
+**Manifest.** The dataset generator emits the `scenario_manifest` (schema in §14.7) as a
 side-effect of running:
 
 | Manifest field(s) | Source |
@@ -933,12 +1037,12 @@ side-effect of running:
 | `mix` | The `scenario_mix` actually consumed: `[{scenario, weight}, …]`, plus the resulting expected per-request share per class (derived from `weight × E[turns_per_session]`). |
 | Per-class `name`, `summary`, `maturity`, `modelled`, `not_modelled` | Copied verbatim from each class's scenario registry entry. |
 | Per-class `assumptions` | Auto-filled from the per-class config actually consumed: input / output (and follow-up, when distinct) length distributions; turns-per-session distribution; session mode; prefix strategy; source `kind` + relevant source config. |
-| `run_assumptions` | Auto-filled run-level facts: arrival process + parameters (§11.3); routing strategy (§11.4); `output_length_mode` (§10.6); master seed; tokenizer ID. |
+| `run_assumptions` | Auto-filled run-level facts: arrival process + parameters (§12.3); routing strategy (§12.4); `output_length_mode` (§11.6); master seed; tokenizer ID. |
 
 Together these are sufficient to reconstruct what the run measured without re-reading the
 registry at a specific revision.
 
-### 10.9 Notes on dataset suitability
+### 11.9 Notes on dataset suitability
 
 - **Synthetic prompts**: acceptable for latency and throughput benchmarking but produce
   near-zero speculative-decoding acceptance rates (random text is unpredictable).
@@ -956,29 +1060,29 @@ registry at a specific revision.
 ---
 
 
-## 11. Load Generation
+## 12. Load Generation
 
-### 11.1 Server readiness and model-loading tracking
+### 12.1 Server readiness and model-loading tracking
 
 Before the sweep starts, the load generator must, for **each** deployed instance:
 
 - Wait for `/health 200`. Per-instance wait bounded by `server_ready_timeout_s` (default 3600 s;
-  see §9.1). If any instance fails to come ready within the timeout, the experiment aborts.
+  see §10.1). If any instance fails to come ready within the timeout, the experiment aborts.
 - Parse the per-instance model-loading breakdown from the backend's structured logs / runtime
-  API and persist one row per instance into the `instances` table (§13.2) with the
-  `model_load_*` fields populated (§9.2).
-- Run the inductor pre-compilation primer (§9.3).
+  API and persist one row per instance into the `instances` table (§14.2) with the
+  `model_load_*` fields populated (§10.2).
+- Run the inductor pre-compilation primer (§10.3).
 
 The sweep begins only once **all** instances are ready, profiled, primed, and — unless
-`skip_quality_gate: true` — quality-gated (§12.5 Stage A).
+`skip_quality_gate: true` — quality-gated (§13.5 Stage A).
 
-### 11.2 Sweep structure
+### 12.2 Sweep structure
 
 - **Warmup phase**: requests sent but metrics excluded. Long enough for:
   - Inductor JIT compilation to complete after primer (≥ 1 full round of compilation per model)
   - KV cache and queue to reach steady state
   - The **session population** to reach steady state: at step start only first turns
-    arrive, and the request rate ramps from λ toward λ × E[turns_per_session] (§11.3
+    arrive, and the request rate ramps from λ toward λ × E[turns_per_session] (§12.3
     *What λ counts*) as sessions accumulate — warmup must cover at least a mean session
     wall-time (turns × (latency + think time)) so the measured window sees the full
     follow-up load.
@@ -986,18 +1090,18 @@ The sweep begins only once **all** instances are ready, profiled, primed, and �
 - **Drain phase**: **no new session starts** after measurement ends; in-flight sessions
   and requests are allowed to complete up to `drain_timeout_s`. Sessions still
   unfinished at drain end are truncated: their issued requests are kept in `requests`,
-  but the session is **incomplete** for session-level metrics (§12.2). Sessions never
+  but the session is **incomplete** for session-level metrics (§13.2). Sessions never
   span sweep steps — every request inherits the `rate_lambda` of the step its session
   started in.
 - `request_timeout_s`: client-side TTFT hard cutoff; exceeded requests recorded as `success=0`.
-- After the final rate level's drain, the **quality comparison** (§12.5 Stage B) runs
+- After the final rate level's drain, the **quality comparison** (§13.5 Stage B) runs
   against the still-running deployment(s), before teardown.
 
-### 11.3 Open-loop stochastic arrivals
+### 12.3 Open-loop stochastic arrivals
 
 The load generator supports **configurable arrival processes**, selected per sweep step via
 `arrival_process` in the benchmark YAML. The chosen process and its parameters are serialized
-into `experiments.scenario_manifest.run_assumptions` (§13.7) so the conditions a result
+into `experiments.scenario_manifest.run_assumptions` (§14.7) so the conditions a result
 was measured under are always recoverable.
 
 | `arrival_process` | Description and intuition |
@@ -1008,14 +1112,14 @@ was measured under are always recoverable.
 **What λ counts.** λ is the **session-start rate** (sessions/s). For single-turn
 scenarios a session is one request, so λ reduces to the familiar request rate. For
 multi-turn classes the arrival process schedules **session starts**; the session's
-follow-up turns are then paced by the class's session mode and `think_time_ms` (§10.7)
+follow-up turns are then paced by the class's session mode and `think_time_ms` (§11.7)
 — `open_loop` turns anchored at the previous turn's send time, `sequential` turns at
 its response time. Follow-up arrivals are therefore deterministic offspring of the
 session-start process, not a separate stream: the steady-state request rate observed by
 the server is **λ × Σ weight × E[turns_per_session]**, which the dataset generator
-derives per class and disclosed in the manifest's `run_assumptions` (§13.7). This gives
+derives per class and disclosed in the manifest's `run_assumptions` (§14.7). This gives
 one coherent λ definition across a mixed run regardless of each class's mode, aligned
-with the session-start semantics of `scenario_mix` weights (§10.4). Under saturation,
+with the session-start semantics of `scenario_mix` weights (§11.4). Under saturation,
 `sequential` classes self-throttle their in-flight turns (realistic user behaviour)
 while session starts keep arriving — so queue growth remains observable.
 
@@ -1023,10 +1127,10 @@ A heavy-tailed (Pareto) arrival process is intentionally out of scope for v1 —
 `TODOs.md`.
 
 Each session start is assigned a workload class by a seeded categorical draw over the
-`scenario_mix` weights (axis `mix`, §10.8); all turns of the session inherit the class.
-Each arriving request is then routed to one of N server instances per `routing_strategy` (§11.4).
+`scenario_mix` weights (axis `mix`, §11.8); all turns of the session inherit the class.
+Each arriving request is then routed to one of N server instances per `routing_strategy` (§12.4).
 
-### 11.4 Routing strategies
+### 12.4 Routing strategies
 
 - `random` (default): uniformly random instance selection per request.
 - `session_affinity`: `session_idx % N` — same-session prompts always route to the same
@@ -1035,13 +1139,13 @@ Each arriving request is then routed to one of N server instances per `routing_s
 
 ---
 
-## 12. Measurement
+## 13. Measurement
 
-### 12.1 Request error tracking
+### 13.1 Request error tracking
 
-Every failed request (`success=0`) is **kept** in the `requests` table (§13.3) — never dropped —
+Every failed request (`success=0`) is **kept** in the `requests` table (§14.3) — never dropped —
 with its `error` column populated. The classification is used both for diagnosis and for
-reporting error rates per λ level (see §14.1).
+reporting error rates per λ level (see §15.1).
 
 The `error` column carries `<class>:<detail>`, with class drawn from:
 
@@ -1056,47 +1160,47 @@ The `error` column carries `<class>:<detail>`, with class drawn from:
 Reports aggregate by class so the reader can distinguish queue saturation (`http_429` / `timeout`)
 from server-side failure (`http_5xx` / `connection`).
 
-### 12.2 Per-session derived metrics
+### 13.2 Per-session derived metrics
 
 Every multi-turn scenario — conversational chat, long-context follow-ups, the v1 agentic
 approximation, … — produces sessions whose turns share a `session_idx`. Session-level
 metrics are derived at report time by the report notebook grouping the `requests` table
-(§13.3) on that key — in mixed runs (§10.4) grouped per class first
+(§14.3) on that key — in mixed runs (§11.4) grouped per class first
 (`GROUP BY scenario, session_idx`) and only then aggregated, so one class's sessions
-never dilute another's statistics (§14.1):
+never dilute another's statistics (§15.1):
 
 | Per-session metric | Derivation |
 |---|---|
-| `session_e2e_ms` | Time from the first turn's send to the last turn's last token: `MAX(issued_at_ms + e2e_ms) − MIN(issued_at_ms)` within the session (§13.3) |
+| `session_e2e_ms` | Time from the first turn's send to the last turn's last token: `MAX(issued_at_ms + e2e_ms) − MIN(issued_at_ms)` within the session (§14.3) |
 | `session_turns` | Number of requests with the same `session_idx` |
 | `session_input_tokens` | `SUM(input_tokens)` per `session_idx` |
 | `session_output_tokens` | `SUM(output_tokens)` per `session_idx` |
 | `session_success` | `MIN(success)` per `session_idx` — the session succeeds only if every turn within it succeeded |
 
-Single-turn scenarios are the degenerate case (session = single request, §10.7), where
+Single-turn scenarios are the degenerate case (session = single request, §11.7), where
 these metrics collapse to the underlying per-request values.
 
 **Boundary rule.** Session-level metrics are computed only over sessions **fully
 contained in the sweep step** — started during warmup or measurement and completed by
-drain end (§11.2); completion is detected by the presence of the session's `final_turn`
-row (§13.3). Truncated sessions are excluded from the session-level aggregates
+drain end (§12.2); completion is detected by the presence of the session's `final_turn`
+row (§14.3). Truncated sessions are excluded from the session-level aggregates
 (their per-request rows still count toward request-level metrics), and the report
 discloses the excluded count per λ level; a high truncation share at a given λ is
 itself a saturation signal.
 
-For **agentic scenarios** under the v1 approximation (per §10.7, where one task ≡ one
+For **agentic scenarios** under the v1 approximation (per §11.7, where one task ≡ one
 session), these session metrics also serve as task-level metrics — `session_e2e_ms` is
 the task latency, `session_turns` is the fan-out depth, etc. A dedicated `agent_tasks`
 table that carries truly task-specific signals (tool calls emitted, schema validity per
 tool call, task identity distinct from session identity, possibly multiple tasks per
 session) is deferred — see `TODOs.md` *Precise agentic / tool-calling measurement*.
 
-### 12.3 Hardware utilization sampling
+### 13.3 Hardware utilization sampling
 
 To detect untapped hardware headroom (per §1 *Observed execution*), the benchmarker
 samples host-side telemetry on every inference-server node for the full duration of every
 sweep step (warmup + measurement + drain). Samples are stored in the `hardware_stats`
-table (§13.5).
+table (§14.5).
 
 Sampled signals — **GPU** (one row per GPU per sample):
 
@@ -1131,24 +1235,24 @@ Data sources by platform:
 | NVIDIA (GH200) | DCGM in-container (recommended) or `nvidia-smi dmon` fallback | `psutil` + `/proc` |
 | AMD (MI300A) | `rocm-smi` | `psutil` + `/proc` |
 
-Signals a platform cannot expose are stored `NULL`. Reports (§14) overlay these signals
+Signals a platform cannot expose are stored `NULL`. Reports (§15) overlay these signals
 against λ so that the "p95 TTFT meets SLO but GPU SM-active is 35%" case (untapped headroom)
 is immediately visible to the reader.
 
-### 12.4 Service-level objectives (SLOs)
+### 13.4 Service-level objectives (SLOs)
 
 The benchmark YAML's `slos` block declares the latency / reliability objectives the
 experiment's results are judged against. Objectives are declared **per workload class**
-(§10.4) because classes differ in what their users feel: chat is TTFT-sensitive, while
+(§11.4) because classes differ in what their users feel: chat is TTFT-sensitive, while
 agentic-coding sessions are dominated by decode pace (`tpot_ms`) and total task time
-(`session_e2e_ms`). The block is persisted verbatim to `experiments.slos` (§13.1) and
-**evaluated at report time only** (§14.1) — the load generator neither enforces
+(`session_e2e_ms`). The block is persisted verbatim to `experiments.slos` (§14.1) and
+**evaluated at report time only** (§15.1) — the load generator neither enforces
 admission control nor sheds load based on it.
 
 | Field | Type | Notes |
 |---|---|---|
 | `slos[].scenario` | string | Class slug from `scenario_mix`, or `all` to apply the objective to every class. |
-| `slos[].metric` | string | `ttft_ms` \| `tpot_ms` \| `e2e_ms` \| `session_e2e_ms` \| `error_rate_pct`. Session-level metrics per §12.2. |
+| `slos[].metric` | string | `ttft_ms` \| `tpot_ms` \| `e2e_ms` \| `session_e2e_ms` \| `error_rate_pct`. Session-level metrics per §13.2. |
 | `slos[].percentile` | string | `p50` \| `p90` \| `p95` \| `p99`. Omitted for `error_rate_pct` (evaluated as the per-class failure fraction over the measurement phase). |
 | `slos[].threshold` | number | Upper bound — milliseconds for latency metrics, percent for `error_rate_pct`. |
 
@@ -1163,17 +1267,17 @@ slos:
 ```
 
 **SLO-attained rate (λ\*).** For each sweep step, every objective is evaluated over the
-measurement-phase requests of its class (warmup and drain excluded, §11.2). **λ\*** is
+measurement-phase requests of its class (warmup and drain excluded, §12.2). **λ\*** is
 the highest swept λ at which **all** declared objectives hold simultaneously — the
 experiment's goodput operating point, and the anchor for the supportable-users estimate
-(§14.1). If no swept λ satisfies all objectives, λ\* is undefined and the report flags
+(§15.1). If no swept λ satisfies all objectives, λ\* is undefined and the report flags
 it prominently (the sweep should be extended toward lower rates). λ\* is a **derived,
 report-time quantity** — nothing cluster-side computes or persists it.
 
-### 12.5 Response-quality evaluation
+### 13.5 Response-quality evaluation
 
 Sweep traffic is **ungradeable for quality by construction**: in the default
-`output_length_mode: forced` (§10.6) every response is truncated or padded to a sampled
+`output_length_mode: forced` (§11.6) every response is truncated or padded to a sampled
 length. Response quality is therefore measured by a **separate evaluation phase** that
 runs graded QnA suites — via the
 [EleutherAI lm-evaluation-harness](https://github.com/EleutherAI/lm-evaluation-harness)
@@ -1181,22 +1285,22 @@ runs graded QnA suites — via the
 decoding and suite-defined sampling parameters. Two stages, configured by the benchmark
 YAML's `quality_eval` block:
 
-**Stage A — pre-sweep sanity gate.** Runs after the inductor primer (§9.3), before the
+**Stage A — pre-sweep sanity gate.** Runs after the inductor primer (§10.3), before the
 first sweep step. A small graded subset checked against a **blunt absolute floor** whose
 only job is detecting rubbish — corrupted weights, a broken chat template, a
 mis-quantized checkpoint, a kernel-level correctness bug — **before** GPU-hours are
 committed to the sweep. The floor is deliberately coarse; fine regressions are Stage B's
 job. The gate runs in **every experiment** unless explicitly disabled
-(`skip_quality_gate: true`; use sparingly, mirroring §7.5).
+(`skip_quality_gate: true`; use sparingly, mirroring §8.5).
 
 **Stage B — post-sweep quality comparison.** Runs after the final sweep step's drain, on
 the same still-running deployment(s): the full configured suites, each at one or more
 **eval-concurrency** levels (the eval traffic itself is the load, exposing
 concurrency-dependent numerics such as batch-variant kernels). Stage B is **measurement,
-not a gate**: one score set per deployment config, persisted to `quality_evals` (§13.9).
+not a gate**: one score set per deployment config, persisted to `quality_evals` (§14.9).
 There is **no standing quality reference**: deltas are **experiment-internal** — when
 the deployment sweep varies a quality-impacting knob (weight quantization,
-`kv_cache_dtype`, a speculative-decoding implementation, …), the report (§14.1) pairs
+`kv_cache_dtype`, a speculative-decoding implementation, …), the report (§15.1) pairs
 each config's capacity (λ\*, supportable users) with its measured quality, so *"the
 quantized config serves N× more users"* and *"the quantized config costs M pts on
 GPQA"* are two columns of the same table in the same report. An experiment with a
@@ -1207,54 +1311,54 @@ single deployment config reports absolute scores, informational.
 | `gate.suite` | `gsm8k` | Stage-A suite. |
 | `gate.sample_size` | `100` | Subset size — minutes of wall-clock, not hours. |
 | `gate.floor` | `0.5` | Blunt rubbish detector; per-model tuning tracked in TODOs. |
-| `gate.on_fail` | `abort` | `abort` \| `continue`. A failed-but-continued gate marks the run's results **quality-flagged** (§14.1). |
+| `gate.on_fail` | `abort` | `abort` \| `continue`. A failed-but-continued gate marks the run's results **quality-flagged** (§15.1). |
 | `compare.suites` | `[gsm8k, gpqa_diamond]` | Stage-B suites. GPQA-Diamond is HF-gated (license + auth token on the Benchmarker). |
 | `compare.eval_concurrency` | `[1, 32]` | lm-eval parallel request counts; each level produces its own score rows. |
 | `skip_quality_gate` | `false` | Disables Stage A only. |
 | `skip_quality_compare` | `false` | Disables Stage B only (e.g. when no quality-impacting knob is swept). |
 
-The consumed `quality_eval` block is persisted on `experiments.quality_eval` (§13.1) for
+The consumed `quality_eval` block is persisted on `experiments.quality_eval` (§14.1) for
 provenance.
 
 ---
 
 
-## 13. Results
+## 14. Results
 
 Per-run results live in a SQLite database file (`run_<id>.db`) with seven tables:
 `experiments` (one row per sweep), `instances` (one row per deployed server instance),
 `requests` (one row per issued request), `server_stats` (periodic samples of
 server-side counters), `hardware_stats` (periodic samples of host hardware telemetry),
 `system_prechecks` (one row per pre-check metric), and `quality_evals` (one row per
-quality-eval measurement, §13.9). A first-class `agent_tasks`
+quality-eval measurement, §14.9). A first-class `agent_tasks`
 table is deferred (see `TODOs.md` *Precise agentic / tool-calling measurement*); v1
-derives per-task agentic metrics by grouping `requests` on `session_idx` (§12.2).
+derives per-task agentic metrics by grouping `requests` on `session_idx` (§13.2).
 
-### 13.1 `experiments` table
+### 14.1 `experiments` table
 
 One row per sweep — the configuration and overall outcome of the run.
 
 | Column | Type | Semantic |
 |---|---|---|
-| `run_id` | TEXT, PK | Unique identifier (`timestamp + model_slug + backend + deployment + 4-hex random`; see §6.2). |
+| `run_id` | TEXT, PK | Unique identifier (`timestamp + model_slug + backend + deployment + 4-hex random`; see §7.2). |
 | `model` | TEXT | Model identifier (HuggingFace ID or path). |
 | `backend` | TEXT | Inference engine (`vllm`, `sglang`, `dynamo`). |
-| `backend_config` | TEXT (JSON) | Serialized `BackendConfig` — all fields from §15.2. |
-| `dataset_config` | TEXT (JSON) | Serialized dataset configuration (§10). |
-| `scenario_mix` | TEXT (JSON) | The workload mix: `[{scenario, weight}, …]` (§10.4). Single-scenario runs carry one entry with `weight = 1.0`. |
-| `scenario_manifest` | TEXT (JSON) | Structured disclosure of what each class models, omits, and assumes, plus run-level assumptions. See §13.7. |
-| `slos` | TEXT (JSON) | Serialized `slos` block (§12.4); `NULL` when the experiment declares none. |
-| `quality_eval` | TEXT (JSON) | Serialized `quality_eval` block as consumed (§12.5); `NULL` when both stages are disabled. |
-| `rate_levels` | TEXT (JSON) | List of λ values (session starts/s; §11.3 *What λ counts*) swept in this run. |
-| `warmup_s` | INTEGER | Warmup phase duration in seconds (metrics excluded; see §11.2). |
+| `backend_config` | TEXT (JSON) | Serialized `BackendConfig` — all fields from §16.2. |
+| `dataset_config` | TEXT (JSON) | Serialized dataset configuration (§11). |
+| `scenario_mix` | TEXT (JSON) | The workload mix: `[{scenario, weight}, …]` (§11.4). Single-scenario runs carry one entry with `weight = 1.0`. |
+| `scenario_manifest` | TEXT (JSON) | Structured disclosure of what each class models, omits, and assumes, plus run-level assumptions. See §14.7. |
+| `slos` | TEXT (JSON) | Serialized `slos` block (§13.4); `NULL` when the experiment declares none. |
+| `quality_eval` | TEXT (JSON) | Serialized `quality_eval` block as consumed (§13.5); `NULL` when both stages are disabled. |
+| `rate_levels` | TEXT (JSON) | List of λ values (session starts/s; §12.3 *What λ counts*) swept in this run. |
+| `warmup_s` | INTEGER | Warmup phase duration in seconds (metrics excluded; see §12.2). |
 | `measurement_s` | INTEGER | Measurement phase duration in seconds. |
 | `created_at` | TEXT (ISO 8601) | Experiment start timestamp. |
 
-### 13.2 `instances` table
+### 14.2 `instances` table
 
 One row per deployed server instance for the experiment. A single experiment may deploy
 multiple instances of the same configuration (routing tests, disaggregation studies, multi-
-replica deployments); each instance has its own load profile (§9.2).
+replica deployments); each instance has its own load profile (§10.2).
 
 | Column | Type | Semantic |
 |---|---|---|
@@ -1262,29 +1366,29 @@ replica deployments); each instance has its own load profile (§9.2).
 | `instance_id` | TEXT | Per-experiment instance identifier (stable across the run). Composite PK with `run_id`. |
 | `endpoint` | TEXT | URL the load generator targets for this instance (`host:port`). |
 | `node` | TEXT | Hosting node — SLURM node name or K8s pod / node-type. `NULL` if not applicable. |
-| `model_load_total_s` | REAL | Total time-to-ready for this instance (§9.2). |
-| `model_load_weights_s` | REAL | Weights load subcomponent (§9.2). |
-| `model_load_engine_init_s` | REAL | Engine/runtime startup subcomponent (§9.2). |
-| `model_load_cuda_graph_capture_s` | REAL | CUDA graph capture subcomponent (§9.2). |
-| `model_load_inductor_compile_s` | REAL | Inductor compilation primer subcomponent (§9.2). |
+| `model_load_total_s` | REAL | Total time-to-ready for this instance (§10.2). |
+| `model_load_weights_s` | REAL | Weights load subcomponent (§10.2). |
+| `model_load_engine_init_s` | REAL | Engine/runtime startup subcomponent (§10.2). |
+| `model_load_cuda_graph_capture_s` | REAL | CUDA graph capture subcomponent (§10.2). |
+| `model_load_inductor_compile_s` | REAL | Inductor compilation primer subcomponent (§10.2). |
 
-Loading-time components a backend cannot expose are stored `NULL` (see §9.2).
+Loading-time components a backend cannot expose are stored `NULL` (see §10.2).
 
-### 13.3 `requests` table
+### 14.3 `requests` table
 
 One row per issued request — the per-request latency record.
 
 | Column | Type | Semantic |
 |---|---|---|
 | `run_id` | TEXT, FK | Foreign key to `experiments.run_id`. |
-| `rate_lambda` | REAL | λ value (session starts/s; §11.3) of the sweep step this request belongs to. |
+| `rate_lambda` | REAL | λ value (session starts/s; §12.3) of the sweep step this request belongs to. |
 | `request_id` | INTEGER | Per-rate-level request index (monotonic). |
-| `session_idx` | INTEGER | Session this request belongs to (§10.7). Shared by every turn of the session; enables grouping per-session for session-affinity routing analysis (§11.4). For single-turn scenarios equals the request's underlying prompt index. |
-| `instance_id` | TEXT | Instance that served this request (§13.2). Required by routing-strategy analysis (§11.4): per-instance load and prefix-cache locality under `session_affinity` vs `random` are not reconstructible without it. |
-| `scenario` | TEXT | Workload-class slug of the session this request belongs to (§10.4, §10.7). Constant across a session's turns; the key for per-class group-bys (§12.2, §12.4, §14.1). |
-| `turn_idx` | INTEGER | 0-based position of this request within its session (§10.7). `0` for the first turn (and for every request in single-turn scenarios); `1` for the first follow-up; etc. Lets reports plot per-turn metrics directly (e.g. "TTFT vs turn index" to visualise prefix-cache benefit on follow-up turns) without reconstructing the order from timestamps. |
-| `issued_at_ms` | REAL | Milliseconds from the sweep-step start at which the request was sent. Lets reports derive measurement-window membership (§11.2) and `session_e2e_ms` (§12.2) without extra state. |
-| `final_turn` | INTEGER | `1` if this request is its session's last planned turn. A session is complete iff its `final_turn` row exists and every turn succeeded; sessions truncated at drain end lack it (§11.2, §12.2). |
+| `session_idx` | INTEGER | Session this request belongs to (§11.7). Shared by every turn of the session; enables grouping per-session for session-affinity routing analysis (§12.4). For single-turn scenarios equals the request's underlying prompt index. |
+| `instance_id` | TEXT | Instance that served this request (§14.2). Required by routing-strategy analysis (§12.4): per-instance load and prefix-cache locality under `session_affinity` vs `random` are not reconstructible without it. |
+| `scenario` | TEXT | Workload-class slug of the session this request belongs to (§11.4, §11.7). Constant across a session's turns; the key for per-class group-bys (§13.2, §13.4, §15.1). |
+| `turn_idx` | INTEGER | 0-based position of this request within its session (§11.7). `0` for the first turn (and for every request in single-turn scenarios); `1` for the first follow-up; etc. Lets reports plot per-turn metrics directly (e.g. "TTFT vs turn index" to visualise prefix-cache benefit on follow-up turns) without reconstructing the order from timestamps. |
+| `issued_at_ms` | REAL | Milliseconds from the sweep-step start at which the request was sent. Lets reports derive measurement-window membership (§12.2) and `session_e2e_ms` (§13.2) without extra state. |
+| `final_turn` | INTEGER | `1` if this request is its session's last planned turn. A session is complete iff its `final_turn` row exists and every turn succeeded; sessions truncated at drain end lack it (§12.2, §13.2). |
 | `ttft_ms` | REAL | Time to first token, milliseconds — authoritative SLO metric. |
 | `tpot_ms` | REAL | Inter-token latency, mean across the request's output tokens. |
 | `e2e_ms` | REAL | End-to-end request time, milliseconds. |
@@ -1293,39 +1397,39 @@ One row per issued request — the per-request latency record.
 | `success` | INTEGER | `1` if completed within timeouts; `0` if client-side `request_timeout_s` exceeded or the server returned an error. |
 | `error` | TEXT | Error message or class when `success=0`; `NULL` otherwise. |
 
-### 13.4 `server_stats` table
+### 14.4 `server_stats` table
 
 Periodic samples of server-side counters during a sweep step. Sampling cadence is
 backend-dependent. Samples are scraped **per instance** — for multi-instance deployments
-(routing-strategy or replica-sizing experiments, §11.4 + §13.2), each instance produces
+(routing-strategy or replica-sizing experiments, §12.4 + §14.2), each instance produces
 its own row stream so saturation on one instance is distinguishable from idleness on
 another.
 
 | Column | Type | Semantic |
 |---|---|---|
 | `run_id` | TEXT, FK | Foreign key to `experiments.run_id`. |
-| `instance_id` | TEXT | Instance the sample was scraped from. Composite key with `run_id` + `ts` + `rate_lambda`. Matches §13.2 / §13.5 / §13.6. |
-| `rate_lambda` | REAL | λ value (session starts/s; §11.3) of the sweep step being sampled. |
+| `instance_id` | TEXT | Instance the sample was scraped from. Composite key with `run_id` + `ts` + `rate_lambda`. Matches §14.2 / §14.5 / §14.6. |
+| `rate_lambda` | REAL | λ value (session starts/s; §12.3) of the sweep step being sampled. |
 | `ts` | TEXT (ISO 8601) | Sample timestamp. |
 | `requests_running` | INTEGER | Requests currently executing on the server. |
 | `requests_waiting` | INTEGER | Requests queued on the server. |
 | `gpu_cache_pct` | REAL | KV cache utilization, percent. |
 | `spec_accept_rate` | REAL | Speculative-decoding token acceptance rate; `NULL` if speculative decoding disabled. |
 
-### 13.5 `hardware_stats` table
+### 14.5 `hardware_stats` table
 
 Periodic samples of host-side hardware telemetry on the inference-server node(s) during a
-sweep step. See §12.3 for sampling cadence and per-signal meaning. GPU-scoped rows carry
+sweep step. See §13.3 for sampling cadence and per-signal meaning. GPU-scoped rows carry
 a non-`NULL` `gpu_index`; node-scoped rows carry `gpu_index = NULL`.
 
 | Column | Type | Semantic |
 |---|---|---|
 | `run_id` | TEXT, FK | Foreign key to `experiments.run_id`. |
 | `instance_id` | TEXT | Instance whose host this sample belongs to. |
-| `rate_lambda` | REAL | λ value (session starts/s; §11.3) of the sweep step being sampled. |
+| `rate_lambda` | REAL | λ value (session starts/s; §12.3) of the sweep step being sampled. |
 | `ts` | TEXT (ISO 8601) | Sample timestamp. |
 | `gpu_index` | INTEGER | GPU device index for GPU rows; `NULL` for node-wide rows. |
-| `gpu_util_pct` | REAL | Coarse GPU activity (§12.3). |
+| `gpu_util_pct` | REAL | Coarse GPU activity (§13.3). |
 | `gpu_mem_used_gb`, `gpu_mem_pct` | REAL | Device memory occupancy. |
 | `gpu_power_w`, `gpu_temp_c` | REAL | Power and thermal. |
 | `gpu_sm_active_pct`, `gpu_tensor_active_pct` | REAL | DCGM profiling counters. |
@@ -1339,9 +1443,9 @@ a non-`NULL` `gpu_index`; node-scoped rows carry `gpu_index = NULL`.
 
 Signals a platform cannot expose are stored `NULL`.
 
-### 13.6 `system_prechecks` table
+### 14.6 `system_prechecks` table
 
-One row per pre-check metric per instance (see §7). Used both for warning the operator about
+One row per pre-check metric per instance (see §8). Used both for warning the operator about
 a degraded foundation and for later correlation with anomalous sweep results.
 
 | Column | Type | Semantic |
@@ -1350,12 +1454,12 @@ a degraded foundation and for later correlation with anomalous sweep results.
 | `instance_id` | TEXT | Instance the check ran against. |
 | `metric` | TEXT | Metric identifier (e.g. `nccl_allreduce_16MiB_GBs`). |
 | `measured` | REAL | Measured value. |
-| `expected` | REAL | Expected value from reference table (§7.3); `NULL` if no reference. |
+| `expected` | REAL | Expected value from reference table (§8.3); `NULL` if no reference. |
 | `tolerance_pct` | REAL | Negative deviation tolerance (e.g. `-10`); `NULL` if no reference. |
-| `status` | TEXT | `pass`, `warn`, or `fail` (§7.4). |
+| `status` | TEXT | `pass`, `warn`, or `fail` (§8.4). |
 | `ts` | TEXT (ISO 8601) | Time the check completed. |
 
-### 13.7 Scenario manifest
+### 14.7 Scenario manifest
 
 Every result carries a structured **scenario manifest** that discloses what the benchmarked
 workload mix models, what it explicitly does *not* model, and the numeric assumptions baked
@@ -1369,7 +1473,7 @@ following required keys:
 
 | Field | Type | Semantic |
 |---|---|---|
-| `mix` | list[object] | `[{scenario, weight, expected_request_share}, …]` — the workload classes, their session-start weights (§10.4), and the per-request share that follows from each class's turn structure. |
+| `mix` | list[object] | `[{scenario, weight, expected_request_share}, …]` — the workload classes, their session-start weights (§11.4), and the per-request share that follows from each class's turn structure. |
 | `classes` | list[object] | One object per mix entry, carrying the per-class disclosure fields below. |
 | `classes[].name` | string | Class slug; matches the corresponding `mix` entry. |
 | `classes[].summary` | string | One- to two-sentence human description of the class. |
@@ -1377,27 +1481,27 @@ following required keys:
 | `classes[].modelled` | list[string] | Aspects of real workload that the class *does* exercise — e.g. `"large multi-turn prompts (16K–32K input tokens)"`, `"follow-up turns reusing the initial context"`. |
 | `classes[].not_modelled` | list[string] | Aspects the class explicitly does *not* cover — e.g. `"no image inputs"`, `"no audio inputs"`, `"no reasoning / thinking traces"`, `"no tool-call interleaving"`. |
 | `classes[].assumptions` | list[string] | Numeric or structural assumptions baked into the class — e.g. `"follow-up turn probability = 0.4"`, `"max output tokens = 4096"`, `"input length distribution: lognormal, mean=20K, σ=0.3"`, `"system prompt length: 1.2K tokens, identical across sessions"`. |
-| `run_assumptions` | list[string] | Run-level assumptions shared by all classes: arrival process + parameters (§11.3), routing strategy (§11.4), `output_length_mode` (§10.6), master seed, tokenizer ID. |
+| `run_assumptions` | list[string] | Run-level assumptions shared by all classes: arrival process + parameters (§12.3), routing strategy (§12.4), `output_length_mode` (§11.6), master seed, tokenizer ID. |
 
 Validation: the Coordinator aborts **before submission** if the benchmark YAML's
-`scenario_mix` is missing or empty, names an unregistered scenario (§10.3), or carries
+`scenario_mix` is missing or empty, names an unregistered scenario (§11.3), or carries
 weights that do not sum to 1.0. The dataset generator on the Benchmarker aborts **before
 load-generation begins** if any required field of the emitted `scenario_manifest` is
-missing or fails schema validation (matching §10.8). There is no implicit default —
+missing or fails schema validation (matching §11.8). There is no implicit default —
 every benchmark must declare what it is and is not.
 
-### 13.8 Experiment directories
+### 14.8 Experiment directories
 
 Each completed sweep produces an `experiments/YYYY-MM-DD_description/` folder containing:
 
 - `benchmark_config.yaml` (copy of the input config for provenance)
 - the run's SQLite DB file (`run_<id>.db`)
 - deployment artifacts used for the run (sbatch scripts, Kubernetes YAML, Dockerfile)
-- the executed report notebook and its rendered outputs (see §14)
+- the executed report notebook and its rendered outputs (see §15)
 
-### 13.9 `quality_evals` table
+### 14.9 `quality_evals` table
 
-One row per quality-eval measurement (§12.5) — per stage, suite, and eval-concurrency
+One row per quality-eval measurement (§13.5) — per stage, suite, and eval-concurrency
 level.
 
 | Column | Type | Semantic |
@@ -1418,18 +1522,18 @@ level.
 
 ---
 
-## 14. Reporting
+## 15. Reporting
 
 The Reports generator produces a Jupyter notebook from the centralized results database
 and writes it back into the experiment directory.
 
-### 14.1 Report notebook (`experiments/template_report.ipynb`)
+### 15.1 Report notebook (`experiments/template_report.ipynb`)
 
 Every experiment report must include:
 
 - Experiment title and description
 - **Scenario & assumptions panel** (from `experiments.scenario_mix` and
-  `experiments.scenario_manifest`, §13.7): the mix table (class, session-start weight,
+  `experiments.scenario_manifest`, §14.7): the mix table (class, session-start weight,
   expected request share), then per class: name, one-line summary, the `modelled`
   list, the `not_modelled` list, and the `assumptions` list, plus the run-level
   `run_assumptions` — surfaced near the top of the report, before any plot, so every
@@ -1437,42 +1541,42 @@ Every experiment report must include:
   not cover. Items in `not_modelled` must be visually distinguished (e.g.
   struck-through or in a warning-coloured panel) so a reader cannot miss them.
 - Configuration summary table (model, TP, KV dtype, spec dec, SLO, etc.)
-- **System pre-checks** (from `system_prechecks`, §13.6): table of pre-check metrics with
+- **System pre-checks** (from `system_prechecks`, §14.6): table of pre-check metrics with
   measured / expected / status — warns and fails flagged prominently at the top of the
   report so a degraded foundation is impossible to overlook when interpreting downstream
   numbers.
-- **Model loading times**: per instance (from the `instances` table, §13.2),
+- **Model loading times**: per instance (from the `instances` table, §14.2),
   `model_load_total_s` plus the per-component breakdown (`model_load_weights_s`,
   `model_load_engine_init_s`, `model_load_cuda_graph_capture_s`,
-  `model_load_inductor_compile_s`) — see §9.2.
-- TTFT p50/p95/p99 vs λ plot (log scale) with per-class SLO lines (§12.4)
+  `model_load_inductor_compile_s`) — see §10.2.
+- TTFT p50/p95/p99 vs λ plot (log scale) with per-class SLO lines (§13.4)
 - ITL p50/p95/p99 vs λ plot
 - Failure rate bar chart (bottom panel of each plot)
-- **Per-class breakdowns** (mixed runs, §10.4): every latency and failure-rate panel is
-  rendered both aggregate and grouped by `requests.scenario`, and the §12.2
+- **Per-class breakdowns** (mixed runs, §11.4): every latency and failure-rate panel is
+  rendered both aggregate and grouped by `requests.scenario`, and the §13.2
   session-level metrics are derived per class (`GROUP BY scenario, session_idx`) — so
   cross-class interference (e.g. long agentic prefills inflating chat TTFT on the
   shared instance) is directly visible rather than averaged away.
-- **SLO attainment** (from `experiments.slos`, §12.4): a per-objective pass/fail table
+- **SLO attainment** (from `experiments.slos`, §13.4): a per-objective pass/fail table
   per λ level, the derived λ\* highlighted, and each class's SLO thresholds drawn on
   its respective panels.
 - **Supportable-users estimate** — the λ→users translation, computed **only here** (and
-  in curated reports built on top, §14.3); nothing cluster-side computes it. The
+  in curated reports built on top, §15.3); nothing cluster-side computes it. The
   notebook exposes editable per-class parameters (`sessions_per_user_per_hour`) and
   combines them with quantities measured at λ\*: per-class session throughput (sessions
-  started per second during the measurement phase) and mean session wall-time (§12.2).
+  started per second during the measurement phase) and mean session wall-time (§13.2).
   It reports, per class, (a) the **supportable user population** = session throughput ÷
   per-user session rate, and (b) **concurrent active sessions** via Little's law =
   session throughput × mean session wall-time. Always presented as an estimate, with
   the parameters disclosed alongside the result. Undefined when λ\* is undefined.
-- **Response-quality panel** (from `quality_evals`, §13.9 + §12.5): the Stage-A gate
+- **Response-quality panel** (from `quality_evals`, §14.9 + §13.5): the Stage-A gate
   outcome — with an unmissable **quality-flagged** banner if the gate failed under
   `on_fail: continue` — and the Stage-B per-suite scores per eval-concurrency level.
   When the experiment's deployment sweep varies a quality-impacting knob, a
   **capacity-vs-quality table**: per deployment config, users at λ\* alongside quality
   scores and the deltas between configs — the *"N× more users, −M pts"* pairing in one
   view, in the same report as the capacity claim.
-- **Hardware utilization** (from `hardware_stats`, §13.5), per λ level, overlaid against
+- **Hardware utilization** (from `hardware_stats`, §14.5), per λ level, overlaid against
   TTFT/ITL so untapped headroom is visible at a glance:
   - GPU SM-active and tensor-active vs λ (the key headroom indicator — SLO met with these
     well below 100% means the system can take more traffic on the same allocation)
@@ -1481,15 +1585,15 @@ Every experiment report must include:
   - Node CPU, RAM, storage-read, network rx/tx vs λ
 - Raw per-rate-level data table
 
-### 14.2 Notebook output
+### 15.2 Notebook output
 
 The executed notebook (`report.ipynb`) and its rendered plots (`ttft.png`, `itl.png`,
 `hardware.png`, `prechecks.png`) are written into the corresponding
-`experiments/YYYY-MM-DD_description/` folder (§13.8).
+`experiments/YYYY-MM-DD_description/` folder (§14.8).
 
-### 14.3 Curated reports (`reports/`)
+### 15.3 Curated reports (`reports/`)
 
-The per-experiment notebooks in §14.1–§14.2 exist for **reproducibility**: every plot the
+The per-experiment notebooks in §15.1–§15.2 exist for **reproducibility**: every plot the
 template renders, the raw per-rate-level table, full provenance back to the SQLite DB. An
 `experiments/<run>/` folder is self-contained: everything about that one experiment —
 config, raw results, notebook, rendered plots — lives there.
@@ -1572,56 +1676,56 @@ full picture lives.
 
 ---
 
-## 15. Experiment Plans
+## 16. Experiment Plans
 
-Each experiment is composed from the features being measured (§15.1), the **deployment
-target** (SLURM vs Kubernetes — frequently a sweep dimension in its own right, §5), the
-**backend and its version / variant** under test (§8.1; e.g. one vLLM release vs
+Each experiment is composed from the features being measured (§16.1), the **deployment
+target** (SLURM vs Kubernetes — frequently a sweep dimension in its own right, §6), the
+**backend and its version / variant** under test (§9.1; e.g. one vLLM release vs
 another, or upstream vs a CSCS-patched build — comparing two versions of the same backend is a first-class
 experiment shape), the BackendConfig knobs that vary across deployments within the
-experiment (§15.2), and the model(s) under test (§8.2). The benchmark YAML specifies
-all five, plus the workload mix the deployment is loaded with (`scenario_mix`, §10.4),
-the SLOs the results are judged against (`slos`, §12.4), and the quality-evaluation
-configuration (`quality_eval`, §12.5). An experiment thus has two nested sweeps: the **deployment sweep** over
+experiment (§16.2), and the model(s) under test (§9.2). The benchmark YAML specifies
+all five, plus the workload mix the deployment is loaded with (`scenario_mix`, §11.4),
+the SLOs the results are judged against (`slos`, §13.4), and the quality-evaluation
+configuration (`quality_eval`, §13.5). An experiment thus has two nested sweeps: the **deployment sweep** over
 deployment-target × backend-version × BackendConfig × model combinations (one engine
 launch per combination), and inside each deployment the **rate-level sweep** over λ
 values (each λ being one "sweep step" in the sense used by the `requests` /
 `server_stats` / `hardware_stats` tables).
 
-The lists in §15.1 and §15.2 are **deliberately non-exhaustive** — they capture the v1
+The lists in §16.1 and §16.2 are **deliberately non-exhaustive** — they capture the v1
 priorities so the implementation phase has concrete context to build against, but
 experiments routinely introduce additional features, modes of usage, or backend knobs on
 a per-experiment basis. Claude adapts the framework to support each addition as the
 operator requests it: extending the BackendConfig surface, the planner templates, the
 manifest disclosure surface, and the report panels in lock-step.
 
-### 15.1 Features under test
+### 16.1 Features under test
 
 The framework benchmarks the inference-serving features listed below. The list is
 **non-exhaustive** — it captures the v1 priorities to give the implementation phase
 concrete context, not a closed set. Experiments routinely require additional features or
 modes of usage; new entries are added by extending this list, defining any new config
-knobs in §15.2, binding to at least one scenario, and surfacing the marginal effect in
-reports (§14). Each feature is exercised by one or more scenarios (see the scenario
+knobs in §16.2, binding to at least one scenario, and surfacing the marginal effect in
+reports (§15). Each feature is exercised by one or more scenarios (see the scenario
 taxonomy in the README).
 
 | Feature | Why it matters | Where configured | Procurement implication |
 |---|---|---|---|
-| **Automatic prefix caching** | Reduces TTFT for sessions sharing prompt prefixes; critical for chat and AI-assisted coding. | `enable_prefix_caching` (§15.2) | Cache-friendly KV memory hierarchy; cache hit-rate as a procurement metric. |
-| **KV-cache offloading** | Extends effective KV capacity by spilling to host DRAM / unified memory; trades per-request latency for concurrency. | `kv_offloading_size`, `kv_offloading_backend` (§15.2) | **Memory-layer sizing decisions** — HBM vs Grace-DRAM vs CXL. Offloading bandwidth profiles drive host-DRAM-per-GPU sizing and the choice of unified-memory / CXL fabrics for next-generation systems. |
-| **KV-cache reuse across requests** | Identical or partially-overlapping prefixes from different requests reuse already-computed KV; effectiveness depends on routing. | `enable_prefix_caching` (§15.2) + `routing_strategy` (§11.4) | KV memory pressure under realistic locality; informs replica-pool sizing. |
-| **Speculative decoding** | Improves decode throughput when a smaller draft model proposes tokens accepted by the target. | `speculative_decoding.*` (§15.2) | Compute headroom for draft model; memory budget for two-model deployments. |
+| **Automatic prefix caching** | Reduces TTFT for sessions sharing prompt prefixes; critical for chat and AI-assisted coding. | `enable_prefix_caching` (§16.2) | Cache-friendly KV memory hierarchy; cache hit-rate as a procurement metric. |
+| **KV-cache offloading** | Extends effective KV capacity by spilling to host DRAM / unified memory; trades per-request latency for concurrency. | `kv_offloading_size`, `kv_offloading_backend` (§16.2) | **Memory-layer sizing decisions** — HBM vs Grace-DRAM vs CXL. Offloading bandwidth profiles drive host-DRAM-per-GPU sizing and the choice of unified-memory / CXL fabrics for next-generation systems. |
+| **KV-cache reuse across requests** | Identical or partially-overlapping prefixes from different requests reuse already-computed KV; effectiveness depends on routing. | `enable_prefix_caching` (§16.2) + `routing_strategy` (§12.4) | KV memory pressure under realistic locality; informs replica-pool sizing. |
+| **Speculative decoding** | Improves decode throughput when a smaller draft model proposes tokens accepted by the target. | `speculative_decoding.*` (§16.2) | Compute headroom for draft model; memory budget for two-model deployments. |
 | **Continuous batching** | Schedules new requests into running batches without waiting for current ones to finish — the dominant throughput optimization for online serving. | Backend default; not directly exposed | Scheduler responsiveness characterisation; admission-control budget. |
-| **MoE expert routing** | Token-to-expert dispatch and load balance govern memory pressure and inter-GPU traffic. | Observed via §12.3 telemetry (NVLink / PCIe all-to-all signals) and §7 NVSHMEM perftest; not configured at the framework layer. | Interconnect sizing for all-to-all expert traffic; hot-expert memory pressure. |
-| **Quantization (weights / KV / activation)** | Trades model fidelity and memory footprint against throughput. | `kv_cache_dtype` (§15.2); weight quantization via backend | Memory hierarchy: lower-precision math support vs higher-precision storage. |
-| **Disaggregated prefill / decode** | Splits compute-heavy prefill from memory-bandwidth-heavy decode across different accelerator classes. | Per-component `nodeSelector` (§5.2); KV-transfer mechanism deferred (TODOs.md *NIXL disaggregated prefill/decode*). | Heterogeneous accelerator procurement; interconnect bandwidth between roles. |
-| **Multi-replica routing and session affinity** | Distributes load across replicas; `session_affinity` preserves prefix-cache hits at the cost of fairness. | `routing_strategy` (§11.4) | Ingress / load-balancer requirements; cache-locality vs replica-fairness trade-off. |
+| **MoE expert routing** | Token-to-expert dispatch and load balance govern memory pressure and inter-GPU traffic. | Observed via §13.3 telemetry (NVLink / PCIe all-to-all signals) and §8 NVSHMEM perftest; not configured at the framework layer. | Interconnect sizing for all-to-all expert traffic; hot-expert memory pressure. |
+| **Quantization (weights / KV / activation)** | Trades model fidelity and memory footprint against throughput. | `kv_cache_dtype` (§16.2); weight quantization via backend | Memory hierarchy: lower-precision math support vs higher-precision storage. |
+| **Disaggregated prefill / decode** | Splits compute-heavy prefill from memory-bandwidth-heavy decode across different accelerator classes. | Per-component `nodeSelector` (§6.2); KV-transfer mechanism deferred (TODOs.md *NIXL disaggregated prefill/decode*). | Heterogeneous accelerator procurement; interconnect bandwidth between roles. |
+| **Multi-replica routing and session affinity** | Distributes load across replicas; `session_affinity` preserves prefix-cache hits at the cost of fairness. | `routing_strategy` (§12.4) | Ingress / load-balancer requirements; cache-locality vs replica-fairness trade-off. |
 
 Each feature's contribution to latency, throughput, error rate, and hardware utilisation
-(§12.3) is recorded per sweep — and, for quality-impacting knobs (weight quantization,
-`kv_cache_dtype`, speculative-decoding implementations, …), response quality (§12.5
+(§13.3) is recorded per sweep — and, for quality-impacting knobs (weight quantization,
+`kv_cache_dtype`, speculative-decoding implementations, …), response quality (§13.5
 Stage B), so reports pair each feature's capacity gain with its measured quality change
-(§14.1). Reports plot the marginal effect of enabling / disabling individual features so
+(§15.1). Reports plot the marginal effect of enabling / disabling individual features so
 procurement evidence can isolate the value of each.
 
 **Platform comparison (SLURM ↔ Kubernetes).** Independent of any specific feature,
@@ -1638,12 +1742,12 @@ overlays for any latency / throughput / utilisation panel.
 ---
 
 
-### 15.2 Sweepable backend configuration
+### 16.2 Sweepable backend configuration
 
 All fields are optional (sensible defaults apply); the experiment's **deployment sweep**
 iterates over combinations of them, instantiating one engine deployment per combination
-(λ is then swept inside each deployment — see §15 intro). Values flow from `BackendConfig`
-through Coordinator → Planner (§4) → backend-specific Jinja2 templates (§9) into the
+(λ is then swept inside each deployment — see §16 intro). Values flow from `BackendConfig`
+through Coordinator → Planner (§5) → backend-specific Jinja2 templates (§10) into the
 engine launch command.
 
 **Backend-by-backend, version-by-version.** Each backend has its own knob surface —
@@ -1662,21 +1766,21 @@ or version comes into scope.
 
 | Field | vLLM flag | Notes |
 |---|---|---|
-| `tensor_parallel_size` | `--tensor-parallel-size` | Default 1. Must not exceed `gpus_per_node` (= 4 on Alps) — per-layer all-reduce is bandwidth-heavy; see §5.1. |
+| `tensor_parallel_size` | `--tensor-parallel-size` | Default 1. Must not exceed `gpus_per_node` (= 4 on Alps) — per-layer all-reduce is bandwidth-heavy; see §6.1. |
 | `pipeline_parallel_size` | `--pipeline-parallel-size` | Default 1. Use for cross-node scale-out — PP traffic is much lighter than TP. |
-| `data_parallel_size` | `--data-parallel-size` | Default 1. Each DP replica is an independent `instances` row (§13.2). |
+| `data_parallel_size` | `--data-parallel-size` | Default 1. Each DP replica is an independent `instances` row (§14.2). |
 | `expert_parallel_size` | `--expert-parallel-size` | Default 1. MoE engines only. |
 | `max_model_len` | `--max-model-len` | |
 | `max_num_batched_tokens` | `--max-num-batched-tokens` | Must equal `max_model_len` for long-context (avoids chunked-prefill rejection) |
 | `gpu_memory_utilization` | `--gpu-memory-utilization` | |
 | `kv_cache_dtype` | `--kv-cache-dtype` | e.g. `"fp8"`. Doubles KV capacity but worsens per-request latency due to higher batch concurrency. |
 | `enable_prefix_caching` | `--enable-prefix-caching` | Default True. Set False to isolate TTFT from cache artefacts (but prefer unique prompts instead). |
-| `safetensors_load_strategy` | `--safetensors-load-strategy` | `"prefetch"` recommended on Lustre (capstor / iopsstor) — see §5.1. |
+| `safetensors_load_strategy` | `--safetensors-load-strategy` | `"prefetch"` recommended on Lustre (capstor / iopsstor) — see §6.1. |
 | `kv_offloading_size` | `--kv-offloading-size` | Total GiB across all TP ranks (e.g. `400` = 100 GiB/GPU for TP=4). Uses GH200 Grace DRAM at 900 GB/s via NVLink-C2C. |
 | `kv_offloading_backend` | `--kv-offloading-backend` | `"native"` (default). |
 | `speculative_decoding.draft_model` | part of `--speculative-config` JSON | Draft model identifier (HuggingFace ID or path). See the vLLM compatibility notes below. |
 | `speculative_decoding.num_speculative_tokens` | part of `--speculative-config` JSON | |
-| `speculative_decoding.draft_tensor_parallel_size` | part of `--speculative-config` JSON | Draft tensor-parallel size. Shared- vs dedicated-GPU guidance in §16.2. |
+| `speculative_decoding.draft_tensor_parallel_size` | part of `--speculative-config` JSON | Draft tensor-parallel size. Shared- vs dedicated-GPU guidance in §17.2. |
 
 **Flag compatibility.** The vLLM flag names above are stable on the current vLLM pin.
 The table below records flags that were removed, renamed, or made mandatory in this
@@ -1698,7 +1802,7 @@ release, so that planner templates don't regress to deprecated syntax when the p
 *Populated as SGLang experiments come into scope.* The same conceptual configuration
 surface as vLLM — TP / PP / DP, KV dtype, prefix caching, speculative decoding, KV
 offloading, MoE expert parallelism — expressed through SGLang's flags. Planner template:
-`tools/templates/sglang.edf.j2` (TBD when the first SGLang experiment is wired).
+`tools/templates/slurm/sglang.edf.j2` (TBD when the first SGLang experiment is wired).
 
 | Field | SGLang flag | Notes |
 |---|---|---|
@@ -1708,7 +1812,7 @@ offloading, MoE expert parallelism — expressed through SGLang's flags. Planner
 
 *Populated as Nvidia Dynamo experiments come into scope.* The same conceptual
 configuration surface as vLLM, expressed through Dynamo's flags. Planner template:
-`tools/templates/dynamo.edf.j2` (TBD when the first Dynamo experiment is wired).
+`tools/templates/slurm/dynamo.edf.j2` (TBD when the first Dynamo experiment is wired).
 
 | Field | Dynamo flag | Notes |
 |---|---|---|
@@ -1717,12 +1821,12 @@ configuration surface as vLLM, expressed through Dynamo's flags. Planner templat
 
 ---
 
-## 16. Findings Records
+## 17. Findings Records
 
 Computed properties and operational findings recorded from running experiments. New
 entries are appended as findings emerge.
 
-### 16.1 KV cache capacity (GH200, 70B, TP=4)
+### 17.1 KV cache capacity (GH200, 70B, TP=4)
 
 ```
 Available KV per GPU  = (96 GiB × gpu_memory_utilization) − (140 GiB / 4 GPUs)
@@ -1736,7 +1840,7 @@ Additional KV capacity  = 100 / 1.91 ≈ 52 additional slots
 Total concurrent        ≈ 80 slots
 ```
 
-### 16.2 Speculative decoding on shared GPUs
+### 17.2 Speculative decoding on shared GPUs
 
 - Running draft at TP=4 on the **same** 4 GPUs as the 70B target is counterproductive:
   NCCL allreduce overhead for 5 draft passes per cycle (320 extra syncs) erases the
@@ -1746,12 +1850,12 @@ Total concurrent        ≈ 80 slots
 
 ---
 
-## 17. Known Issues & Workarounds
+## 18. Known Issues & Workarounds
 
 Issues discovered during image builds and experiment runs — and the workarounds that
 resolved them — are tracked here as they arise.
 
-### 17.1 Engine image cache is stale across rebuilds under the same tag
+### 18.1 Engine image cache is stale across rebuilds under the same tag
 
 The container engine (enroot/pyxis) caches an imported image keyed by reference, so
 rebuilding and re-pushing under the **same tag** leaves the cached squashfs pointing at
@@ -1762,7 +1866,7 @@ use `podman image inspect {{.Digest}}` — that is the *local* manifest digest, 
 format-converting push can change, and the registry returns `404` for it.
 `tools/images/build.sh` writes the digest-pinned EDF that `sanity.sbatch` consumes.
 
-### 17.2 Slim Ubuntu/CUDA bases need extra netstack steps vs NGC
+### 18.2 Slim Ubuntu/CUDA bases need extra netstack steps vs NGC
 
 NGC bases ship a complete CUDA toolkit, an HPC-X stack, and `/bin/sh`→bash; slim engine
 bases (e.g. `vllm/vllm-openai`, Ubuntu 24.04 / CUDA 13) do not. Building the Alps network
@@ -1779,5 +1883,5 @@ phase scripts and Containerfile):
   which rejects bash-only `${!x}` / `printf -v` / `[[ ]]` with "Bad substitution" and
   aborts container start.
 
-The §8.1 post-push acceptance gate is what catches a base that silently lacks one of
+The §9.1 post-push acceptance gate is what catches a base that silently lacks one of
 these (e.g. collectives that fall back off the Slingshot path).

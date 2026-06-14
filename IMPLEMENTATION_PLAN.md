@@ -14,7 +14,7 @@ phase 7 (*Implementation*), starting at M0.
 
 ## 1. Objective and success criterion
 
-The driving deliverable is the framework's primary v1 question (README, §12.4, §14.1):
+The driving deliverable is the framework's primary v1 question (README, §13.4, §15.1):
 
 > **How many users can a model instance support under a mixed workload of 80%
 > agentic-assisted coding + 20% user chats, at declared per-class SLOs — and how do
@@ -25,8 +25,8 @@ SLO-attained rate λ\*, per-class SLO attainment, and the supportable-users esti
 the 80/20 mix on `clariden` — and **E5** answers whether the same workload runs slower
 on Kubernetes (`breithorn`) than on SLURM.
 
-All spec pillars are in scope — system pre-checks (§7), image building (§8.1),
-model-load decomposition (§9.2), platform comparison (§15.1), curated reports (§14.3).
+All spec pillars are in scope — system pre-checks (§8), image building (§9.1),
+model-load decomposition (§10.2), platform comparison (§16.1), curated reports (§15.3).
 None are descoped.
 
 ## 2. Current state
@@ -34,22 +34,22 @@ None are descoped.
 | Asset | Status |
 |---|---|
 | `SPECIFICATIONS.md`, scenario registry (`tools/scenarios/*.yaml` × 4, incl. `smoke-synthetic`) | Done |
-| `tools/pre-flight-checks.py` (§3) | Done |
-| `tools/system_prechecks_reference.yaml` (§7.3) | Skeleton — all `expected: TBD` (populated by E2) |
-| `examples/nccl-tests/` (standalone manual pre-check example) | Adapted into M4 (done); the canonical §7 scripts now live in `tools/benchmarker/prechecks/` |
+| `tools/pre-flight-checks.py` (§4) | Done |
+| `tools/system_prechecks_reference.yaml` (§8.3) | Skeleton — all `expected: TBD` (populated by E2) |
+| `examples/nccl-tests/` (standalone manual pre-check example) | Adapted into M4 (done); the canonical §8 scripts now live in `tools/benchmarker/prechecks/` |
 | `examples/slurm-deployment/` (Apertus-8B vLLM sbatch + EDF) | Done — seed for M6 templates |
 | `examples/k8s-deployment/` (deployment/service/ingress/PVC) | Done — seed for M6 templates |
 | `examples/docker-images-build/` (Dockerfile) | Superseded by `tools/images/` (M5 done) — retained as a historical monolithic example |
-| `tools/common/` (global.yaml §2.3, benchmark-YAML schema + CLI, run-ID §6.2) + `examples/benchmark-configs/mixed-80-20.yaml` + `tools/tests/` (20 tests) | Done (M0, 2026-06-12) |
-| `tools/benchmarker/dataset_gen/` (registry loader, seeded sampling, all four §10.5 sources, manifest emitter, offline CLI) — validated against real LongBench / WildChat / gsm8k downloads | Done (M1, 2026-06-12) |
-| `tools/benchmarker/load_gen/` (arrival, client + §12.1 taxonomy, session scheduler with §11.2 phase accounting, `server_stats` scraper, readiness/model-load/primer) + `tools/testing/mock_openai_server.py` | Done (M2, 2026-06-12) |
-| `tools/common/results_db.py` (seven §13 tables, WAL + single-writer, smoke-mode suppression, NDJSON ingestion) + `tools/benchmarker/hw_sampler.py` (stdlib-only, engine-node placement) | Done (M3, 2026-06-12) |
-| `tools/benchmarker/prechecks/` (runner + parsers + §7.3/§7.4 grading) and `tools/planner/` + `tools/templates/` (EDF, engine/benchmarker sbatch, K8s engine + benchmarker pod) | Laptop halves done (M4/M6, 2026-06-12); cluster validation at E1/E5 |
+| `tools/common/` (global.yaml §3.3, benchmark-YAML schema + CLI, run-ID §7.2) + `examples/benchmark-configs/mixed-80-20.yaml` + `tools/tests/` (20 tests) | Done (M0, 2026-06-12) |
+| `tools/benchmarker/dataset_gen/` (registry loader, seeded sampling, all four §11.5 sources, manifest emitter, offline CLI) — validated against real LongBench / WildChat / gsm8k downloads | Done (M1, 2026-06-12) |
+| `tools/benchmarker/load_gen/` (arrival, client + §13.1 taxonomy, session scheduler with §12.2 phase accounting, `server_stats` scraper, readiness/model-load/primer) + `tools/testing/mock_openai_server.py` | Done (M2, 2026-06-12) |
+| `tools/common/results_db.py` (seven §14 tables, WAL + single-writer, smoke-mode suppression, NDJSON ingestion) + `tools/benchmarker/hw_sampler.py` (stdlib-only, engine-node placement) | Done (M3, 2026-06-12) |
+| `tools/benchmarker/prechecks/` (runner + parsers + §8.3/§8.4 grading) and `tools/planner/` + `tools/templates/` (EDF, engine + benchmarker sbatch, K8s engine manifest) | Laptop halves done (M4/M6, 2026-06-12); cluster validation at E1/E5 |
 | `tools/benchmarker/orchestrator.py` (`run_experiment` phase driver, `EngineLauncher` + `QualityEvaluator`/M11 seams) + `launchers.py` (Slurm/K8s) + `main.py` CLI + `tools/tests/test_orchestrator.py` (7 mock-integration tests) + planner `--deployment-index` wiring | Done (M7, 2026-06-13) — DoD met on the laptop half against the mock server; SlurmEngineLauncher/K8sEngineLauncher subprocess paths (sbatch/squeue/scancel, kubectl) exercised on-cluster at E1/E5 |
-| `tools/coordinator/` (`state` resumable run file, `merge` idempotent central-DB merge, `policy` §7.4 gate, `teardown` §6 plan, `backend` ClusterBackend + Fake/Kubectl, `coordinator` phase loop, `main` CLI) + `tools/tests/test_coordinator.py` (11 tests) | Done (M8, 2026-06-13) — deterministic logic + >100MB staged-download round-trip unit-tested vs a fake backend; SLURM FirecREST effects assistant-driven via MCP in-session (decision 5), K8s `kubectl` path headless (staging is E5); live FirecREST validation at E1 |
+| `tools/coordinator/` (`state` resumable run file, `merge` idempotent central-DB merge, `policy` §8.4 gate, `teardown` §7 plan, `backend` ClusterBackend + Fake/Kubectl, `coordinator` phase loop, `main` CLI) + `tools/tests/test_coordinator.py` (11 tests) | Done (M8, 2026-06-13) — deterministic logic + >100MB staged-download round-trip unit-tested vs a fake backend; SLURM FirecREST effects assistant-driven via MCP in-session (decision 5), K8s `kubectl` path headless (staging is E5); live FirecREST validation at E1 |
 | `tools/benchmarker/quality_eval/` (`runner` implementing M7's QualityEvaluator seam, `BuiltinEvalBackend` in-process grader, `LmEvalBackend` lm-eval-harness wrapper, `suites`/`base`) + `tools/tests/test_quality_eval.py` (7 tests); M7 `main.py` wires `QualityEvalRunner(LmEvalBackend())` | Done (M11, 2026-06-13) — Stage-A gate (floor pass/fail) + Stage-B comparison (suites × eval-concurrency → `quality_evals` rows) verified vs the mock's canned answers; gate-abort path exercised by `test_orchestrator`. lm-eval invocation/parse provisional → validated at E1; GPQA-Diamond gating documented (decision 8) |
-| `tools/reports/` (`analysis` §14.1 computations, `plots` matplotlib figures, `notebook` builder, `render` nbclient executor, `fixtures` known-answer DB) + `experiments/template_report.ipynb` + `reports/STYLE.md` + `tools/tests/test_reports.py` (12 tests) | Done (M9, 2026-06-13) — λ\*/supportable-users/capacity-vs-quality asserted against a crafted fixture; notebook executes headless (PNGs + λ\* captured); validated against the real E1 DB later |
-| `tools/cleaner.py` (§6.7 `identify` policy + `prune`, ClusterBackend seam: Kubectl/Fake, `scratch_candidates` for the MCP-driven SLURM path, `reminder_due`) + `tools/tests/test_cleaner.py` (5 tests) | Done (M10, 2026-06-13) — identification + skip policy (model-cache PVC §6.6, recent-N JFrog, active-job scratch, age threshold) and approval-gated pruning tested vs a fake backend; K8s headless; SLURM scratch assistant-driven; JFrog `jf` backend is a follow-up |
+| `tools/reports/` (`analysis` §15.1 computations, `plots` matplotlib figures, `notebook` builder, `render` nbclient executor, `fixtures` known-answer DB) + `experiments/template_report.ipynb` + `reports/STYLE.md` + `tools/tests/test_reports.py` (12 tests) | Done (M9, 2026-06-13) — λ\*/supportable-users/capacity-vs-quality asserted against a crafted fixture; notebook executes headless (PNGs + λ\* captured); validated against the real E1 DB later |
+| `tools/cleaner.py` (§7.7 `identify` policy + `prune`, ClusterBackend seam: Kubectl/Fake, `scratch_candidates` for the MCP-driven SLURM path, `reminder_due`) + `tools/tests/test_cleaner.py` (5 tests) | Done (M10, 2026-06-13) — identification + skip policy (model-cache PVC §7.6, recent-N JFrog, active-job scratch, age threshold) and approval-gated pruning tested vs a fake backend; K8s headless; SLURM scratch assistant-driven; JFrog `jf` backend is a follow-up |
 | `tools/images/` (multi-image catalogue: Alps netstack `core` + `nvidia-vllm-0.22.1-net.v1` variant, `build.sh` SLURM build → digest-pinned EDF → `sanity.sbatch` acceptance gate) | Done (M5, 2026-06-14) — first Alps vLLM image green on clariden |
 
 ## 3. Build strategy
@@ -58,7 +58,7 @@ None are descoped.
    notebook are pure Python — built and tested on the laptop against a mock
    OpenAI-compatible server before any cluster time is spent.
 2. **Walking skeleton before scale**: the first end-to-end run (E1) uses the
-   `smoke-synthetic` scenario (registered for pipeline validation, exempt from the §8.2
+   `smoke-synthetic` scenario (registered for pipeline validation, exempt from the §9.2
    model/scenario pairings; its results are never findings) on Apertus-8B and one GH200
    node — the cheapest legal full-pipeline shakeout before the multi-node MoE bring-up
    that E3 requires.
@@ -76,31 +76,31 @@ Sizes are relative complexity (S < M < L), not time promises.
 
 - **Deliverables**: `tools/common/config.py` (typed schema + validation for the full
   benchmark YAML: `deployment_target`, `backend` + version, model, `BackendConfig`
-  §15.2, `dataset_config` with `scenario_mix` §10.4, `slos` §12.4, `rate_levels`,
-  `arrival_process` §11.3, `routing_strategy` §11.4, timeouts, `output_length_mode`
-  §10.6, the `quality_eval` block §12.5, and the §7 pre-check surface: `skip_system_prechecks`, `system_prechecks_on_warn` / `_on_fail`,
+  §16.2, `dataset_config` with `scenario_mix` §11.4, `slos` §13.4, `rate_levels`,
+  `arrival_process` §12.3, `routing_strategy` §12.4, timeouts, `output_length_mode`
+  §11.6, the `quality_eval` block §13.5, and the §8 pre-check surface: `skip_system_prechecks`, `system_prechecks_on_warn` / `_on_fail`,
   `system_prechecks_timeout_s`, `collective_tests_version`,
-  `collective_tests_cache_dir`, `shmem_required`); `tools/common/runid.py` (§6.2); a
+  `collective_tests_cache_dir`, `shmem_required`); `tools/common/runid.py` (§7.2); a
   committed canonical example `examples/benchmark-configs/mixed-80-20.yaml`.
 - **Validation rules enforced**: weights sum to 1.0; registered scenario names; SLO
-  metric/percentile enums; `tensor_parallel_size ≤ gpus_per_node` (§5.1). (Modality
-  rejection happens at registry-load time in M1, per §10.5 — not here.)
+  metric/percentile enums; `tensor_parallel_size ≤ gpus_per_node` (§6.1). (Modality
+  rejection happens at registry-load time in M1, per §11.5 — not here.)
 - **DoD**: pytest green; `python -m tools.common.config <yaml>` accepts the canonical
   example and rejects each violation class with a one-line error.
 
 ### M1 — Dataset generator (L) — ✅ done 2026-06-12 (all four sources; traces support gsm8k, further trace datasets + HF revision pinning tracked in TODOs)
 
 - **Deliverables**: `tools/benchmarker/dataset_gen/` — registry loader (rejects
-  non-`[text]` modalities at load time, §10.5), mix planner (per-class sub-pools,
+  non-`[text]` modalities at load time, §11.5), mix planner (per-class sub-pools,
   `num_prompts` split ∝ `weight × E[turns_per_session]`), sources in order
-  **synthetic → longbench → wildchat → reasoning_trace_replay** (§10.5), session builder
-  (`append_delta`, turns, think-time, `followup_input_length` §10.3), per-class seeding (§10.8), global unique
-  headers (§10.6), `thinking: true` widening, tokenizer handling (§10.6), source-failure
-  abort (§10.1), manifest emitter (§13.7: `mix` / `classes[]` / `run_assumptions`,
-  including the derived per-class expected request rates per §11.3 *What λ counts*).
+  **synthetic → longbench → wildchat → reasoning_trace_replay** (§11.5), session builder
+  (`append_delta`, turns, think-time, `followup_input_length` §11.3), per-class seeding (§11.8), global unique
+  headers (§11.6), `thinking: true` widening, tokenizer handling (§11.6), source-failure
+  abort (§11.1), manifest emitter (§14.7: `mix` / `classes[]` / `run_assumptions`,
+  including the derived per-class expected request rates per §12.3 *What λ counts*).
 - **Artifact format** (decision embedded here): JSONL prompt pool, one record per turn —
   `{scenario, session_idx, turn_idx, prompt_text, max_tokens}` — plus `manifest.json`.
-- **DoD**: byte-identical regeneration with same config (the §10.8 contract, as a test);
+- **DoD**: byte-identical regeneration with same config (the §11.8 contract, as a test);
   empirical per-class length/turn distributions match declared params within tolerance;
   manifest schema-validates; runs on laptop with no cluster access (synthetic + cached
   HF datasets).
@@ -108,18 +108,18 @@ Sizes are relative complexity (S < M < L), not time promises.
 ### M2 — Load generator (L) — ✅ done 2026-06-12 (vLLM model-load log regexes seeded from upstream message shapes — re-capture fixtures from the pinned vLLM image at E1)
 
 - **Deliverables**: `tools/benchmarker/load_gen/` — asyncio streaming client
-  (forced/natural `output_length_mode` per §10.6, sampled `max_tokens`); arrival
+  (forced/natural `output_length_mode` per §11.6, sampled `max_tokens`); arrival
   processes `poisson` + `burst_mmpp`
-  scheduling **session starts** (λ semantics per §11.3 *What λ counts*); session modes
-  `open_loop` / `sequential` with `think_time_ms` (§10.7); class inheritance per
-  session; routing `random` / `session_affinity` (§11.4); warmup / measurement / drain
-  phases with sweep-step session accounting (§11.2: session-population warmup, no new
-  sessions after measurement end, incomplete-session truncation per §12.2); per-request
-  metrics + §12.1 error taxonomy; **per-instance
-  `server_stats` scraper** (§13.4: `requests_running`, `requests_waiting`,
+  scheduling **session starts** (λ semantics per §12.3 *What λ counts*); session modes
+  `open_loop` / `sequential` with `think_time_ms` (§11.7); class inheritance per
+  session; routing `random` / `session_affinity` (§12.4); warmup / measurement / drain
+  phases with sweep-step session accounting (§12.2: session-population warmup, no new
+  sessions after measurement end, incomplete-session truncation per §13.2); per-request
+  metrics + §13.1 error taxonomy; **per-instance
+  `server_stats` scraper** (§14.4: `requests_running`, `requests_waiting`,
   `gpu_cache_pct`, `spec_accept_rate` from the backend's metrics endpoint); readiness
-  wait + per-instance model-load parsing (vLLM logs/API first, §9.2/§11.1); inductor
-  primer (§9.3) including the primer-missed-target warning.
+  wait + per-instance model-load parsing (vLLM logs/API first, §10.2/§12.1); inductor
+  primer (§10.3) including the primer-missed-target warning.
 - **Test harness**: `tools/testing/mock_openai_server.py` — OpenAI-compatible SSE server
   with configurable TTFT/TPOT delays, a mock metrics endpoint, fault injection, and a
   **deterministic canned-answer mode** (fixed responses per prompt pattern — required by
@@ -134,29 +134,29 @@ Sizes are relative complexity (S < M < L), not time promises.
 
 ### M3 — Results DB and hardware sampler (M) — ✅ done 2026-06-12 (DCGM profiling counters emit NULL until wired + fixture-tested on a GH200 node at E1; rocm-smi parse best-effort until beverin)
 
-- **Deliverables**: `tools/common/results_db.py` — the seven §13 tables, column-for-column,
+- **Deliverables**: `tools/common/results_db.py` — the seven §14 tables, column-for-column,
   with a concurrency design (WAL mode + single-writer queue, or per-producer DB files
   merged at finalisation — decided at implementation, asserted by a contention test);
-  smoke-test-mode suppression hook (§7.2: results not persisted on pre-check cache
+  smoke-test-mode suppression hook (§8.2: results not persisted on pre-check cache
   miss). `tools/benchmarker/hw_sampler.py` — **single-file, stdlib-only** script
   (shells out to DCGM / `nvidia-smi dmon` / `rocm-smi` + `/proc`) so it runs inside
-  *any engine container without extra dependencies*; 1 Hz per §12.3; writes NDJSON to
+  *any engine container without extra dependencies*; 1 Hz per §13.3; writes NDJSON to
   the run's scratch directory; `NULL` for unexposed signals.
 - **Placement (per review H3)**: the sampler runs **on the inference-server nodes**,
   backgrounded inside the engine container session before `exec <engine>` (wired by the
   M6 templates); its NDJSON output is ingested into `hardware_stats` by the Benchmarker
   orchestrator (M7) at finalisation.
-- **DoD**: schema asserted against §13 in a test; concurrent-writer test passes; sampler
+- **DoD**: schema asserted against §14 in a test; concurrent-writer test passes; sampler
   runs dependency-free in a bare container image locally (all-`NULL` GPU rows on
   laptop); verified on a GH200 node during E1.
 
-### M4 — System performance pre-checks runner (M) — 🚧 laptop half done 2026-06-12 (runner + parsers + §7.3/§7.4 grading + gate policy, fixture-tested; in-container execution on clariden pending — needs M5/E1; NVSHMEM output fixtures provisional until captured from the real image)
+### M4 — System performance pre-checks runner (M) — 🚧 laptop half done 2026-06-12 (runner + parsers + §8.3/§8.4 grading + gate policy, fixture-tested; in-container execution on clariden pending — needs M5/E1; NVSHMEM output fixtures provisional until captured from the real image)
 
 - **Deliverables**: `tools/benchmarker/prechecks/run_system_prechecks` — adapts
   `examples/nccl-tests/` (stack fingerprint, cached build, rank-0 toolchain install,
-  collectives, NVSHMEM) into the in-container gate of §7.2; adds the storage
-  sequential-read check; parses results into `system_prechecks` rows (§13.6); grades
-  against `tools/system_prechecks_reference.yaml` (§7.3–7.4) with warn/fail signalling
+  collectives, NVSHMEM) into the in-container gate of §8.2; adds the storage
+  sequential-read check; parses results into `system_prechecks` rows (§14.6); grades
+  against `tools/system_prechecks_reference.yaml` (§8.3–8.4) with warn/fail signalling
   to the orchestrator (M7) and smoke-test mode on cache miss.
 - **DoD**: executes inside the vLLM EDF container session on one `clariden` node,
   concatenated `run_system_prechecks && exec <engine>`; rows persisted; with TBD
@@ -164,7 +164,7 @@ Sizes are relative complexity (S < M < L), not time promises.
 
 ### M5 — Images and registry workflow (M, parallel track) — ✅ done 2026-06-14 (first Alps vLLM image `vllm:0.22.1-alps.net.v1` built + 2-node sanity green on clariden)
 
-- **Deliverables**: `tools/images/` as a multi-image catalogue (§8.1) — a shared,
+- **Deliverables**: `tools/images/` as a multi-image catalogue (§9.1) — a shared,
   version-tagged Alps network stack under `core/<vendor>/netstack/<v>/` (Containerfile +
   per-component build `phases/` + `patches/`) plus thin per-image directories
   (`<vendor>-<backend>-<ver>-net.<n>/` with `manifest.yaml` + `tests/`); `build.sh`
@@ -181,15 +181,16 @@ Sizes are relative complexity (S < M < L), not time promises.
 
 ### M6 — Planner (M) — 🚧 laptop half done 2026-06-12 (templates + renderer + render-invariant tests; `sbatch --test-only` / `kubectl --dry-run=server` validation at E1/E5; multi-node Ray block is a skeleton validated at the E3 ladder; K8s ingress wiring lands with E5)
 
-- **Deliverables**: `tools/planner/` + templates `tools/templates/vllm.edf.j2`,
-  `tools/templates/engine.sbatch.j2`, `tools/templates/benchmarker.sbatch.j2`,
-  **`tools/templates/k8s/benchmarker-pod.yaml.j2`** (the §4 Benchmarker-as-pod path for
-  K8s, needed by E5) and `tools/templates/k8s/engine.yaml.j2` (engine side, seeded from
-  `examples/k8s-deployment/`); renders the full §13.8
-  experiment directory from one benchmark YAML; CLI + Claude-driven paths (§4).
+- **Deliverables**: `tools/planner/` + templates `tools/templates/slurm/vllm.edf.j2`,
+  `tools/templates/slurm/engine.sbatch.j2`, `tools/templates/benchmarker.sbatch.j2` (the
+  Benchmarker is **always SLURM**, §2) and `tools/templates/k8s/engine.yaml.j2` (the K8s
+  *engine* manifest, seeded from `examples/k8s-deployment/`); renders the full §14.8
+  experiment directory from one benchmark YAML; CLI + Claude-driven paths (§5). (The SLURM
+  Benchmarker that drives a K8s engine — endpoint reachability + benchmarker-cluster
+  designation — is an E5 deliverable; see §6.2.)
 - **DoD**: golden-file render tests; rendered sbatch passes `sbatch --test-only` on
   `clariden`; rendered manifests pass `kubectl apply --dry-run=server` on `breithorn`;
-  asserted in tests: time-limit alignment (§5.1), the §7.2
+  asserted in tests: time-limit alignment (§6.1), the §8.2
   `run_system_prechecks && exec <engine>` concatenation, and the M3 sampler
   backgrounding in the engine container command.
 
@@ -198,53 +199,53 @@ Sizes are relative complexity (S < M < L), not time promises.
 - **Deliverables**: `tools/benchmarker/main.py` — the cluster-side driver that owns the
   §1 phase sequencing: run dataset generation → **submit the inference deployment(s)
   from within the Benchmarker allocation** (sbatch on SLURM, kubectl on K8s) only after
-  the dataset is ready → wait for readiness + primer (§11.1) → **Stage-A quality gate**
-  (§12.5, via M11) → run load generation → **Stage-B quality comparison** (§12.5, via
-  M11) → finalise the per-run DB (ingest sampler NDJSON into `hardware_stats`, §13.5;
-  stage outputs per §5.1). Owns warn/fail propagation from pre-checks to the Coordinator (§7.4 pause +
+  the dataset is ready → wait for readiness + primer (§12.1) → **Stage-A quality gate**
+  (§13.5, via M11) → run load generation → **Stage-B quality comparison** (§13.5, via
+  M11) → finalise the per-run DB (ingest sampler NDJSON into `hardware_stats`, §14.5;
+  stage outputs per §6.1). Owns warn/fail propagation from pre-checks to the Coordinator (§8.4 pause +
   `system_prechecks_on_warn` default for non-interactive runs) and smoke-test-mode
   propagation (suppress persistence pipeline-wide, warn at launch and termination,
-  §7.2).
+  §8.2).
 - **DoD**: phase ordering asserted by an integration test (engine job not submitted
   until the dataset pool exists); forced pre-check warn pauses and resolves per config;
   smoke-test mode produces no persisted results and two unmissable warnings.
 
-### M8 — Coordinator (L) — ✅ laptop half done 2026-06-13 (resumable state machine, idempotent `run_id`-keyed central-DB merge, §6 teardown on success+failure with best-effort partial-DB salvage, §7.4 gate policy, ClusterBackend seam + FakeClusterBackend + KubectlClusterBackend skeleton, CLI; 11 mock-integration/unit tests incl. the >100MB staged-download round-trip. Per decision 5 the SLURM/FirecREST path is assistant-driven via MCP in-session — no autonomous SLURM backend; K8s headless via kubectl, full K8s staging at E5; live FirecREST submit/monitor/download validated at E1)
+### M8 — Coordinator (L) — ✅ laptop half done 2026-06-13 (resumable state machine, idempotent `run_id`-keyed central-DB merge, §7 teardown on success+failure with best-effort partial-DB salvage, §8.4 gate policy, ClusterBackend seam + FakeClusterBackend + KubectlClusterBackend skeleton, CLI; 11 mock-integration/unit tests incl. the >100MB staged-download round-trip. Per decision 5 the SLURM/FirecREST path is assistant-driven via MCP in-session — no autonomous SLURM backend; K8s headless via kubectl, full K8s staging at E5; live FirecREST submit/monitor/download validated at E1)
 
 - **Deliverables**: `tools/coordinator/` — pre-staging of HF datasets to capstor before
   submission (review LOW); submit (FirecREST for SLURM, kubectl for K8s); monitor loop
-  with log streaming and the §7.4 **operator abort/proceed interaction** on pre-check
+  with log streaming and the §8.4 **operator abort/proceed interaction** on pre-check
   warns; **resumable state** (state file per run; reattach to a running experiment after
   laptop sleep / network loss); per-run DB download via the **FirecREST staged-transfer
   path with compression** (direct transfer is capped ~5 MB; per-run DBs will reach
   hundreds of MB — review H5); merge into the centralized results DB; teardown on
-  success **and** failure (§6.3–6.6).
+  success **and** failure (§7.3–7.6).
 - **DoD**: drives E1 end-to-end unattended; a deliberately killed Coordinator resumes
   from its state file and completes monitoring + collection; a deliberately killed run
-  still tears down all labelled resources; PVC retention honored (§6.6); a >100 MB
+  still tears down all labelled resources; PVC retention honored (§7.6); a >100 MB
   fixture DB round-trips intact through the staged-transfer download.
 
-### M9 — Reports generator (M) — ✅ done 2026-06-13 (analysis module computes every §14.1 panel — measurement-phase filtering, per-class latency-vs-λ, λ\* / SLO attainment, supportable-users via Little's law, quality + capacity-vs-quality deltas, hardware overlays — asserted against a known-answer fixture; matplotlib plots; the §14.1 template notebook `experiments/template_report.ipynb` executes headless via nbclient, writing report.ipynb + ttft/itl/hardware PNGs; `reports/STYLE.md` bootstrapped; real-DB validation at E1)
+### M9 — Reports generator (M) — ✅ done 2026-06-13 (analysis module computes every §15.1 panel — measurement-phase filtering, per-class latency-vs-λ, λ\* / SLO attainment, supportable-users via Little's law, quality + capacity-vs-quality deltas, hardware overlays — asserted against a known-answer fixture; matplotlib plots; the §15.1 template notebook `experiments/template_report.ipynb` executes headless via nbclient, writing report.ipynb + ttft/itl/hardware PNGs; `reports/STYLE.md` bootstrapped; real-DB validation at E1)
 
-- **Deliverables**: `experiments/template_report.ipynb` with every §14.1 panel —
+- **Deliverables**: `experiments/template_report.ipynb` with every §15.1 panel —
   scenario/mix manifest panel, pre-checks table, model-load breakdown, TTFT/ITL vs λ
   with per-class SLO lines, failure rates, **per-class group-bys**
   (`GROUP BY scenario, session_idx`), **SLO-attainment table + λ\***, **supportable-users
   estimate** (editable `sessions_per_user_per_hour`, Little's-law concurrent sessions),
-  **response-quality panel + capacity-vs-quality table** (§12.5/§14.1: per-config users
+  **response-quality panel + capacity-vs-quality table** (§13.5/§15.1: per-config users
   at λ\* paired with quality scores and inter-config deltas; quality-flagged banner),
   hardware-headroom overlays, raw table; headless executor in `tools/reports/`.
 - **Bootstrap**: `reports/STYLE.md` created with the first styling decisions; first
-  curated report authored after E3 (§14.3).
+  curated report authored after E3 (§15.3).
 - **DoD**: notebook executes headless against a synthetic fixture DB with a known λ\*,
   user count, and quality rows (asserted, including the capacity-vs-quality deltas),
   then against the real E1 DB.
 
-### M10 — Cleaner (S–M) — ✅ done 2026-06-13 (read-only `identify()` policy over the §6.1 labels/§6.2 pattern with the skip rules — model-cache PVC §6.6, recent-N JFrog tags, active-job scratch, age threshold — plus approval-gated `prune()`; KubectlCleanerBackend headless, SLURM scratch via the MCP-driven `scratch_candidates()`, JFrog `jf` backend deferred; `reminder_due()` for Claude's periodic nudge — Claude never prunes itself; 5 tests; cluster-resource validation at E1/E5)
+### M10 — Cleaner (S–M) — ✅ done 2026-06-13 (read-only `identify()` policy over the §7.1 labels/§7.2 pattern with the skip rules — model-cache PVC §7.6, recent-N JFrog tags, active-job scratch, age threshold — plus approval-gated `prune()`; KubectlCleanerBackend headless, SLURM scratch via the MCP-driven `scratch_candidates()`, JFrog `jf` backend deferred; `reminder_due()` for Claude's periodic nudge — Claude never prunes itself; 5 tests; cluster-resource validation at E1/E5)
 
-- **Deliverables**: `tools/cleaner.py` (§6.7) — identification stage (read-only report
-  over the §6.1 labels: K8s objects, scratch dirs, JFrog tags) + pruning stage gated on
-  explicit operator approval; age threshold configurable. Includes the §6.7 reminder
+- **Deliverables**: `tools/cleaner.py` (§7.7) — identification stage (read-only report
+  over the §7.1 labels: K8s objects, scratch dirs, JFrog tags) + pruning stage gated on
+  explicit operator approval; age threshold configurable. Includes the §7.7 reminder
   mechanism: Claude surfaces a periodic run-the-cleaner reminder (scheduled wake-up /
   session reminder); Claude never executes the pruning itself.
 - **DoD**: identification correctly lists deliberately-orphaned test resources on both
@@ -257,7 +258,7 @@ Sizes are relative complexity (S < M < L), not time promises.
   (configurable suite/subset/floor, abort signalling through the M7 orchestrator,
   `skip_quality_gate` honoured) and **Stage B** comparison (full suites × configured
   eval-concurrency levels, natural decoding, suite-defined sampling); rows persisted to
-  `quality_evals` (§13.9); eval datasets pre-staged by M8 alongside the workload
+  `quality_evals` (§14.9); eval datasets pre-staged by M8 alongside the workload
   datasets; no standing reference — deltas computed in-report across the experiment's
   deployment configs.
 - **DoD**: against the mock server with deterministic canned answers, Stage-A pass/fail
@@ -269,13 +270,13 @@ Sizes are relative complexity (S < M < L), not time promises.
 
 | ID | Experiment | Needs | Definition of done |
 |---|---|---|---|
-| **E1** | **Walking skeleton**: Apertus-8B, 1× GH200 node (`clariden`), single-entry mix of `smoke-synthetic` (§8.2 smoke-run exemption — results are pipeline validation, never findings; **stock NGC vLLM image allowed**, operator decision 2026-06-12 — single-node E1 exercises no Slingshot/CXI path; §8.1 repo-built images mandatory from E2a onward), 3 λ levels | M0–M7 (manual drive acceptable), M9 for the notebook DoD; M8 to re-run automated | Full pipeline executes: pre-checks → engine → primer → §12.5 Stage-A gate → sweep (incl. `server_stats` + `hardware_stats` capture) → Stage-B eval → DB → notebook renders all panels. Teardown leaves zero orphans. **✅ done 2026-06-14** — assistant-driven via FirecREST MCP: 629 requests over λ∈{0.5,1,2}, 0 errors, persisted DB (not smoke) + report.ipynb/ttft/itl PNGs rendered against the real DB, engine torn down cleanly (zero orphans). Stock image → §7 pre-checks skipped (no MPI/NCCL dev to build nccl-tests; validated on the Alps image at E2); sweep never saturated so λ\*=2.0 is the swept ceiling, not a capacity limit; pipeline-validation only (never findings, §8.2). Bring-up fixes in commit 84e3c01. **Re-validated 2026-06-14 post-merge/refactor on the current code** (671 requests over λ∈{0.5,1,2}, 0 errors, persisted real DB + notebook, zero orphans) — exercised the moved `tools.common.results_db` end-to-end on-cluster; the re-run also surfaced + fixed a missing `skip_quality_gate`/`skip_quality_compare` in `e1-walking-skeleton.yaml`. |
-| **E2a** | **Single-node characterisation** (`clariden`): populate `tools/system_prechecks_reference.yaml` 1-node rows from repeated E1-class deployments | M4, M5; piggybacks on E1 | 1-node TBD placeholders replaced with measured medians + tolerances; §7.4 gate enforceable at single-node scope. |
+| **E1** | **Walking skeleton**: Apertus-8B, 1× GH200 node (`clariden`), single-entry mix of `smoke-synthetic` (§9.2 smoke-run exemption — results are pipeline validation, never findings; **stock NGC vLLM image allowed**, operator decision 2026-06-12 — single-node E1 exercises no Slingshot/CXI path; §9.1 repo-built images mandatory from E2a onward), 3 λ levels | M0–M7 (manual drive acceptable), M9 for the notebook DoD; M8 to re-run automated | Full pipeline executes: pre-checks → engine → primer → §13.5 Stage-A gate → sweep (incl. `server_stats` + `hardware_stats` capture) → Stage-B eval → DB → notebook renders all panels. Teardown leaves zero orphans. **✅ done 2026-06-14** — assistant-driven via FirecREST MCP: 629 requests over λ∈{0.5,1,2}, 0 errors, persisted DB (not smoke) + report.ipynb/ttft/itl PNGs rendered against the real DB, engine torn down cleanly (zero orphans). Stock image → §8 pre-checks skipped (no MPI/NCCL dev to build nccl-tests; validated on the Alps image at E2); sweep never saturated so λ\*=2.0 is the swept ceiling, not a capacity limit; pipeline-validation only (never findings, §9.2). Bring-up fixes in commit 84e3c01. **Re-validated 2026-06-14 post-merge/refactor on the current code** (671 requests over λ∈{0.5,1,2}, 0 errors, persisted real DB + notebook, zero orphans) — exercised the moved `tools.common.results_db` end-to-end on-cluster; the re-run also surfaced + fixed a missing `skip_quality_gate`/`skip_quality_compare` in `e1-walking-skeleton.yaml`. |
+| **E2a** | **Single-node characterisation** (`clariden`): populate `tools/system_prechecks_reference.yaml` 1-node rows from repeated E1-class deployments | M4, M5; piggybacks on E1 | 1-node TBD placeholders replaced with measured medians + tolerances; §8.4 gate enforceable at single-node scope. |
 | **E2b** | **Multi-node characterisation** (`clariden`): reference rows at E3's exact rank topology (inter-node collectives + NVSHMEM over Slingshot), gathered during E3 bring-up smokes, *before* graded E3 measurement | E2a; E3's multi-node deployment templates | Inter-node reference rows populated; E3's foundation gate enforceable on the cross-node fabric it actually depends on. |
 | **E2c** | **`breithorn` characterisation**: reference rows on the K8s GH200 nodes | M6 K8s templates, M7 K8s path | `breithorn` rows populated; prerequisite for E5. |
-| **E3** | **The capacity run (primary goal)**: Kimi-K2.6 on `clariden`, `scenario_mix` 0.8 `agentic-coding` (longbench, `sequential` sessions) + 0.2 `chat-short-turns` (wildchat), `slos` declared, λ sweep. **Prerequisites**: (a) verify Kimi-K2.6 architecture support in the pinned vLLM — a forced version bump triggers §15.2 flag-compat work + image rebuild; (b) MoE bring-up ladder: Apertus-70B PP=2 smoke (dense, cross-node PP), then a small open MoE at EP>1 (exercises expert all-to-all + the §7 NVSHMEM plane) before Kimi-scale (≈1 TB weights → ≥3–4 GH200 nodes, TP4 × PP≥3, §5.1) | E1, E2a/E2b, M8, M9; Kimi image (M5) | Report shows λ\*, per-class SLO attainment, supportable-users estimate; results pass adversarial review (phase 16). |
-| **E4** | **Feature-effect sweeps** on the E3 workload: `enable_prefix_caching` on/off, `kv_offloading_size`, `kv_cache_dtype`, `session_affinity` vs `random` (multi-instance); speculative decoding on Apertus-70B chat/long-context (§8.2 pairing, §16.2 placements; `spec_accept_rate` captured via the M2 scraper) | E3 baseline | Marginal effect of each feature on λ\*/users quantified per §15.1, **with the §12.5 capacity-vs-quality pairing for quality-impacting knobs** (quantization / KV dtype) — the flagship *"N× more users at −M pts"* report; findings recorded in §16. |
-| **E5** | **Platform comparison**: E3 workload, SLURM (`clariden`) vs K8s (`breithorn`), same GH200 hardware, engine, config; Benchmarker-as-pod (M6/M7 K8s path) | E3; E2c | Per-platform overlay report isolating the platform contribution (§15.1); "is K8s slower than it could be?" answered with telemetry-backed evidence. |
+| **E3** | **The capacity run (primary goal)**: Kimi-K2.6 on `clariden`, `scenario_mix` 0.8 `agentic-coding` (longbench, `sequential` sessions) + 0.2 `chat-short-turns` (wildchat), `slos` declared, λ sweep. **Prerequisites**: (a) verify Kimi-K2.6 architecture support in the pinned vLLM — a forced version bump triggers §16.2 flag-compat work + image rebuild; (b) MoE bring-up ladder: Apertus-70B PP=2 smoke (dense, cross-node PP), then a small open MoE at EP>1 (exercises expert all-to-all + the §8 NVSHMEM plane) before Kimi-scale (≈1 TB weights → ≥3–4 GH200 nodes, TP4 × PP≥3, §6.1) | E1, E2a/E2b, M8, M9; Kimi image (M5) | Report shows λ\*, per-class SLO attainment, supportable-users estimate; results pass adversarial review (phase 16). |
+| **E4** | **Feature-effect sweeps** on the E3 workload: `enable_prefix_caching` on/off, `kv_offloading_size`, `kv_cache_dtype`, `session_affinity` vs `random` (multi-instance); speculative decoding on Apertus-70B chat/long-context (§9.2 pairing, §17.2 placements; `spec_accept_rate` captured via the M2 scraper) | E3 baseline | Marginal effect of each feature on λ\*/users quantified per §16.1, **with the §13.5 capacity-vs-quality pairing for quality-impacting knobs** (quantization / KV dtype) — the flagship *"N× more users at −M pts"* report; findings recorded in §17. |
+| **E5** | **Platform comparison**: E3 workload, SLURM (`clariden`) vs K8s (`breithorn`), same GH200 hardware, engine, config; the SLURM Benchmarker drives the K8s engine (M6/M7 K8s engine path) | E3; E2c | Per-platform overlay report isolating the platform contribution (§16.1); "is K8s slower than it could be?" answered with telemetry-backed evidence. |
 
 ## 6. Dependency sketch
 
@@ -313,11 +314,11 @@ DBs alongside M2/M3.
 
 | Risk | Impact | Mitigation |
 |---|---|---|
-| Multi-node MoE bring-up (Kimi-K2.6: ≈1 TB weights, ≥3–4 GH200 nodes, TP4 × PP≥3 + EP) is the heaviest unknown on the critical path; pinned vLLM may not support the architecture | E3 slips or forces a version bump (§15.2 flag-compat + rebuild) | E3 prerequisite ladder: verify model support first; Apertus-70B PP=2 smoke (cross-node PP), then small open MoE at EP>1 (expert all-to-all + NVSHMEM plane) before Kimi-scale; §5.1 TP≤4 rule enforced by M0 validation |
+| Multi-node MoE bring-up (Kimi-K2.6: ≈1 TB weights, ≥3–4 GH200 nodes, TP4 × PP≥3 + EP) is the heaviest unknown on the critical path; pinned vLLM may not support the architecture | E3 slips or forces a version bump (§16.2 flag-compat + rebuild) | E3 prerequisite ladder: verify model support first; Apertus-70B PP=2 smoke (cross-node PP), then small open MoE at EP>1 (expert all-to-all + NVSHMEM plane) before Kimi-scale; §6.1 TP≤4 rule enforced by M0 validation |
 | Per-run DB exceeds FirecREST direct-transfer limits (hundreds of MB of `requests` + 1 Hz `hardware_stats`) | Results stranded on cluster | M8 uses the FirecREST staged-transfer path + compression; round-trip drill with a >100 MB fixture is in M8's DoD |
-| HF dataset downloads from compute nodes (egress/proxy) | M1 fails on cluster | M8 pre-stages datasets to capstor before submission; §10.1 abort semantics already specced — no silent fallback |
-| DCGM unavailable in engine containers | §12.3 telemetry gaps | Sampler is stdlib-only with `nvidia-smi dmon` fallback; verified during E1, not E3 |
-| vLLM log/metrics format drift breaks model-load parsing and `server_stats` scraping | Silent `NULL`s | Pin backend version per experiment (§8.1); parser tests against captured log/metrics fixtures per pinned version |
+| HF dataset downloads from compute nodes (egress/proxy) | M1 fails on cluster | M8 pre-stages datasets to capstor before submission; §11.1 abort semantics already specced — no silent fallback |
+| DCGM unavailable in engine containers | §13.3 telemetry gaps | Sampler is stdlib-only with `nvidia-smi dmon` fallback; verified during E1, not E3 |
+| vLLM log/metrics format drift breaks model-load parsing and `server_stats` scraping | Silent `NULL`s | Pin backend version per experiment (§9.1); parser tests against captured log/metrics fixtures per pinned version |
 | FirecREST constraints (5 MB direct upload, API rate limits) | Coordinator instability | Code reaches cluster via benchmarker image / git clone, never file upload; downloads via staged transfer (above) |
 | Client-side load-gen saturation at high λ | Measured latencies become client artefacts | Event-loop lag guard (M2 DoD); shard load gen across processes if the guard trips |
 | Laptop sleep / network loss during multi-hour runs | Orphaned runs, lost monitoring | M8 resumable state file + reattach drill in its DoD; Cleaner (M10) as backstop |
@@ -326,12 +327,12 @@ DBs alongside M2/M3.
 ## 9. Open decisions (operator input needed)
 
 1. **Global configuration location** — **resolved 2026-06-12**: `tools/common/global.yaml`
-   (SPECIFICATIONS.md §2.3), implemented in M0. JFrog base remains `TBD` inside it
+   (SPECIFICATIONS.md §3.3), implemented in M0. JFrog base remains `TBD` inside it
    (decision 2).
 2. **JFrog publish path** — **resolved 2026-06-12**:
    `https://jfrog.svc.cscs.ch/artifactory/ml/inference` (in `global.yaml`). Operator
    action open: fix the local `jf` server config (doubled `/artifactory` in the stored
-   Artifactory URL); a §3 pre-flight row now guards this.
+   Artifactory URL); a §4 pre-flight row now guards this.
 3. **Code-to-cluster delivery / Benchmarker runtime** — **resolved 2026-06-13 (operator
    decision)**: deps from a **staged uv venv on capstor** (`{scratch_base}/benchmarker-venv`,
    built once by `benchmarker.sbatch`: `uv venv` + `uv pip install -r
@@ -342,7 +343,7 @@ DBs alongside M2/M3.
    cache); exact versions pinned after E1's first build (TODOs).
 4. **Centralized results DB shape** — **resolved 2026-06-13 (M8)**: `experiments/results.db`,
    per-run DBs merged on download via `tools/coordinator/merge.py` (`ATTACH` + delete-then-
-   insert, idempotent by `run_id`); per-run files remain the §13.8 provenance artifacts.
+   insert, idempotent by `run_id`); per-run files remain the §14.8 provenance artifacts.
 5. **Programmatic FirecREST client for the Coordinator** — **resolved 2026-06-13 (M8,
    operator decision)**: **MCP-mediated, assistant-driven in-session** — there is no
    autonomous SLURM/FirecREST client; the assistant performs submit/monitor/staged-download/
@@ -367,11 +368,11 @@ Operator decisions taken during the review:
 
 - **D1**: `agentic-coding` registry flipped to `session.mode: sequential` with a
   provisional tool-execution `think_time_ms` — open_loop made `session_e2e_ms` an
-  arrival-schedule artifact, corrupting the §12.4 SLO and the §14.1 users estimate.
+  arrival-schedule artifact, corrupting the §13.4 SLO and the §15.1 users estimate.
 - **D2**: E1 runs the new registered `smoke-synthetic` scenario (pipeline validation
-  only; §8.2 exemption) instead of an illegal source-kind override on
+  only; §9.2 exemption) instead of an illegal source-kind override on
   `chat-short-turns`.
-- **D3**: λ counts **session starts** in all modes (§11.3 *What λ counts*), aligning
+- **D3**: λ counts **session starts** in all modes (§12.3 *What λ counts*), aligning
   arrival semantics with `scenario_mix` weights and the users math.
 
 Structural outcomes: new M7 (Benchmarker orchestrator — previously unowned); Coordinator
@@ -386,9 +387,9 @@ decisions: **no standing quality anchor** — deltas are experiment-internal acr
 experiment's deployment configs; **Stage-A sanity gate default-on** in every experiment,
 skippable (`skip_quality_gate`); **Stage-B comparison** pairs capacity gains and quality
 deltas in the same report (the "N× users at −M pts" claim); `ignore_eos` parameterized
-as `output_length_mode: forced | natural` (§10.6). Structural outcomes: new **M11
+as `output_length_mode: forced | natural` (§11.6). Structural outcomes: new **M11
 Quality eval runner**; M0/M2/M7/M9 amended; E1 exercises the gate; E4's DoD now requires
-the capacity-vs-quality pairing; spec gained §12.5 + §13.9 (`quality_evals` table).
+the capacity-vs-quality pairing; spec gained §13.5 + §14.9 (`quality_evals` table).
 
 ## 11. Process gates
 

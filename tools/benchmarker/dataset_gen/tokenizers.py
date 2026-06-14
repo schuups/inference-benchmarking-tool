@@ -1,4 +1,4 @@
-"""Tokenizer abstraction (SPECIFICATIONS.md §10.6).
+"""Tokenizer abstraction (SPECIFICATIONS.md §11.6).
 
 Production uses the target model's HuggingFace tokenizer; tests and offline
 smoke runs use the deterministic WordTokenizer (1 whitespace word == 1 token),

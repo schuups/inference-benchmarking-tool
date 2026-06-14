@@ -134,7 +134,7 @@ def test_teardown_plan_slurm_and_k8s_pvc_retention(tmp_path):
     k8s = _state(tmp_path, "r2", platform="k8s", target="breithorn")
     k8s.benchmarker_handle, k8s.engine_handles = "pod/b", ["deployment/e", "service/e"]
     plan = teardown_plan(k8s)
-    assert all(a.kind != "remove_dir" for a in plan)  # §6.6: PVC/scratch retained on K8s
+    assert all(a.kind != "remove_dir" for a in plan)  # §7.6: PVC/scratch retained on K8s
     assert any(a.target == "deployment/e" for a in plan)
 
 
@@ -162,7 +162,7 @@ async def test_coordinator_happy_path(tmp_path):
     assert (Path(state.run_dir_local) / f"run_{run_id}.db").exists()  # collected locally
     assert _count(central, "requests", run_id) == 4  # merged
     assert _count(central, "experiments", run_id) == 1
-    # teardown ran on success: both jobs cancelled + scratch removed (§6)
+    # teardown ran on success: both jobs cancelled + scratch removed (§7)
     assert ("cancel", "job-fake-1") in backend.calls
     assert ("cancel", "job-engine-1") in backend.calls
     assert ("remove_dir", state.run_dir_remote) in backend.calls
@@ -206,7 +206,7 @@ async def test_coordinator_teardown_on_failure(tmp_path):
     with pytest.raises(CoordinatorError, match="failed"):
         await Coordinator(state, backend, central, poll_interval_s=0, on_fail="abort").run()
 
-    assert state.phase == "torn_down"  # §6: teardown still runs on the failure path
+    assert state.phase == "torn_down"  # §7: teardown still runs on the failure path
     assert state.error
     assert ("cancel", "job-fake-1") in backend.calls
     assert ("cancel", "job-engine-1") in backend.calls

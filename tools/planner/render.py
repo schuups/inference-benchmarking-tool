@@ -1,4 +1,4 @@
-"""Planner (SPECIFICATIONS.md §4): benchmark YAML -> §13.8 experiment directory.
+"""Planner (SPECIFICATIONS.md §5): benchmark YAML -> §14.8 experiment directory.
 
 Pure laptop-side rendering against the Jinja2 templates in tools/templates/;
 nothing is submitted. Every artifact lands in the experiment directory, so a
@@ -27,7 +27,7 @@ TEMPLATES_DIR = Path(__file__).resolve().parents[1] / "templates"
 
 
 def vllm_command(deployment: Deployment) -> str:
-    """BackendConfig -> vLLM launch command (§15.2 flag mapping)."""
+    """BackendConfig -> vLLM launch command (§16.2 flag mapping)."""
     bc = deployment.backend_config
     parts = [
         "vllm serve", deployment.model,
@@ -89,7 +89,7 @@ def precheck_scope(deployment: Deployment, glob: GlobalConfig) -> str:
 def default_image(deployment: Deployment, glob: GlobalConfig) -> str:
     if deployment.image:
         return deployment.image
-    # Canonical tag scheme is finalised in M5; this default tracks §8.1's shape.
+    # Canonical tag scheme is finalised in M5; this default tracks §9.1's shape.
     registry_host = glob.registry.jfrog_base.removeprefix("https://").split("/artifactory")[0]
     return f"{registry_host}/ml/inference/{deployment.backend}:{deployment.backend_version}"
 
@@ -127,7 +127,7 @@ def render_experiment(
             "cluster": deployment.target,
             "image": default_image(deployment, glob),
             # Alps-extended images bundle their own CXI/libfabric stack → disable
-            # the host CXI hook so the image's libraries win (§8.1). Drives the EDF
+            # the host CXI hook so the image's libraries win (§9.1). Drives the EDF
             # annotation + the srun --network=disable_rdzv_get flag.
             "disable_cxi_hook": deployment.alps_extended_image,
             "engine_command": vllm_command(deployment),
@@ -151,24 +151,22 @@ def render_experiment(
                 else "capstor weights mount (Lustre, HDD)"
             ),
             "hardware_sampling_interval_s": cfg.hardware_sampling_interval_s,
-            "benchmarker_image": default_image(
-                Deployment(
-                    target=deployment.target, backend=deployment.backend,
-                    backend_version="benchmarker", model="benchmarker/benchmarker",
-                ),
-                glob,
-            ).rsplit(":", 1)[0].replace(f"/{deployment.backend}", "/benchmarker") + ":latest",
             "startup_failure_threshold": max(
                 6, int((cfg.phases.server_ready_timeout_s) / 10)
             ),
         }
+        # The Benchmarker is ALWAYS a SLURM allocation (§2, §5); only the engine
+        # deployment under test is SLURM-or-K8s.
         if cluster.type == "slurm":
-            _render(env, "vllm.edf.j2", context, run_dir / "engine.toml")
-            _render(env, "engine.sbatch.j2", context, run_dir / "engine.sbatch")
+            _render(env, "slurm/vllm.edf.j2", context, run_dir / "engine.toml")
+            _render(env, "slurm/engine.sbatch.j2", context, run_dir / "engine.sbatch")
             _render(env, "benchmarker.sbatch.j2", context, run_dir / "benchmarker.sbatch")
         else:
+            # K8s engine target: render the engine manifest. The SLURM Benchmarker that
+            # drives it (kubectl-deploys the engine + load-gens against an externally
+            # reachable endpoint, from a designated benchmarker cluster) is an E5
+            # deliverable — see SPECIFICATIONS.md §6.2 and TODOs.md. Never a K8s pod.
             _render(env, "k8s/engine.yaml.j2", context, run_dir / "engine.yaml")
-            _render(env, "k8s/benchmarker-pod.yaml.j2", context, run_dir / "benchmarker-pod.yaml")
     return exp_dir
 
 
@@ -179,7 +177,7 @@ def _render(env: Environment, template: str, context: dict, dest: Path) -> None:
 def main() -> int:
     import argparse
 
-    parser = argparse.ArgumentParser(description="Render an experiment directory (§4)")
+    parser = argparse.ArgumentParser(description="Render an experiment directory (§5)")
     parser.add_argument("yaml_path", type=Path)
     parser.add_argument("--out", type=Path, default=Path("experiments"))
     args = parser.parse_args()

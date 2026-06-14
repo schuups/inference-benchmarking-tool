@@ -1,14 +1,14 @@
-"""Report analytics (SPECIFICATIONS.md §14.1) — the testable core of M9.
+"""Report analytics (SPECIFICATIONS.md §15.1) — the testable core of M9.
 
 Pure pandas/sqlite functions the template notebook presents. All latency/SLO math
-operates on the **measurement phase** only (§11.2): requests whose `issued_at_ms`
+operates on the **measurement phase** only (§12.2): requests whose `issued_at_ms`
 (ms from sweep-step start) falls in `[warmup_s, warmup_s + measurement_s)`.
 
 Key derived quantities (asserted in tests against a known fixture):
-- λ* (§12.4): the highest swept λ at which every declared SLO holds simultaneously.
-- supportable users (§14.1): per-class session throughput ÷ per-user session rate,
+- λ* (§13.4): the highest swept λ at which every declared SLO holds simultaneously.
+- supportable users (§15.1): per-class session throughput ÷ per-user session rate,
   plus Little's-law concurrent sessions.
-- capacity-vs-quality (§12.5/§14.1): users-at-λ* paired with quality scores across
+- capacity-vs-quality (§13.5/§15.1): users-at-λ* paired with quality scores across
   the experiment's deployment configs (run_ids).
 """
 
@@ -99,7 +99,7 @@ def load_run(db_path: Path | str, run_id: str | None = None) -> ReportData:
 
 
 def measurement_requests(report: ReportData) -> pd.DataFrame:
-    """Requests in the measurement window [warmup_s, warmup_s+measurement_s) (§11.2)."""
+    """Requests in the measurement window [warmup_s, warmup_s+measurement_s) (§12.2)."""
     lo = report.warmup_s * 1000.0
     hi = (report.warmup_s + report.measurement_s) * 1000.0
     req = report.requests
@@ -145,9 +145,9 @@ def failure_rate_vs_lambda(req: pd.DataFrame, by_scenario: bool = False) -> pd.D
 
 
 def session_metrics(req: pd.DataFrame) -> pd.DataFrame:
-    """Per-session derived metrics (§12.2) over **completed** sessions only — those
+    """Per-session derived metrics (§13.2) over **completed** sessions only — those
     whose `final_turn==1` row is present. Grouped per class so one class's sessions
-    never dilute another's (§14.1)."""
+    never dilute another's (§15.1)."""
     if req.empty:
         return pd.DataFrame(
             columns=["rate_lambda", "scenario", "session_idx", "session_e2e_ms",
@@ -163,7 +163,7 @@ def session_metrics(req: pd.DataFrame) -> pd.DataFrame:
         session_success=("success", "min"),
         completed=("final_turn", "max"),
     ).reset_index()
-    agg = agg[agg["completed"] == 1]  # §12.2 boundary: keep only completed sessions
+    agg = agg[agg["completed"] == 1]  # §13.2 boundary: keep only completed sessions
     agg["session_e2e_ms"] = agg["end_ms"] - agg["start_ms"]
     return agg[[*keys, "session_e2e_ms", "session_turns", "session_success"]]
 
@@ -211,7 +211,7 @@ def evaluate_slos(report: ReportData) -> pd.DataFrame:
 
 
 def lambda_star(report: ReportData) -> float | None:
-    """Highest swept λ at which all declared SLOs hold simultaneously (§12.4)."""
+    """Highest swept λ at which all declared SLOs hold simultaneously (§13.4)."""
     if not report.slos:
         return None
     att = evaluate_slos(report)
@@ -229,7 +229,7 @@ def supportable_users(
     report: ReportData, lam: float | None, sessions_per_user_per_hour: dict[str, float]
 ) -> pd.DataFrame:
     """Per class at λ: session throughput, supportable user population, and Little's-law
-    concurrent sessions (§14.1). Empty when λ* is undefined."""
+    concurrent sessions (§15.1). Empty when λ* is undefined."""
     if lam is None:
         return pd.DataFrame(
             columns=["scenario", "sessions_started", "session_throughput_per_s",
@@ -265,7 +265,7 @@ def supportable_users(
 
 
 def quality_summary(report: ReportData) -> dict:
-    """Stage-A gate outcome (+ quality-flagged) and Stage-B scores per concurrency (§12.5)."""
+    """Stage-A gate outcome (+ quality-flagged) and Stage-B scores per concurrency (§13.5)."""
     qe = report.quality_evals
     gate = qe[qe["stage"] == "gate"] if not qe.empty else qe
     compare = qe[qe["stage"] == "compare"] if not qe.empty else qe
@@ -284,7 +284,7 @@ def capacity_vs_quality(
     suite: str | None = None,
 ) -> pd.DataFrame:
     """Per deployment config (run_id): users-at-λ* paired with a Stage-B quality score,
-    and the inter-config deltas (§12.5/§14.1 'N× more users at −M pts')."""
+    and the inter-config deltas (§13.5/§15.1 'N× more users at −M pts')."""
     rows = []
     for rid in run_ids:
         report = load_run(db_path, rid)
@@ -316,7 +316,7 @@ def capacity_vs_quality(
 
 
 def hardware_vs_lambda(hw: pd.DataFrame, signal: str) -> pd.DataFrame:
-    """Mean of a §12.3 telemetry signal per λ (untapped-headroom overlays, §14.1)."""
+    """Mean of a §13.3 telemetry signal per λ (untapped-headroom overlays, §15.1)."""
     if hw.empty or signal not in hw.columns:
         return pd.DataFrame(columns=["rate_lambda", signal])
     sub = hw.dropna(subset=[signal])

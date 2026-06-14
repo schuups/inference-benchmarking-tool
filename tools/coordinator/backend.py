@@ -1,12 +1,14 @@
 """Cluster transport seam for the Coordinator (M8).
 
 The deterministic coordinator logic (coordinator.py) depends only on the
-`ClusterBackend` protocol. Per the operator's decision (open decision 5), the
-**SLURM / FirecREST** effects are driven by the assistant *in-session* via the
-FirecREST MCP tools — there is intentionally no autonomous SLURM backend here, so
-SLURM orchestration runs interactively. The **K8s** path uses `kubectl` and is
-headless-capable (`KubectlClusterBackend`), though its staging/PVC wiring is an
-E5 deliverable. `FakeClusterBackend` exercises the whole orchestration in tests,
+`ClusterBackend` protocol. The
+Benchmarker is **always a SLURM allocation** (§2), so the only real backend is
+SLURM / FirecREST — and per the operator's decision (open decision 5) those effects
+are driven by the assistant *in-session* via the FirecREST MCP tools, so there is no
+autonomous backend here. There is **no K8s Coordinator backend**: a K8s *engine* target
+is deployed by the Benchmarker itself (`tools.benchmarker.launchers.K8sEngineLauncher`)
+from inside its SLURM allocation, and orphaned K8s objects are reclaimed by the Cleaner
+(§7.7). `FakeClusterBackend` exercises the whole orchestration in tests,
 including a real local compress→transfer→extract→checksum so the staged-download
 round-trip (M8 DoD) is verified bit-for-bit.
 
@@ -23,7 +25,6 @@ import shutil
 from pathlib import Path
 from typing import Protocol
 
-from tools.common.proc import kubectl as _kubectl
 
 log = logging.getLogger("coordinator.backend")
 
@@ -54,7 +55,7 @@ class ClusterBackend(Protocol):
         """Read a small remote text file (e.g. prechecks/results.json); None if absent."""
 
     async def discover_engine_handles(self, run_id: str) -> list[str]:
-        """Find the inference-deployment resources to tear down (§6.1 labels)."""
+        """Find the inference-deployment resources to tear down (§7.1 labels)."""
 
     async def fetch_db(self, remote_db: str, local_db: Path) -> str:
         """Staged transfer of the per-run DB; return its sha256."""
@@ -143,69 +144,3 @@ class FakeClusterBackend:
         if d.exists():
             shutil.rmtree(d)
 
-
-# ----------------------------------------------------------------- kubernetes
-
-
-_K8S_PHASE = {"Pending": "pending", "Running": "running", "Succeeded": "completed", "Failed": "failed"}
-
-
-class KubectlClusterBackend:
-    """Headless K8s backend (breithorn, E5). Well-defined ops are implemented;
-    staging (results PVC + config injection) is wired with E5 — see TODOs.md."""
-
-    platform = "k8s"
-
-    def __init__(self, namespace: str, run_id_slug: str, manifest_dir: Path):
-        self._ns = namespace
-        self._slug = run_id_slug
-        self._dir = Path(manifest_dir)
-
-    async def stage(self, local_dir: Path, run_dir_remote: str) -> None:
-        raise NotImplementedError(
-            "K8s staging (results PVC + benchmark_config injection) lands with E5 — see TODOs.md"
-        )
-
-    async def submit(self, run_dir_remote: str, script: str) -> str:
-        code, out, err = await _kubectl("apply", "-f", str(self._dir / script))
-        if code != 0:
-            raise RuntimeError(f"kubectl apply {script} failed: {err.strip() or out.strip()}")
-        return f"pod/ib-benchmarker-{self._slug}"
-
-    async def status(self, handle: str) -> str:
-        code, out, _ = await _kubectl(
-            "get", handle, "-n", self._ns, "-o", "jsonpath={.status.phase}"
-        )
-        if code != 0:
-            return "pending"  # not yet visible; don't treat a transient miss as failure
-        return _K8S_PHASE.get(out.strip(), "running")
-
-    async def read_remote(self, remote_path: str) -> str | None:
-        # results.json lives on the results PVC; read it via the benchmarker pod.
-        code, out, _ = await _kubectl(
-            "exec", "-n", self._ns, f"ib-benchmarker-{self._slug}", "--", "cat", remote_path
-        )
-        return out if code == 0 else None
-
-    async def discover_engine_handles(self, run_id: str) -> list[str]:
-        return [f"deployment/ib-engine-{self._slug}", f"service/ib-engine-{self._slug}"]
-
-    async def fetch_db(self, remote_db: str, local_db: Path) -> str:
-        local_db = Path(local_db)
-        local_db.parent.mkdir(parents=True, exist_ok=True)
-        code, _, err = await _kubectl(
-            "cp", f"{self._ns}/ib-benchmarker-{self._slug}:{remote_db}", str(local_db)
-        )
-        if code != 0:
-            raise RuntimeError(f"kubectl cp of per-run DB failed: {err.strip()}")
-        return _sha256(local_db)
-
-    async def cancel(self, handle: str) -> None:
-        code, _, err = await _kubectl("delete", handle, "-n", self._ns, "--ignore-not-found")
-        if code != 0:
-            log.warning("kubectl delete %s failed: %s", handle, err.strip())
-
-    async def remove_dir(self, remote_dir: str) -> None:
-        # K8s scratch is the results PVC; the model-cache PVC is retained (§6.6).
-        # The results PVC is reclaimed with the run's objects at E5; nothing to rm here.
-        return None

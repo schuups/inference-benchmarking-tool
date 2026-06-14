@@ -1,5 +1,5 @@
 # Global configuration — environmental constants shared by every experiment.
-# See SPECIFICATIONS.md §2.3 for what belongs here (and what must stay in the
+# See SPECIFICATIONS.md §3.3 for what belongs here (and what must stay in the
 # per-experiment benchmark YAML instead). Loaded by tools/common/config.py.
 
 clusters:
@@ -8,13 +8,13 @@ clusters:
     platform: mlp                  # FirecREST MCP "ML Platform"
     partition: normal
     gpus_per_node: 4
-    gpu_label: GH200               # used in §7.3 reference scope strings
+    gpu_label: GH200               # used in §8.3 reference scope strings
   bristen:
     type: slurm
     platform: mlp
     partition: normal
     gpus_per_node: 4
-    gpu_label: A100                # sm_80 — see §5.1 portability note
+    gpu_label: A100                # sm_80 — see §6.1 portability note
   beverin:
     type: slurm
     platform: hpc                  # FirecREST MCP "HPC Platform"
@@ -29,12 +29,12 @@ clusters:
     gpu_label: gh200
 
 slurm:
-  account: csstaff                 # never use other accounts (§5.1)
+  account: csstaff                 # never use other accounts (§6.1)
 
-# All project files on the cluster live under this single folder (§2.2/§2.3):
+# All project files on the cluster live under this single folder (§3.2/§3.3):
 # run dirs, prompt pools, hf-cache, venv, image builds, caches.
-scratch_base: /capstor/scratch/cscs/stefschu/ib       # all IB work under <scratch>/ib
-collective_tests_cache_dir: /capstor/scratch/cscs/stefschu/ib/collective-tests-cache  # §7.2
+scratch_base: /capstor/scratch/cscs/stefschu/ibt       # all IBT work under <scratch>/ibt
+collective_tests_cache_dir: /capstor/scratch/cscs/stefschu/ibt/collective-tests-cache  # §8.2
 
 registry:
-  jfrog_base: https://jfrog.svc.cscs.ch/artifactory/ml/inference   # image publish base (§8.1); jf server-id cscs-jfrog
+  jfrog_base: https://jfrog.svc.cscs.ch/artifactory/ml/inference   # image publish base (§9.1); jf server-id cscs-jfrog

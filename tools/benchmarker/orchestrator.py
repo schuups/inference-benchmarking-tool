@@ -5,17 +5,17 @@ allocation:
 
     dataset generation
       → submit the inference deployment(s) ONLY after the prompt pool exists
-      → wait for readiness + inductor primer (§9.3, §11.1)
-      → Stage-A quality gate (§12.5, via the M11 QualityEvaluator seam)
-      → rate-level sweep (§11.2)
-      → Stage-B quality comparison (§12.5, via the seam)
-      → finalise the per-run DB (ingest sampler NDJSON into hardware_stats, §13.5)
+      → wait for readiness + inductor primer (§10.3, §12.1)
+      → Stage-A quality gate (§13.5, via the M11 QualityEvaluator seam)
+      → rate-level sweep (§12.2)
+      → Stage-B quality comparison (§13.5, via the seam)
+      → finalise the per-run DB (ingest sampler NDJSON into hardware_stats, §14.5)
 
-Smoke-test-mode propagation (§7.2): a pre-check cache miss flips the run into
+Smoke-test-mode propagation (§8.2): a pre-check cache miss flips the run into
 smoke mode — the pipeline runs end-to-end but nothing is persisted, with an
 unmissable warning at launch and at termination.
 
-Pre-check gate (§7.4): the engine container enforces the gate inline
+Pre-check gate (§8.4): the engine container enforces the gate inline
 (`run_system_prechecks.sh && exec <engine>`), so an aborting gate means the
 engine never starts. This orchestrator detects that from prechecks/results.json
 instead of waiting out the full readiness timeout. The interactive operator
@@ -58,7 +58,7 @@ log = logging.getLogger("benchmarker")
 
 @dataclass(frozen=True)
 class Instance:
-    """One deployed engine endpoint the load generator targets (§13.2)."""
+    """One deployed engine endpoint the load generator targets (§14.2)."""
 
     instance_id: str
     base_url: str  # e.g. http://nid007660:8000 — no trailing slash, no path
@@ -91,7 +91,7 @@ class RunAborted(RuntimeError):
 
 
 class _PrecheckAbort(RuntimeError):
-    """Internal: the in-container §7.4 gate aborted; engine will not start."""
+    """Internal: the in-container §8.4 gate aborted; engine will not start."""
 
     def __init__(self, gate_exit_code: int):
         super().__init__(f"pre-check gate exit {gate_exit_code}")
@@ -105,17 +105,17 @@ class EngineLauncher(Protocol):
         """Spawn the engine deployment; return its instances once endpoints resolve."""
 
     def engine_log_text(self) -> str:
-        """Engine stdout/stderr — parsed for the §9.2 model-load breakdown."""
+        """Engine stdout/stderr — parsed for the §10.2 model-load breakdown."""
 
     def is_alive(self) -> bool:
         """False once the engine job has exited (crash detection during readiness)."""
 
     async def teardown(self) -> None:
-        """Cancel/delete the spawned engine (§6.4/§6.5); idempotent."""
+        """Cancel/delete the spawned engine (§7.4/§7.5); idempotent."""
 
 
 class QualityEvaluator(Protocol):
-    """M11 seam (§12.5). Wired in main.py when M11 lands; None until then."""
+    """M11 seam (§13.5). Wired in main.py when M11 lands; None until then."""
 
     async def stage_a_gate(self, instances: list[Instance], model: str, gate) -> GateOutcome:
         ...
@@ -162,7 +162,7 @@ def _persist_experiment(
     db: ResultsDB, run_id: str, cfg: BenchmarkConfig, deployment: Deployment, manifest: dict
 ) -> None:
     qe = cfg.quality_eval
-    # §13.1: quality_eval is NULL when both stages are disabled.
+    # §14.1: quality_eval is NULL when both stages are disabled.
     quality_eval = None if (qe.skip_quality_gate and qe.skip_quality_compare) else qe.model_dump()
     db.insert(
         "experiments",
@@ -210,7 +210,7 @@ def _ingest_hardware(
     instances: list[Instance],
     windows: list[tuple[float, datetime, datetime]],
 ) -> int:
-    """Map each per-node sampler file (hw-<host>.ndjson) onto its instance (§13.5)."""
+    """Map each per-node sampler file (hw-<host>.ndjson) onto its instance (§14.5)."""
     by_node = {i.node: i for i in instances if i.node}
     default_id = instances[0].instance_id if instances else "i0"
     total = 0
@@ -222,7 +222,7 @@ def _ingest_hardware(
     return total
 
 
-DEAD_ENGINE_GRACE_S = 10.0  # let Lustre surface results.json after a §7.4 abort
+DEAD_ENGINE_GRACE_S = 10.0  # let Lustre surface results.json after a §8.4 abort
 
 
 async def _await_ready(
@@ -235,7 +235,7 @@ async def _await_ready(
 ) -> float:
     """Wait for /health 200; abort early on an in-container gate abort or a dead job.
 
-    Returns seconds waited → the instance's model_load_total_s input (§9.2; this
+    Returns seconds waited → the instance's model_load_total_s input (§10.2; this
     coarse total covers scheduling + pre-checks + load, with the precise
     breakdown carried by the parsed model_load_* components).
     """
@@ -251,7 +251,7 @@ async def _await_ready(
         except aiohttp.ClientError:
             pass
         if not launcher.is_alive():
-            # The §7.4 gate may have aborted the engine job *after* writing its
+            # The §8.4 gate may have aborted the engine job *after* writing its
             # results.json (run_system_prechecks.sh && exec <engine>): the job
             # exits before /health ever comes up. Give the shared filesystem
             # (Lustre) a moment to surface the file, then disambiguate a clean
@@ -267,7 +267,7 @@ async def _await_ready(
         if time.perf_counter() - start > timeout_s:
             raise RunAborted(
                 f"engine at {base_url} not ready within server_ready_timeout_s={timeout_s} "
-                "(§9.1/§11.1)"
+                "(§10.1/§12.1)"
             )
         await asyncio.sleep(poll_s)
 
@@ -281,9 +281,9 @@ async def _stage_a(
     model: str,
     smoke: bool,
 ) -> bool:
-    """Stage-A sanity gate (§12.5). Returns quality_flagged; raises on fail+abort."""
+    """Stage-A sanity gate (§13.5). Returns quality_flagged; raises on fail+abort."""
     if qe.skip_quality_gate:
-        log.info("Stage-A quality gate skipped (skip_quality_gate, §12.5)")
+        log.info("Stage-A quality gate skipped (skip_quality_gate, §13.5)")
         return False
     if quality is None:
         log.info("Stage-A quality gate: no evaluator wired (M11 pending) — skipped")
@@ -292,15 +292,15 @@ async def _stage_a(
     if not smoke and outcome.rows:
         db.insert_many("quality_evals", [{"run_id": run_id, **r} for r in outcome.rows])
     if outcome.passed:
-        log.info("Stage-A quality gate PASSED (§12.5)")
+        log.info("Stage-A quality gate PASSED (§13.5)")
         return False
     if qe.gate.on_fail == "abort":
         raise RunAborted(
-            "Stage-A quality gate FAILED (§12.5) — aborting before the sweep; "
+            "Stage-A quality gate FAILED (§13.5) — aborting before the sweep; "
             "results quality-flagged"
         )
     log.warning(
-        "Stage-A quality gate FAILED but on_fail=continue — run is QUALITY-FLAGGED (§12.5, §14.1)"
+        "Stage-A quality gate FAILED but on_fail=continue — run is QUALITY-FLAGGED (§13.5, §15.1)"
     )
     return True
 
@@ -314,9 +314,9 @@ async def _stage_b(
     model: str,
     smoke: bool,
 ) -> None:
-    """Stage-B quality comparison (§12.5) — measurement, not a gate."""
+    """Stage-B quality comparison (§13.5) — measurement, not a gate."""
     if qe.skip_quality_compare:
-        log.info("Stage-B quality comparison skipped (skip_quality_compare, §12.5)")
+        log.info("Stage-B quality comparison skipped (skip_quality_compare, §13.5)")
         return
     if quality is None:
         log.info("Stage-B quality comparison: no evaluator wired (M11 pending) — skipped")
@@ -324,7 +324,7 @@ async def _stage_b(
     rows = await quality.stage_b_compare(instances, model, qe.compare)
     if not smoke and rows:
         db.insert_many("quality_evals", [{"run_id": run_id, **r} for r in rows])
-    log.info("Stage-B quality comparison: %d measurement rows (§12.5)", len(rows))
+    log.info("Stage-B quality comparison: %d measurement rows (§13.5)", len(rows))
 
 
 # ------------------------------------------------------------------- the driver
@@ -352,7 +352,7 @@ async def run_experiment(
     if not pool_path.exists():
         raise RunAborted(f"dataset pool {pool_path} missing after generation")
     pool = load_pool(pool_path)
-    weights = {m["scenario"]: m["weight"] for m in manifest["mix"]}  # session-start weights (§11.3)
+    weights = {m["scenario"]: m["weight"] for m in manifest["mix"]}  # session-start weights (§12.3)
 
     db: ResultsDB | None = None
     smoke = False
@@ -368,7 +368,7 @@ async def run_experiment(
             raise RunAborted("engine launcher returned no instances")
 
         async with aiohttp.ClientSession() as http:
-            # ---- phase 3: readiness, with in-container §7.4 gate-abort detection
+            # ---- phase 3: readiness, with in-container §8.4 gate-abort detection
             try:
                 waits = await asyncio.gather(
                     *[
@@ -380,7 +380,7 @@ async def run_experiment(
                     ]
                 )
             except _PrecheckAbort as abort:
-                # §7.4: persist what the gate measured, then stop — the engine
+                # §8.4: persist what the gate measured, then stop — the engine
                 # never started so there is no sweep to run.
                 precheck = _read_precheck(results_path)
                 smoke = bool(precheck.get("smoke_test_mode", False))
@@ -393,7 +393,7 @@ async def run_experiment(
                     if r["status"] in ("warn", "fail")
                 ]
                 raise RunAborted(
-                    f"system pre-check gate aborted (exit {abort.gate_exit_code}, §7.4) — "
+                    f"system pre-check gate aborted (exit {abort.gate_exit_code}, §8.4) — "
                     f"engine not started. Offending: {', '.join(offending) or 'see system_prechecks'}"
                 ) from abort
 
@@ -402,7 +402,7 @@ async def run_experiment(
             smoke = bool(precheck.get("smoke_test_mode", False))
             if smoke:
                 log.warning(
-                    "[%s] SMOKE-TEST MODE (§7.2): collective-tests cache was cold — "
+                    "[%s] SMOKE-TEST MODE (§8.2): collective-tests cache was cold — "
                     "results will NOT be persisted",
                     run_id,
                 )
@@ -423,7 +423,7 @@ async def run_experiment(
                 )
             _persist_prechecks(db, run_id, instances[0].instance_id, precheck)
 
-            # ---- phase 5: inductor pre-compilation primer (§9.3)
+            # ---- phase 5: inductor pre-compilation primer (§10.3)
             primers = await asyncio.gather(
                 *[run_primer(http, inst.base_url, model=deployment.model) for inst in instances]
             )
@@ -431,10 +431,10 @@ async def run_experiment(
                 if pr.warning:
                     log.warning("[%s] instance %s primer: %s", run_id, inst.instance_id, pr.warning)
 
-            # ---- phase 6: Stage-A quality gate (§12.5)
+            # ---- phase 6: Stage-A quality gate (§13.5)
             quality_flagged = await _stage_a(db, run_id, quality, qe, instances, deployment.model, smoke)
 
-            # ---- phase 7: rate-level sweep (§11.2)
+            # ---- phase 7: rate-level sweep (§12.2)
             endpoints = [(i.instance_id, i.base_url) for i in instances]
             windows: list[tuple[float, datetime, datetime]] = []
             n_requests = n_truncated = 0
@@ -456,14 +456,14 @@ async def run_experiment(
                     )
                 if step.sessions_truncated:
                     log.info(
-                        "[%s] λ=%s %d sessions truncated at drain (§11.2)",
+                        "[%s] λ=%s %d sessions truncated at drain (§12.2)",
                         run_id, rate, step.sessions_truncated,
                     )
 
-            # ---- phase 8: Stage-B quality comparison (§12.5)
+            # ---- phase 8: Stage-B quality comparison (§13.5)
             await _stage_b(db, run_id, quality, qe, instances, deployment.model, smoke)
 
-            # ---- phase 9: finalise — sampler NDJSON → hardware_stats (§13.5)
+            # ---- phase 9: finalise — sampler NDJSON → hardware_stats (§14.5)
             ingested = _ingest_hardware(db, run_id, run_dir, instances, windows)
             log.info(
                 "[%s] finalised: %d requests, %d hardware_stats rows",
@@ -487,7 +487,7 @@ async def run_experiment(
         await launcher.teardown()
         if smoke:
             log.warning(
-                "[%s] SMOKE-TEST MODE (§7.2): run completed but NOTHING was persisted — "
+                "[%s] SMOKE-TEST MODE (§8.2): run completed but NOTHING was persisted — "
                 "re-run on a warm collective-tests cache",
                 run_id,
             )

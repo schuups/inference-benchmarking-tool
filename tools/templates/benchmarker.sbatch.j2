@@ -1,11 +1,11 @@
 #!/bin/bash
-# Benchmarker allocation — rendered by the Planner (§4). One per experiment;
+# Benchmarker allocation — rendered by the Planner (§5). One per experiment;
 # sequences dataset gen -> engine spawn -> load gen -> finalisation (§1, M7).
 # run_id: {{ run_id }}
 
 #SBATCH --account={{ account }}
 #SBATCH --partition={{ partition }}
-#SBATCH --job-name=ib-benchmarker-{{ run_id }}
+#SBATCH --job-name=ibt-benchmarker-{{ run_id }}
 #SBATCH --comment=inference-benchmarking
 #SBATCH --output=%x-%j.out
 #SBATCH --nodes=1
@@ -13,7 +13,7 @@
 #SBATCH --time={{ time_limit }}
 #SBATCH --chdir={{ run_dir_remote }}
 
-# Same time limit as the engine job (§5.1 time-limit alignment).
+# Same time limit as the engine job (§6.1 time-limit alignment).
 export HUGGING_FACE_HUB_TOKEN=$(cat ~/.hf_token 2>/dev/null || true)
 export HF_HOME={{ scratch_base }}/hf-cache
 

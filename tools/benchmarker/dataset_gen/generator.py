@@ -1,8 +1,8 @@
-"""Dataset generator core (SPECIFICATIONS.md §10).
+"""Dataset generator core (SPECIFICATIONS.md §11).
 
 Produces a deterministic prompt pool (prompts.jsonl, one record per turn) and
-the scenario manifest (manifest.json, §13.7) from a validated BenchmarkConfig.
-The §10.8 contract: same dataset_config + same registry revision + same
+the scenario manifest (manifest.json, §14.7) from a validated BenchmarkConfig.
+The §11.8 contract: same dataset_config + same registry revision + same
 tokenizer -> byte-identical pool.
 """
 
@@ -36,7 +36,7 @@ class _ClassPlan:
 
 
 def _effective_class(entry: MixEntry, scenario: Scenario) -> _ClassPlan:
-    """Apply §10.4 per-class overrides on top of the registry entry."""
+    """Apply §11.4 per-class overrides on top of the registry entry."""
     input_length = (
         Distribution.model_validate(entry.input_length) if entry.input_length else scenario.input_length
     )
@@ -64,7 +64,7 @@ def _effective_class(entry: MixEntry, scenario: Scenario) -> _ClassPlan:
 def _plan_classes(cfg: BenchmarkConfig, registry_dir: Path) -> list[_ClassPlan]:
     dc = cfg.dataset_config
     plans = [_effective_class(e, load_scenario(registry_dir, e.scenario)) for e in dc.scenario_mix]
-    # §10.4: split num_prompts (total turn records) ∝ weight × E[turns_per_session],
+    # §11.4: split num_prompts (total turn records) ∝ weight × E[turns_per_session],
     # i.e. sessions_c ∝ weight_c — so no class exhausts its sub-pool early.
     denominator = sum(p.entry.weight * p.expected_turns for p in plans)
     for p in plans:
@@ -97,7 +97,7 @@ def generate(
     next_session_idx = 0
     for plan in plans:
         slug = plan.scenario.name
-        source = make_source(plan.scenario.source, tokenizer)  # aborts per §10.1 on failure
+        source = make_source(plan.scenario.source, tokenizer)  # aborts per §11.1 on failure
         rng_in = class_rng(dc.seed, slug, "length_input")
         rng_out = class_rng(dc.seed, slug, "length_output")
         rng_sel = class_rng(dc.seed, slug, "selection")
@@ -112,7 +112,7 @@ def generate(
             session_idx = next_session_idx
             next_session_idx += 1
             if conversational:
-                # §10.5: corpus turn boundaries drive the structure, clamped to
+                # §11.5: corpus turn boundaries drive the structure, clamped to
                 # the declared turns ceiling.
                 user_turns = source.conversation(rng_sel)
                 if max_turns is not None:
@@ -125,7 +125,7 @@ def generate(
                 length_dist = plan.input_length if turn_idx == 0 else plan.followup_input_length
                 recorded_output: int | None = None
                 if conversational:
-                    # real content, clamped to the distribution's max bound (§10.5)
+                    # real content, clamped to the distribution's max bound (§11.5)
                     bound = length_dist.params.get("max")
                     body = user_turns[turn_idx]
                     if bound is not None:
@@ -133,7 +133,7 @@ def generate(
                         body = trim_to_tokens(body, max(1, budget), tokenizer)
                 elif trace_based:
                     # recorded trace: question is the prompt; the answer's token
-                    # count overrides output_length sampling (§10.5)
+                    # count overrides output_length sampling (§11.5)
                     question, answer = source.trace(rng_sel)
                     bound = length_dist.params.get("max")
                     body = question
@@ -186,7 +186,7 @@ def _class_assumptions(plan: _ClassPlan) -> list[str]:
     out: list[str] = [
         f"input length distribution: {plan.input_length.distribution} {plan.input_length.params}",
         f"output length distribution: {plan.output_length.distribution} {plan.output_length.params}"
-        + (" (widened for thinking per §10.6)" if s.thinking else ""),
+        + (" (widened for thinking per §11.6)" if s.thinking else ""),
     ]
     if plan.followup_input_length != plan.input_length:
         out.insert(
@@ -208,18 +208,18 @@ def _class_assumptions(plan: _ClassPlan) -> list[str]:
     if s.source.kind == "wildchat":
         out.append(
             "session structure and per-turn lengths driven by real conversation "
-            "content; lengths clamped to the declared distribution max bounds (§10.5)"
+            "content; lengths clamped to the declared distribution max bounds (§11.5)"
         )
     if s.source.kind == "reasoning_trace_replay":
         out.append(
             "output lengths replayed from recorded reasoning traces — overrides "
-            "the declared output_length distribution (§10.5)"
+            "the declared output_length distribution (§11.5)"
         )
     return out
 
 
 def _build_manifest(cfg: BenchmarkConfig, plans: list[_ClassPlan], tokenizer: Tokenizer) -> dict:
-    """§13.7: mix (+ expected request share), per-class disclosure, run assumptions."""
+    """§14.7: mix (+ expected request share), per-class disclosure, run assumptions."""
     weighted = [(p, p.entry.weight * p.expected_turns) for p in plans]
     total = sum(w for _, w in weighted)
     mix = [
@@ -250,7 +250,7 @@ def _build_manifest(cfg: BenchmarkConfig, plans: list[_ClassPlan], tokenizer: To
             f"mean_idle_s={ap.mean_idle_s})"
         )
     run_assumptions = [
-        arrival + " — λ counts session starts (§11.3)",
+        arrival + " — λ counts session starts (§12.3)",
         f"routing strategy: {cfg.routing_strategy}",
         f"output_length_mode: {cfg.dataset_config.output_length_mode}",
         f"master seed: {cfg.dataset_config.seed}",

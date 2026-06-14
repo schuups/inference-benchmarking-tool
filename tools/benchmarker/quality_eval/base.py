@@ -1,4 +1,4 @@
-"""Quality-eval backend seam (SPECIFICATIONS.md §12.5, IMPLEMENTATION_PLAN.md M11).
+"""Quality-eval backend seam (SPECIFICATIONS.md §13.5, IMPLEMENTATION_PLAN.md M11).
 
 `QualityEvalRunner` (runner.py) implements M7's `QualityEvaluator` protocol and
 delegates the actual scoring of a suite against the deployed endpoint to an
@@ -26,8 +26,8 @@ class EvalScore:
     metric: str  # e.g. "exact_match"
     score: float  # mean over the graded items, [0, 1]
     sample_size: int  # number of items actually graded
-    sampling_params: dict  # decoding params actually used (§13.9)
-    harness_version: str  # provenance (§13.9)
+    sampling_params: dict  # decoding params actually used (§14.9)
+    harness_version: str  # provenance (§14.9)
 
 
 class EvalBackend(Protocol):

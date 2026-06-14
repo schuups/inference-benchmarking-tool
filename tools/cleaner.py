@@ -1,4 +1,4 @@
-"""Cleaner (SPECIFICATIONS.md §6.7, IMPLEMENTATION_PLAN.md M10).
+"""Cleaner (SPECIFICATIONS.md §7.7, IMPLEMENTATION_PLAN.md M10).
 
 Reclaims state that escaped the Coordinator's per-run teardown — Coordinator
 killed mid-run, network loss during teardown, runs predating a teardown fix.
@@ -6,8 +6,8 @@ killed mid-run, network loss during teardown, runs predating a teardown fix.
 it (`reminder_due`); it never prunes on its own.
 
 Two stages:
-  1. identify() — ALWAYS read-only. Lists candidates discovered via the §6.1
-     labels/patterns and applies the skip policy (model-cache PVCs §6.6, the most
+  1. identify() — ALWAYS read-only. Lists candidates discovered via the §7.1
+     labels/patterns and applies the skip policy (model-cache PVCs §7.6, the most
      recent N JFrog tags, scratch dirs owned by an active job, an age threshold).
   2. prune() — requires explicit operator approval (the CLI's `--yes`). Deletes
      exactly the approved candidates via the backend.
@@ -44,9 +44,9 @@ DEFAULT_REMINDER_INTERVAL_H = 168.0  # weekly
 
 
 def parse_run_id(name: str) -> str | None:
-    """Return the name if it matches the §6.2 run-ID pattern, else None.
+    """Return the name if it matches the §7.2 run-ID pattern, else None.
 
-    Thin wrapper over the canonical parser in tools.common.runid so the §6.2
+    Thin wrapper over the canonical parser in tools.common.runid so the §7.2
     field layout is defined in exactly one place."""
     return name if _parse_run_id_parts(name) else None
 
@@ -77,11 +77,11 @@ class CleanReport:
 
 def _skip_reason(c: Candidate, age_threshold_h: float, jfrog_keep: set[str], active_run_ids) -> str | None:
     if c.kind == "k8s" and "model-cache" in c.ident:
-        return "model-cache PVC retained (§6.6)"
+        return "model-cache PVC retained (§7.6)"
     if c.kind == "scratch" and c.run_id is None:
-        return "not a benchmark run dir (§6.2 pattern)"
+        return "not a benchmark run dir (§7.2 pattern)"
     # Protect anything owned by a still-running job — scratch dirs AND K8s objects
-    # (the run-id comes from the §6.1 label for K8s, the dir name for scratch).
+    # (the run-id comes from the §7.1 label for K8s, the dir name for scratch).
     if c.run_id is not None and c.run_id in active_run_ids:
         return "owned by an active job"
     if c.kind == "jfrog" and c.ident in jfrog_keep:
@@ -98,7 +98,7 @@ def identify(
     keep_recent_jfrog: int = DEFAULT_KEEP_RECENT_JFROG,
     active_run_ids=frozenset(),
 ) -> CleanReport:
-    """Read-only §6.7 stage 1: partition candidates into prunable vs skipped."""
+    """Read-only §7.7 stage 1: partition candidates into prunable vs skipped."""
     jfrog = sorted((c for c in candidates if c.kind == "jfrog"), key=lambda c: c.age_hours)
     jfrog_keep = {c.ident for c in jfrog[:keep_recent_jfrog]}  # keep the youngest N
     report = CleanReport()
@@ -113,7 +113,7 @@ def identify(
 
 def reminder_due(last_cleanup_iso: str | None, interval_h: float = DEFAULT_REMINDER_INTERVAL_H,
                  now: datetime | None = None) -> bool:
-    """§6.7: whether Claude should remind the operator to run the Cleaner."""
+    """§7.7: whether Claude should remind the operator to run the Cleaner."""
     if last_cleanup_iso is None:
         return True
     now = now or datetime.now(timezone.utc)
@@ -130,7 +130,7 @@ class CleanerBackend(Protocol):
 
 
 async def prune(backend: CleanerBackend, candidates: list[Candidate]) -> list[tuple[Candidate, bool, str]]:
-    """§6.7 stage 2: delete the operator-approved candidates, best-effort."""
+    """§7.7 stage 2: delete the operator-approved candidates, best-effort."""
     results = []
     for c in candidates:
         try:
@@ -167,7 +167,7 @@ def _age_hours(iso_ts: str, now: datetime) -> float:
 
 
 class KubectlCleanerBackend:
-    """Headless K8s discovery/deletion via kubectl over the §6.1 managed-by label."""
+    """Headless K8s discovery/deletion via kubectl over the §7.1 managed-by label."""
 
     KINDS = "deployment,service,ingress,secret,persistentvolumeclaim"
 
@@ -226,7 +226,7 @@ async def _cli_identify(backend: CleanerBackend, age_threshold_h: float, keep_re
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Cleaner (§6.7) — identify (default) or prune")
+    parser = argparse.ArgumentParser(description="Cleaner (§7.7) — identify (default) or prune")
     parser.add_argument("--namespace", default="ml", help="K8s namespace (breithorn)")
     parser.add_argument("--age-threshold-h", type=float, default=DEFAULT_AGE_THRESHOLD_H)
     parser.add_argument("--keep-recent-jfrog", type=int, default=DEFAULT_KEEP_RECENT_JFROG)
@@ -247,7 +247,7 @@ def main() -> int:
 
     if args.prune:
         if not args.yes:
-            print("\nRefusing to prune without --yes (§6.7 requires explicit operator approval).")
+            print("\nRefusing to prune without --yes (§7.7 requires explicit operator approval).")
             return 2
         results = asyncio.run(prune(backend, report.prunable))
         print(f"\nPruned {sum(ok for _, ok, _ in results)}/{len(results)} candidates.")

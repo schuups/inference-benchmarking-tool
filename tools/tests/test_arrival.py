@@ -1,4 +1,4 @@
-"""M2 DoD: arrival-process statistical properties under fixed seeds (§11.3)."""
+"""M2 DoD: arrival-process statistical properties under fixed seeds (§12.3)."""
 
 import random
 import statistics
@@ -58,7 +58,7 @@ def test_mmpp_burstier_than_poisson():
     mmpp_times = session_start_times(MMPP, 2.0, 20_000, random.Random(42))
     poisson_times = session_start_times(POISSON, 2.0, 20_000, random.Random(42))
     cv = statistics.stdev(_gaps(mmpp_times)) / statistics.mean(_gaps(mmpp_times))
-    assert cv > 1.3  # inter-arrival CV above Poisson's 1 (§11.3)
+    assert cv > 1.3  # inter-arrival CV above Poisson's 1 (§12.3)
     # the decisive burstiness signal: windowed index of dispersion (Poisson ≈ 1)
     assert _dispersion_index(poisson_times, 20_000) == pytest.approx(1.0, abs=0.3)
     assert _dispersion_index(mmpp_times, 20_000) > 5

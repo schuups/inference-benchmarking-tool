@@ -1,17 +1,17 @@
-"""Parse + grade system pre-check measurements (SPECIFICATIONS.md §7.3-§7.4).
+"""Parse + grade system pre-check measurements (SPECIFICATIONS.md §8.3-§8.4).
 
 Consumes the raw benchmark outputs captured by run_system_prechecks.sh, parses
 per-metric values, grades them against tools/system_prechecks_reference.yaml,
-and emits JSON rows shaped for the `system_prechecks` table (§13.6) plus an
+and emits JSON rows shaped for the `system_prechecks` table (§14.6) plus an
 overall gate outcome.
 
-Grading (§7.3/§7.4):
+Grading (§8.3/§8.4):
 - tolerance_pct < 0 (higher is better): warn when measured < (1+tol/100)·expected;
   fail when measured < 0.5·expected.
 - tolerance_pct > 0 (lower is better): warn when measured > (1+tol/100)·expected;
   fail when measured > 2·expected.
 - expected TBD / no matching reference: informational — recorded with
-  expected=None and status "pass" (the gate is unenforceable, §7.3).
+  expected=None and status "pass" (the gate is unenforceable, §8.3).
 - benchmark errored / output unparseable: status "fail" with measured=None.
 
 Exit codes (consumed by run_system_prechecks.sh in the `&& exec <engine>` chain):
@@ -105,9 +105,9 @@ def find_reference(refs: list[dict], benchmark: str, scope: str) -> dict | None:
 
 def grade(measured: float | None, expected: float | None, tolerance_pct: float | None) -> str:
     if measured is None:
-        return "fail"  # §7.4: the benchmark itself errored
+        return "fail"  # §8.4: the benchmark itself errored
     if expected is None or tolerance_pct is None:
-        return "pass"  # informational — gate unenforceable until characterised (§7.3)
+        return "pass"  # informational — gate unenforceable until characterised (§8.3)
     if tolerance_pct < 0:  # higher is better
         if measured < 0.5 * expected:
             return "fail"
@@ -127,7 +127,7 @@ def metric_id(benchmark: str, size_label: str) -> str:
 
 
 def build_rows(measurements: list[dict], refs: list[dict]) -> list[dict]:
-    """measurements: [{benchmark, scope, size, measured}, ...] -> §13.6 rows."""
+    """measurements: [{benchmark, scope, size, measured}, ...] -> §14.6 rows."""
     ts = datetime.now(timezone.utc).isoformat()
     rows = []
     for m in measurements:
@@ -179,10 +179,10 @@ def collect_measurements(out_dir: Path, cluster: str, scope: str, storage_scope:
     for path, suffix in [(out_dir / "nvshmem_alltoall_latency.out", "alltoall_latency"),
                          (out_dir / "nvshmem_put_bw.out", "shmem_put_bw")]:
         if not path.exists():
-            continue  # skipped-with-warning path (§7.1) — no row, orchestrator logs it
+            continue  # skipped-with-warning path (§8.1) — no row, orchestrator logs it
         text = path.read_text()
         if "perftest not found" in text or not text.strip():
-            # §7.1 skip: the runner tees the warning into the capture file, so
+            # §8.1 skip: the runner tees the warning into the capture file, so
             # absence-of-file is not the only skip signal — content is.
             continue
         benchmark = f"{shmem_prefix} {suffix}"
@@ -203,7 +203,7 @@ def collect_measurements(out_dir: Path, cluster: str, scope: str, storage_scope:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Grade §7 pre-check outputs")
+    parser = argparse.ArgumentParser(description="Grade §8 pre-check outputs")
     parser.add_argument("--out-dir", type=Path, required=True, help="dir with captured *.out files")
     parser.add_argument("--cluster", required=True)
     parser.add_argument("--scope", required=True, help='reference scope, e.g. "4× GH200, 1 node"')
@@ -211,7 +211,7 @@ def main() -> int:
     parser.add_argument("--reference", type=Path, default=REFERENCE_PATH)
     parser.add_argument("--on-warn", choices=["abort", "continue"], default="abort")
     parser.add_argument("--on-fail", choices=["abort", "continue"], default="abort")
-    parser.add_argument("--smoke", action="store_true", help="smoke-test mode flag (§7.2 cache miss)")
+    parser.add_argument("--smoke", action="store_true", help="smoke-test mode flag (§8.2 cache miss)")
     parser.add_argument("--results", type=Path, required=True, help="output JSON path")
     args = parser.parse_args()
 
@@ -230,7 +230,7 @@ def main() -> int:
     for row in rows:
         print(f"[prechecks] {row['status']:4s} {row['metric']}: measured={row['measured']} expected={row['expected']}")
     if args.smoke:
-        print("[prechecks] SMOKE-TEST MODE: collective-tests cache was cold — results will NOT be persisted (§7.2)")
+        print("[prechecks] SMOKE-TEST MODE: collective-tests cache was cold — results will NOT be persisted (§8.2)")
     return code
 
 

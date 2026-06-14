@@ -1,4 +1,4 @@
-"""Coverage for the production LmEvalBackend result parsers (§12.5).
+"""Coverage for the production LmEvalBackend result parsers (§13.5).
 
 The backend's `evaluate` needs a GPU endpoint + the lm-eval-harness, but
 `_pick_metric` / `_graded_count` are pure parsers over the harness results dict —

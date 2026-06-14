@@ -1,9 +1,9 @@
 """Benchmark-YAML and global-config schema (IMPLEMENTATION_PLAN.md M0).
 
-Spec references: §2.3 (global config), §10.4 (dataset_config / scenario_mix),
-§10.6 (output_length_mode), §11.3 (arrival process), §11.4 (routing), §12.4 (SLOs),
-§12.5 (quality_eval), §15.2 (BackendConfig), §7.2-7.5 (pre-check surface),
-§5.1 (TP <= gpus_per_node).
+Spec references: §3.3 (global config), §11.4 (dataset_config / scenario_mix),
+§11.6 (output_length_mode), §12.3 (arrival process), §12.4 (routing), §13.4 (SLOs),
+§13.5 (quality_eval), §16.2 (BackendConfig), §8.2-8.5 (pre-check surface),
+§6.1 (TP <= gpus_per_node).
 
 CLI: `python -m tools.common.config <benchmark.yaml>` validates and exits 0/1.
 """
@@ -81,7 +81,7 @@ class SpeculativeDecoding(StrictModel):
 
 
 class BackendConfig(StrictModel):
-    """Sweepable engine knobs (§15.2). All optional; engine defaults apply."""
+    """Sweepable engine knobs (§16.2). All optional; engine defaults apply."""
 
     tensor_parallel_size: int = Field(default=1, gt=0)
     pipeline_parallel_size: int = Field(default=1, gt=0)
@@ -99,20 +99,20 @@ class BackendConfig(StrictModel):
 
 
 class Deployment(StrictModel):
-    """One engine launch == one run_id (§15 deployment sweep, explicit list)."""
+    """One engine launch == one run_id (§16 deployment sweep, explicit list)."""
 
     target: str
     backend: Literal["vllm", "sglang", "dynamo"]
     backend_version: str
     model: str
     backend_config: BackendConfig = BackendConfig()
-    image: str | None = None  # canonical JFrog tag (§8.1); derived from global.yaml when absent
+    image: str | None = None  # canonical JFrog tag (§9.1); derived from global.yaml when absent
     # Repo-built engine images extend an NGC base with the Alps HPC network stack
     # (libfabric / NCCL / aws-ofi-nccl / NVSHMEM over CXI) — the alps-extended-images
     # pattern. Such images MUST run with the host CXI hook DISABLED so their own
-    # network libraries take priority over the host's (§8.1; docs.cscs.ch
+    # network libraries take priority over the host's (§9.1; docs.cscs.ch
     # /software/alps-extended-images "Danger"). Set False only for a stock vendor
-    # image that relies on the host hook (e.g. the E1 stock-NGC §8.2 exemption).
+    # image that relies on the host hook (e.g. the E1 stock-NGC §9.2 exemption).
     alps_extended_image: bool = True
 
 
@@ -123,7 +123,7 @@ class MixEntry(StrictModel):
     input_length: dict | None = None
     output_length: dict | None = None
     session: dict | None = None
-    # §10.4 per-class source override (e.g. LongBench task subset). Declared in the
+    # §11.4 per-class source override (e.g. LongBench task subset). Declared in the
     # schema but NOT yet consumed by the generator — the schema-per-source-kind work
     # is tracked in TODOs.md ("source_overrides schema per source kind").
     source_overrides: dict | None = None
@@ -244,13 +244,13 @@ class BenchmarkConfig(StrictModel):
     quality_eval: QualityEval = QualityEval()
     system_prechecks: SystemPrechecks = SystemPrechecks()
     hardware_sampling_interval_s: float = Field(default=1.0, gt=0)
-    server_time_limit: str | None = None  # HH:MM:SS; shared by all jobs (§5.1)
+    server_time_limit: str | None = None  # HH:MM:SS; shared by all jobs (§6.1)
 
     @field_validator("rate_levels")
     @classmethod
     def _rates(cls, v: list[float]) -> list[float]:
         if any(r <= 0 for r in v):
-            raise ValueError("rate_levels must be positive (session starts/s, §11.3)")
+            raise ValueError("rate_levels must be positive (session starts/s, §12.3)")
         return v
 
     @model_validator(mode="after")
@@ -267,7 +267,7 @@ class BenchmarkConfig(StrictModel):
 def validate_scenarios_registered(
     cfg: BenchmarkConfig, registry_dir: Path = SCENARIOS_DIR
 ) -> None:
-    """Every mix entry must name a registered scenario (§10.3/§10.4)."""
+    """Every mix entry must name a registered scenario (§11.3/§11.4)."""
     known = sorted(p.stem for p in registry_dir.glob("*.yaml"))
     for entry in cfg.dataset_config.scenario_mix:
         if entry.scenario not in known:
@@ -277,7 +277,7 @@ def validate_scenarios_registered(
 
 
 def validate_against_globals(cfg: BenchmarkConfig, glob: GlobalConfig) -> None:
-    """Cross-checks needing the cluster catalogue (§5.1)."""
+    """Cross-checks needing the cluster catalogue (§6.1)."""
     for i, dep in enumerate(cfg.deployments):
         cluster = glob.clusters.get(dep.target)
         if cluster is None:
@@ -289,7 +289,7 @@ def validate_against_globals(cfg: BenchmarkConfig, glob: GlobalConfig) -> None:
         if tp > cluster.gpus_per_node:
             raise ValueError(
                 f"deployments[{i}]: tensor_parallel_size={tp} exceeds "
-                f"gpus_per_node={cluster.gpus_per_node} on '{dep.target}' (§5.1 — "
+                f"gpus_per_node={cluster.gpus_per_node} on '{dep.target}' (§6.1 — "
                 f"cross-node TP is impractical on Alps; scale out via PP or DP)"
             )
 

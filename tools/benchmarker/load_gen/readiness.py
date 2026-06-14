@@ -1,9 +1,9 @@
-"""Readiness wait (§11.1), model-load breakdown parsing (§9.2), primer (§9.3).
+"""Readiness wait (§12.1), model-load breakdown parsing (§10.2), primer (§10.3).
 
 The model-load regexes target vLLM's structured log lines. They are seeded from
 upstream-vLLM message shapes and MUST be re-validated against a captured log of
 the pinned vLLM image at E1 (parser-fixture discipline per plan M2 DoD);
-components a log does not expose stay None -> stored as NULL (§9.2).
+components a log does not expose stay None -> stored as NULL (§10.2).
 """
 
 from __future__ import annotations
@@ -49,7 +49,7 @@ async def run_primer(
     timeout_s: float = 300.0,
     probe_tokens: int = 2_000,
 ) -> PrimerResult:
-    """§9.3: one large priming request, then two probes. The primer is judged
+    """§10.3: one large priming request, then two probes. The primer is judged
     self-calibratingly: if probe 1's TTFT is far above probe 2's, the first
     measurement-like request still paid a compile cost -> warn the operator."""
     start = time.perf_counter()
@@ -80,6 +80,6 @@ async def run_primer(
     elif t1 > 3 * t2 + 100:
         warning = (
             f"primer missed its target: first probe TTFT {t1:.0f}ms vs steady-state "
-            f"{t2:.0f}ms — the first sweep request may still pay a compile cost (§9.3)"
+            f"{t2:.0f}ms — the first sweep request may still pay a compile cost (§10.3)"
         )
     return PrimerResult(primer_s, t1, t2, warning)

@@ -1,8 +1,8 @@
 """Merge a per-run results DB into the centralized results DB (M8, open decision 4).
 
 `experiments/results.db` aggregates every run; per-run `run_<id>.db` files remain
-the §13.8 provenance artifacts. Merges are **idempotent by run_id** (delete-then-
-insert across all seven §13 tables), so re-downloading and re-merging a run — or
+the §14.8 provenance artifacts. Merges are **idempotent by run_id** (delete-then-
+insert across all seven §14 tables), so re-downloading and re-merging a run — or
 resuming a Coordinator mid-collection — is safe and never double-counts.
 """
 
@@ -20,7 +20,7 @@ log = logging.getLogger("coordinator.merge")
 def merge_run_db(per_run_db: Path | str, central_db: Path | str, run_id: str) -> dict[str, int]:
     """Merge one run's rows into the central DB; return per-table inserted counts.
 
-    Both DBs share the §13 schema (created by ResultsDB), so `INSERT … SELECT *`
+    Both DBs share the §14 schema (created by ResultsDB), so `INSERT … SELECT *`
     aligns column-for-column. Existing rows for `run_id` are deleted first, making
     the operation idempotent.
     """
@@ -29,7 +29,7 @@ def merge_run_db(per_run_db: Path | str, central_db: Path | str, run_id: str) ->
         raise FileNotFoundError(f"per-run DB not found: {per_run_db}")
 
     central_db.parent.mkdir(parents=True, exist_ok=True)  # e.g. experiments/ on first run
-    ResultsDB(central_db).close()  # ensure the central DB exists with the §13 schema
+    ResultsDB(central_db).close()  # ensure the central DB exists with the §14 schema
 
     conn = sqlite3.connect(central_db)
     try:

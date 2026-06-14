@@ -7,14 +7,14 @@
 # shared prefix via append_delta. Operator think-time between turns is longer
 # than for vanilla chat (they are reading the long answer before following up).
 #
-# `thinking: true` widens the output distribution per SPECIFICATIONS.md §10.6.
+# `thinking: true` widens the output distribution per SPECIFICATIONS.md §11.6.
 
 name: long-context-followup
 summary: Returning-user follow-up sessions over a large initial context with a thinking model.
 maturity: established
 
 source:
-  kind: longbench                    # see §10.5
+  kind: longbench                    # see §11.5
   config: { tasks: [lcc, repobench-p] }
 
 input_length:
@@ -25,7 +25,7 @@ output_length:
   distribution: lognormal
   params: { mean: 500, sigma: 0.5, min: 32, max: 4096 }
 
-thinking: true                       # widens output_length per §10.6
+thinking: true                       # widens output_length per §11.6
 
 session:
   mode: sequential                   # operator reads the long answer before following up
@@ -47,7 +47,7 @@ manifest:
     - "large initial context (LongBench code) with a small number of short follow-up turns"
     - "returning-user temporal locality — turn K+1 reuses the heavy turn-1 prefix via append_delta"
     - "longer operator think-time between turns (reading the long answer before following up)"
-    - "thinking traces approximated by widened output-length distribution per §10.6"
+    - "thinking traces approximated by widened output-length distribution per §11.6"
   not_modelled:
     - "no image / audio / video inputs (v1 is text-only; see TODOs.md *Multimodality*)"
     - "no explicit document-retrieval mechanism — the long context is drawn directly from LongBench rather than assembled from retrieved chunks"

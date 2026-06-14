@@ -1,4 +1,4 @@
-"""Per-instance server_stats scraping (§13.4) from the backend's /metrics."""
+"""Per-instance server_stats scraping (§14.4) from the backend's /metrics."""
 
 from __future__ import annotations
 

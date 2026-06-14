@@ -1,9 +1,9 @@
-"""§6.3–6.6 per-run teardown plan + executor (M8).
+"""§7.3–7.6 per-run teardown plan + executor (M8).
 
 Teardown runs on **both** success and failure paths. The plan is computed
 deterministically from `RunState` (testable); execution is best-effort — each
 action is logged and one failure does not abort the rest, since the goal is to
-leave no orphans. Model-cache PVCs are intentionally retained (§6.6); the plan
+leave no orphans. Model-cache PVCs are intentionally retained (§7.6); the plan
 never targets them.
 """
 
@@ -29,16 +29,16 @@ def teardown_plan(state: RunState) -> list[TeardownAction]:
     actions: list[TeardownAction] = []
     if state.benchmarker_handle:
         actions.append(
-            TeardownAction("cancel", state.benchmarker_handle, "cancel Benchmarker job (§6.3)")
+            TeardownAction("cancel", state.benchmarker_handle, "cancel Benchmarker job (§7.3)")
         )
     for handle in state.engine_handles:
         actions.append(
-            TeardownAction("cancel", handle, "cancel inference deployment (§6.4/§6.5)")
+            TeardownAction("cancel", handle, "cancel inference deployment (§7.4/§7.5)")
         )
-    # SLURM scratch run dir (§6.3); K8s remove_dir is a no-op (PVC retained, §6.6).
+    # SLURM scratch run dir (§7.3); K8s remove_dir is a no-op (PVC retained, §7.6).
     if state.platform == "slurm" and state.run_dir_remote:
         actions.append(
-            TeardownAction("remove_dir", state.run_dir_remote, "remove scratch run dir (§6.3)")
+            TeardownAction("remove_dir", state.run_dir_remote, "remove scratch run dir (§7.3)")
         )
     return actions
 
@@ -58,7 +58,7 @@ async def execute_teardown(
                 raise ValueError(f"unknown teardown action {action.kind!r}")
             results.append((action, True, "ok"))
             log.info("teardown ok: %s %s", action.kind, action.target)
-        except Exception as exc:  # best-effort: log and continue (§6 leave no orphans)
+        except Exception as exc:  # best-effort: log and continue (§7 leave no orphans)
             results.append((action, False, str(exc)))
             log.warning("teardown FAILED (continuing): %s %s — %s", action.kind, action.target, exc)
     return results

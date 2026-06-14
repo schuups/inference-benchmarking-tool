@@ -1,5 +1,5 @@
-"""M10 DoD: §6.7 identification lists orphaned resources and applies the skip
-policy (model-cache PVCs §6.6, recent-N JFrog, active-job scratch, age threshold);
+"""M10 DoD: §7.7 identification lists orphaned resources and applies the skip
+policy (model-cache PVCs §7.6, recent-N JFrog, active-job scratch, age threshold);
 pruning removes exactly the approved list.
 """
 
@@ -29,7 +29,7 @@ def _candidates():
         Candidate("scratch", "/scratch/collective-tests-cache", age_hours=999, run_id=None),
         Candidate("scratch", f"/scratch/{YOUNG_RUN}", age_hours=2, run_id=YOUNG_RUN),
         Candidate("k8s", "persistentvolumeclaim/model-cache-kimi", age_hours=999),
-        Candidate("k8s", "deployment/ib-engine-xyz", age_hours=48, run_id=OLD_RUN),
+        Candidate("k8s", "deployment/ibt-engine-xyz", age_hours=48, run_id=OLD_RUN),
         Candidate("jfrog", "inference-benchmarking-runA", age_hours=1),
         Candidate("jfrog", "inference-benchmarking-runB", age_hours=10),
         Candidate("jfrog", "inference-benchmarking-runC", age_hours=100),
@@ -49,11 +49,11 @@ def test_identify_applies_skip_policy():
     prunable = {c.ident for c in report.prunable}
     assert prunable == {
         f"/scratch/{OLD_RUN}",
-        "deployment/ib-engine-xyz",
+        "deployment/ibt-engine-xyz",
         "inference-benchmarking-runC",  # runA/runB kept as the 2 most recent
     }
     reasons = {c.ident: reason for c, reason in report.skipped}
-    assert "model-cache" in reasons["persistentvolumeclaim/model-cache-kimi"]  # §6.6
+    assert "model-cache" in reasons["persistentvolumeclaim/model-cache-kimi"]  # §7.6
     assert "active job" in reasons[f"/scratch/{ACTIVE_RUN}"]
     assert "not a benchmark run dir" in reasons["/scratch/collective-tests-cache"]
     assert "age threshold" in reasons[f"/scratch/{YOUNG_RUN}"]

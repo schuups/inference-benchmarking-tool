@@ -1,11 +1,11 @@
 #!/bin/bash
-# Inference-deployment job — rendered by the Planner (§4); submitted by the
+# Inference-deployment job — rendered by the Planner (§5); submitted by the
 # Benchmarker orchestrator from within its allocation (§1, M7).
 # run_id: {{ run_id }}
 
 #SBATCH --account={{ account }}
 #SBATCH --partition={{ partition }}
-#SBATCH --job-name=ib-engine-{{ run_id }}
+#SBATCH --job-name=ibt-engine-{{ run_id }}
 #SBATCH --comment=inference-benchmarking
 #SBATCH --output=%x-%j.out
 #SBATCH --nodes={{ nodes }}
@@ -17,7 +17,7 @@
 export HUGGING_FACE_HUB_TOKEN=$(cat ~/.hf_token 2>/dev/null || true)
 export HF_HOME={{ scratch_base }}/hf-cache
 
-# §7.2 pre-check surface (graded by tools/benchmarker/prechecks/grade.py)
+# §8.2 pre-check surface (graded by tools/benchmarker/prechecks/grade.py)
 export PRECHECK_CLUSTER={{ cluster }}
 export PRECHECK_SCOPE="{{ precheck_scope }}"
 export PRECHECK_STORAGE_SCOPE="{{ precheck_storage_scope }}"
@@ -33,7 +33,7 @@ export NCCL_TESTS_MPI={{ "1" if nodes > 1 else "0" }}
 export PRECHECK_GPUS={{ total_gpus if nodes == 1 else 1 }}
 
 {% if nodes > 1 %}
-# ---- multi-node Ray bring-up (validated at the E3 ladder; see plan §5/E3) ----
+# ---- multi-node Ray bring-up (validated at the E3 ladder; see plan §6/E3) ----
 # Head starts Ray, workers join, vLLM launches on the head with the Ray backend.
 nodes_list=$(scontrol show hostnames "$SLURM_JOB_NODELIST")
 head_node=$(echo "$nodes_list" | head -1)
@@ -43,11 +43,11 @@ RAY_CMD='if [ "$SLURM_NODEID" = "0" ]; then ray start --head --port=6379; else s
 
 {# Alps-extended images require --network=disable_rdzv_get alongside the CXI    #}
 {# hook being disabled in the EDF, and PMIx for the MPI-built pre-check         #}
-{# collectives (§8.1; docs.cscs.ch/software/alps-extended-images "Danger").     #}
+{# collectives (§9.1; docs.cscs.ch/software/alps-extended-images "Danger").     #}
 srun --environment={{ run_dir_remote }}/engine.toml{% if disable_cxi_hook %} --network=disable_rdzv_get{% endif %} --mpi=pmix bash -c '
 set -eo pipefail
 bash {{ tools_remote }}/benchmarker/prechecks/run_system_prechecks.sh && {
-    # §12.3 sampler backgrounded in the SAME container session before exec (M3/H3)
+    # §13.3 sampler backgrounded in the SAME container session before exec (M3/H3)
     python3 {{ tools_remote }}/benchmarker/hw_sampler.py \
         --out {{ run_dir_remote }}/hw-$(hostname).ndjson --interval {{ hardware_sampling_interval_s }} &
 {% if nodes > 1 %}

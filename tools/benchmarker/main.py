@@ -1,6 +1,6 @@
 """Benchmarker orchestrator CLI entry (SPECIFICATIONS.md §1, IMPLEMENTATION_PLAN.md M7).
 
-Invoked from the Planner-rendered benchmarker.sbatch / benchmarker-pod.yaml:
+Invoked from the Planner-rendered benchmarker.sbatch (the Benchmarker is always SLURM):
 
     python3 -m tools.benchmarker.main \
         --config <yaml> --run-id <id> --run-dir <dir> \
@@ -43,7 +43,7 @@ def main() -> int:
     parser.add_argument("--k8s", action="store_true", help="Kubernetes deployment target")
     parser.add_argument(
         "--deployment-index", type=int, default=0,
-        help="index into config.deployments this run corresponds to (§15 deployment sweep)",
+        help="index into config.deployments this run corresponds to (§16 deployment sweep)",
     )
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -75,7 +75,7 @@ def main() -> int:
             run_id=args.run_id,
         )
 
-    # §12.5: the standard-suite harness (lm-eval) is the production backend; the
+    # §13.5: the standard-suite harness (lm-eval) is the production backend; the
     # orchestrator skips Stage A/B per the YAML's skip_quality_gate/_compare flags.
     quality = QualityEvalRunner(LmEvalBackend())
     try:

@@ -83,7 +83,7 @@ async def test_stage_a_gate_pass(tmp_path):
         assert row["stage"] == "gate" and row["status"] == "pass"
         assert row["suite"] == "smoke-math" and row["floor"] == 0.5
         assert row["score"] == 1.0 and row["eval_concurrency"] == 1
-        # rows carry no run_id (the orchestrator stamps it); shape matches §13.9
+        # rows carry no run_id (the orchestrator stamps it); shape matches §14.9
         assert "run_id" not in row
         db = ResultsDB(tmp_path / "r.db")
         db.insert_many("quality_evals", [{"run_id": "run1", **r} for r in outcome.rows])
@@ -119,7 +119,7 @@ async def test_stage_b_collects_rows_per_suite_and_concurrency(tmp_path):
             assert r["stage"] == "compare"
             assert r["floor"] is None and r["status"] is None  # measurement, not a gate
             assert r["score"] == 1.0
-        # persists into §13.9 quality_evals without shape drift
+        # persists into §14.9 quality_evals without shape drift
         db = ResultsDB(tmp_path / "r.db")
         db.insert_many("quality_evals", [{"run_id": "run1", **r} for r in rows])
         assert db.count("quality_evals") == 2

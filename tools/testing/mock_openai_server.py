@@ -108,7 +108,7 @@ class MockServer:
                 await response.write(f"data: {json.dumps(chunk)}\n\n".encode())
             if self.config.abort_mid_stream_after is None:
                 await response.write(b"data: [DONE]\n\n")
-            # else: truncated stream, no DONE — clients must classify as 'server' (§12.1)
+            # else: truncated stream, no DONE — clients must classify as 'server' (§13.1)
         finally:
             self.requests_running -= 1
         await response.write_eof()

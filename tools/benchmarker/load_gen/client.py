@@ -1,4 +1,4 @@
-"""Streaming request execution + §12.1 error taxonomy."""
+"""Streaming request execution + §13.1 error taxonomy."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ class RequestOutcome:
     output_tokens: int
     output_text: str
     success: int
-    error: str | None  # "<class>:<detail>" per §12.1
+    error: str | None  # "<class>:<detail>" per §13.1
 
 
 async def execute_request(
@@ -31,7 +31,7 @@ async def execute_request(
     ignore_eos: bool,
     request_timeout_s: float,
 ) -> RequestOutcome:
-    """One streaming chat-completion; never raises — §12.1 classes in `error`."""
+    """One streaming chat-completion; never raises — §13.1 classes in `error`."""
     payload = {
         "model": model,
         "messages": messages,
@@ -55,7 +55,7 @@ async def execute_request(
                     remaining = (
                         request_timeout_s - (time.perf_counter() - start)
                         if first is None
-                        else None  # §11.2: the client-side hard cutoff is TTFT-only
+                        else None  # §12.2: the client-side hard cutoff is TTFT-only
                     )
                     if remaining is not None and remaining <= 0:
                         raise asyncio.TimeoutError
@@ -81,13 +81,13 @@ async def execute_request(
     except asyncio.TimeoutError:
         return _failure(start, f"timeout:ttft>{request_timeout_s}s", chunks, first, last)
     except asyncio.CancelledError:
-        # drain deadline cancelled an in-flight request (§11.2); record, don't drop
+        # drain deadline cancelled an in-flight request (§12.2); record, don't drop
         return _failure(start, "timeout:drain-cancelled", chunks, first, last)
     except aiohttp.ClientConnectionError as exc:
         return _failure(start, f"connection:{exc}", chunks, first, last)
     except aiohttp.ClientError as exc:
         return _failure(start, f"connection:{exc}", chunks, first, last)
-    except Exception as exc:  # §12.1 'unknown': keep the raw message for triage
+    except Exception as exc:  # §13.1 'unknown': keep the raw message for triage
         return _failure(start, f"unknown:{exc}", chunks, first, last)
 
     if not saw_done:

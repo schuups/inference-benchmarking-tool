@@ -1,11 +1,11 @@
-# Engine Deployment + Service (breithorn) — rendered by the Planner (§4).
-# Labels per §6.1 so the Cleaner and per-run teardown can discover everything.
-# Ingress/TLS wiring lands with E5 (plan §5).
+# Engine Deployment + Service (breithorn) — rendered by the Planner (§5).
+# Labels per §7.1 so the Cleaner and per-run teardown can discover everything.
+# Ingress/TLS wiring lands with E5 (plan §6).
 # run_id: {{ run_id }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: ib-engine-{{ run_id_slug }}
+  name: ibt-engine-{{ run_id_slug }}
   namespace: {{ namespace }}
   labels:
     app.kubernetes.io/managed-by: inference-benchmarking
@@ -14,11 +14,11 @@ spec:
   replicas: 1
   selector:
     matchLabels:
-      app: ib-engine-{{ run_id_slug }}
+      app: ibt-engine-{{ run_id_slug }}
   template:
     metadata:
       labels:
-        app: ib-engine-{{ run_id_slug }}
+        app: ibt-engine-{{ run_id_slug }}
         app.kubernetes.io/managed-by: inference-benchmarking
     spec:
       nodeSelector:
@@ -29,7 +29,7 @@ spec:
       containers:
       - name: engine
         image: {{ image }}
-        # §7.2: pre-checks + sampler share the engine container; gate failure stops the pod
+        # §8.2: pre-checks + sampler share the engine container; gate failure stops the pod
         command: ["bash", "-c"]
         args:
           - >
@@ -71,21 +71,21 @@ spec:
       volumes:
       - name: model-cache
         persistentVolumeClaim:
-          claimName: model-cache-{{ model_slug }}   # §6.6: kept across runs
+          claimName: model-cache-{{ model_slug }}   # §7.6: kept across runs
       - name: results
         persistentVolumeClaim:
-          claimName: ib-results-{{ run_id_slug }}
+          claimName: ibt-results-{{ run_id_slug }}
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: ib-engine-{{ run_id_slug }}
+  name: ibt-engine-{{ run_id_slug }}
   namespace: {{ namespace }}
   labels:
     app.kubernetes.io/managed-by: inference-benchmarking
     inference-benchmarking/run-id: "{{ run_id }}"
 spec:
   selector:
-    app: ib-engine-{{ run_id_slug }}
+    app: ibt-engine-{{ run_id_slug }}
   ports:
   - { port: 8000, targetPort: 8000, name: http }

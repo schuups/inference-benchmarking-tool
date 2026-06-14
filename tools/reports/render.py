@@ -1,8 +1,8 @@
-"""Headless report executor (SPECIFICATIONS.md §14.2, M9).
+"""Headless report executor (SPECIFICATIONS.md §15.2, M9).
 
 Injects parameters into the template notebook, executes it against a results DB
 with nbclient (papermill is not a dependency), and writes the executed notebook
-plus its rendered PNGs into the experiment directory (§13.8).
+plus its rendered PNGs into the experiment directory (§14.8).
 """
 
 from __future__ import annotations
@@ -80,7 +80,7 @@ def render_report(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Execute the report notebook headless (§14.2)")
+    parser = argparse.ArgumentParser(description="Execute the report notebook headless (§15.2)")
     parser.add_argument("--db", type=Path, required=True, help="results DB (per-run or central)")
     parser.add_argument("--run-id", default=None, help="run to report (required if the DB has many)")
     parser.add_argument("--out-dir", type=Path, required=True, help="experiment dir for report.ipynb + PNGs")

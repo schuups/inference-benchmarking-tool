@@ -1,4 +1,4 @@
-"""Run-ID generation + parsing (SPECIFICATIONS.md §6.2).
+"""Run-ID generation + parsing (SPECIFICATIONS.md §7.2).
 
 Format: <timestamp>_<model-slug>_<backend>_<target>_<4-hex>
 The random suffix prevents collisions when multiple Coordinators start within
@@ -55,5 +55,5 @@ def parse_run_id(run_id: str) -> RunIdParts | None:
 
 
 def run_id_slug(run_id: str) -> str:
-    """run_id → DNS/label-safe slug (K8s object names, §6.1). Underscores → '-'."""
+    """run_id → DNS/label-safe slug (K8s object names, §7.1). Underscores → '-'."""
     return re.sub(r"[^a-z0-9-]+", "-", run_id.lower()).strip("-")

@@ -7,8 +7,8 @@ Systematic measurement of LLM inference deployments across multiple dimensions:
 - **Token efficiency**: tokens consumed per task for a given model + config (system prompts, templates).
 - **Cost efficiency**: cost per completed task at a given SLO — for buy-vs-scale decisions.
 - **Reliability**: request error rates across load levels.
-- **Response quality**: quality cost of serving optimizations (weight quantization, KV dtype, …) measured via graded evals against the deployed endpoint (SPECIFICATIONS.md §12.5) — capacity gains and quality deltas disclosed in the same report; a pre-sweep sanity gate protects every sweep from measuring a corrupted deployment.
-- **Model loading times**: time-to-ready per configuration (SPECIFICATIONS.md §9.2) — supports auto-scaling decisions.
+- **Response quality**: quality cost of serving optimizations (weight quantization, KV dtype, …) measured via graded evals against the deployed endpoint (SPECIFICATIONS.md §13.5) — capacity gains and quality deltas disclosed in the same report; a pre-sweep sanity gate protects every sweep from measuring a corrupted deployment.
+- **Model loading times**: time-to-ready per configuration (SPECIFICATIONS.md §10.2) — supports auto-scaling decisions.
 - **Hardware elasticity**: benefit of dynamically adding compute under load.
 
 ## Architecture
@@ -19,19 +19,19 @@ A LLM deployment can use different engines (vLLM, SGLang, Nvidia Dynamo), span a
 
 Laptop-side (run by the operator, not allocated on any cluster):
 
-- **Pre-flight checker** — runs at the start of every session to verify credentials, cluster reachability, and K8s capacity. Distinct from the in-engine-container hardware gate in §7. (§3)
-- **Planner** — renders Jinja2 templates into the experiment's deployment artifacts (EDF / K8s manifests / sbatch / benchmark YAML). Driven via Claude Code or CLI. (§4)
-- **Coordinator** — drives one experiment end-to-end: submits the Benchmarker job, monitors progress, downloads the per-run SQLite DB into the centralized results DB, tears down on both success and failure paths. SLURM via FirecREST MCP, K8s via kubectl. (§6)
-- **Reports generator** — generates and executes a Jupyter notebook producing tables, plots, per-class SLO attainment (λ*), and the supportable-users estimate from the centralized results DB. (§12.4, §14)
-- **Cleaner** — manual, operator-approved cleanup of state that escaped the Coordinator's per-run teardown (orphaned JFrog images, leftover K8s objects, stale capstor dirs). Two stages: identification (always) + pruning (manual approval). Claude periodically reminds the operator to run it; never executes itself. (§6.7)
+- **Pre-flight checker** — runs at the start of every session to verify credentials, cluster reachability, and K8s capacity. Distinct from the in-engine-container hardware gate in §8. (§4)
+- **Planner** — renders Jinja2 templates into the experiment's deployment artifacts (EDF / K8s manifests / sbatch / benchmark YAML). Driven via Claude Code or CLI. (§5)
+- **Coordinator** — drives one experiment end-to-end: submits the Benchmarker job, monitors progress, downloads the per-run SQLite DB into the centralized results DB, tears down on both success and failure paths. SLURM via FirecREST MCP, K8s via kubectl. (§7)
+- **Reports generator** — generates and executes a Jupyter notebook producing tables, plots, per-class SLO attainment (λ*), and the supportable-users estimate from the centralized results DB. (§13.4, §15)
+- **Cleaner** — manual, operator-approved cleanup of state that escaped the Coordinator's per-run teardown (orphaned JFrog images, leftover K8s objects, stale capstor dirs). Two stages: identification (always) + pruning (manual approval). Claude periodically reminds the operator to run it; never executes itself. (§7.7)
 
 Cluster-side (allocated on the cluster under test):
 
 - **Benchmarker** — Coordinator-submitted SLURM allocation, one per experiment. Runs three sequential phases (dataset prep → engine spawn → load generation); spawns the inference deployment **only after the dataset generator has completed** so GPUs do not sit idle during CPU-bound prompt prep. Hosts:
-  - **Dataset generator** — produces the prompt dataset from the experiment's weighted `scenario_mix` (synthetic with unique headers, or real-text e.g. LongBench / WildChat). (§10)
-  - **Load generator** — awaits LLM readiness, issues requests at rate λ via the configured arrival process (Poisson or burst-aware), collects per-request metrics. (§9.3, §11)
-  - **Quality evaluator** — lm-eval-harness against the deployed endpoint(s): pre-sweep sanity gate (default-on, skippable) + post-sweep quality comparison across deployment configs. (§12.5)
-- **Inference deployment(s) under test** — the LLM serving stack(s) being measured (engine + replicas + ingress/auth/accounting). Spawned by the Benchmarker as SLURM jobs or K8s manifests; multi-instance deployments map to rows in the `instances` table. (§15.2, §13.2)
+  - **Dataset generator** — produces the prompt dataset from the experiment's weighted `scenario_mix` (synthetic with unique headers, or real-text e.g. LongBench / WildChat). (§11)
+  - **Load generator** — awaits LLM readiness, issues requests at rate λ via the configured arrival process (Poisson or burst-aware), collects per-request metrics. (§10.3, §12)
+  - **Quality evaluator** — lm-eval-harness against the deployed endpoint(s): pre-sweep sanity gate (default-on, skippable) + post-sweep quality comparison across deployment configs. (§13.5)
+- **Inference deployment(s) under test** — the LLM serving stack(s) being measured (engine + replicas + ingress/auth/accounting). Spawned by the Benchmarker as SLURM jobs or K8s manifests; multi-instance deployments map to rows in the `instances` table. (§16.2, §14.2)
 
 ## Targeted Infrastructures
 
@@ -49,7 +49,7 @@ Additional targets may be added (e.g. systems outside CSCS).
 - `.venv` — uv-based Python 3.14 virtualenv (`source .venv/bin/activate`).
 - `tools/` — implementation of the components above (includes `pre-flight-checks.py`).
 - `experiments/` — per-experiment folders (`YYYY-MM-DD_description/`) with config, deployment artifacts (Dockerfiles, sbatch, K8s YAML), and raw results.
-- `reports/` — curated, audience-facing reports synthesised from one or many `experiments/` runs. Distinct from the per-experiment notebook (which lives under `experiments/<run>/`). See §14.3.
+- `reports/` — curated, audience-facing reports synthesised from one or many `experiments/` runs. Distinct from the per-experiment notebook (which lives under `experiments/<run>/`). See §15.3.
 - `examples/` — image build, communication-plane pre-checks (`nccl-tests`), benchmark-config examples, and vLLM deployment on K8s and SLURM.
 - `firecrest-mcp/` — FirecREST MCP server registered in Claude Code. Do not modify; use via its registered tools.
 - `SPECIFICATIONS.md` — authoritative reference for detailed requirements, schema, known constraints, and cluster-specific workarounds. Read it before making changes to the tool.
@@ -65,7 +65,7 @@ Literal values to quote exactly when running project commands. Using anything el
 - **Package installs** — `uv pip install <pkg>` (system `uv`, 0.8.22). The venv intentionally does **not** ship a `pip` binary; `pip install ...` from a non-activated shell will fail with "command not found", and even after activation `pip` is absent. Use `uv pip` instead.
 - **Running a one-off Python command** — prefer `.venv/bin/python -c '...'` over activating the shell first; it is one fewer step and avoids leaking the activation into subsequent commands.
 
-Cluster-side constants (cluster catalogue, capstor scratch base, SLURM account, collective-tests cache dir, JFrog base) live in **`tools/common/global.yaml`** (SPECIFICATIONS.md §2.3), loaded by `tools/common/config.py` — read them from there instead of hardcoding literals. Per-experiment values stay in the benchmark YAML.
+Cluster-side constants (cluster catalogue, capstor scratch base, SLURM account, collective-tests cache dir, JFrog base) live in **`tools/common/global.yaml`** (SPECIFICATIONS.md §3.3), loaded by `tools/common/config.py` — read them from there instead of hardcoding literals. Per-experiment values stay in the benchmark YAML.
 
 ## How we work together
 

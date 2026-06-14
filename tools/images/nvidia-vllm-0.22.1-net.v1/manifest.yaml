@@ -1,4 +1,4 @@
-# Image manifest (SPECIFICATIONS.md §8.1).
+# Image manifest (SPECIFICATIONS.md §9.1).
 # Authoritative per-image record: identity, base, baked-in component pins,
 # published tag, build provenance, and sanity status. build.sh reads the pins
 # below and passes them to `podman build` as --build-arg (manifest wins over the
@@ -71,7 +71,7 @@ provenance:
   built_at: "2026-06-13T20:17:30+02:00"
   image_id: sha256:75147c238b2d803a31b79bc1fe487e5d464d09c630f603e1acea48a9cd7d7837
   registry_digest: sha256:f3188394e0720aecf6da6ce892bc6a281a3ecbff060860cf40b0a5f1d775921a
-  # No durable build_log: build/staging under /capstor/.../ib is EPHEMERAL (can be
+  # No durable build_log: build/staging under /capstor/.../ibt is EPHEMERAL (can be
   # reclaimed anytime). Reproducibility = netstack_git_sha + the pins above +
   # base_digest + registry_digest.
 

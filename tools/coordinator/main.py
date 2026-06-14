@@ -1,10 +1,11 @@
 """Coordinator CLI (IMPLEMENTATION_PLAN.md M8).
 
 Subcommands:
-  run    drive an experiment end-to-end. Headless for K8s (kubectl). For SLURM,
-         FirecREST is assistant-driven via MCP (open decision 5), so the autonomous
-         loop is not used — the assistant performs the phases in-session using the
-         tools.coordinator helpers; this command reports that.
+  run    drive an experiment end-to-end. The Benchmarker is always a SLURM allocation and,
+         per open decision 5, FirecREST is assistant-driven via MCP — so there is no
+         autonomous loop here; the assistant performs the phases in-session using the
+         tools.coordinator helpers, and this command reports that. (A K8s *engine* target is
+         deployed by the Benchmarker itself; there is no K8s Coordinator path.)
   merge  headless: merge a downloaded per-run DB into the centralized results DB
          (usable on any platform — e.g. after the assistant downloads a SLURM DB
          via the FirecREST MCP staged transfer).
@@ -13,16 +14,13 @@ Subcommands:
 from __future__ import annotations
 
 import argparse
-import asyncio
 import logging
 import sys
 from pathlib import Path
 
 from tools.common.config import REPO_ROOT, load_global_config
-from tools.common.runid import parse_run_id, run_id_slug
+from tools.common.runid import parse_run_id
 
-from .backend import KubectlClusterBackend
-from .coordinator import Coordinator
 from .merge import merge_run_db
 from .state import RunState
 
@@ -33,7 +31,7 @@ DEFAULT_CENTRAL_DB = REPO_ROOT / "experiments" / "results.db"
 def _target_from_run_id(run_id: str) -> str:
     parts = parse_run_id(run_id)
     if parts is None:
-        raise SystemExit(f"cannot parse target from run_id {run_id!r} (expected §6.2 format)")
+        raise SystemExit(f"cannot parse target from run_id {run_id!r} (expected §7.2 format)")
     return parts.target
 
 
@@ -73,25 +71,17 @@ def _cmd_run(args) -> int:
         state = _build_state(exp_dir, run_id, glob)
         state.save()
 
-    if state.platform != "k8s":
-        print(
-            f"SLURM run {run_id}: FirecREST is assistant-driven via MCP (open decision 5) — "
-            "drive the phases through Claude using the tools.coordinator helpers + FirecREST MCP "
-            "tools. The autonomous loop here only covers the K8s (kubectl) path.",
-            file=sys.stderr,
-        )
-        return 2
-
-    cluster = glob.clusters[state.target]
-    backend = KubectlClusterBackend(
-        namespace=cluster.namespace, run_id_slug=run_id_slug(run_id), manifest_dir=run_dir_local
+    # The Benchmarker is ALWAYS a SLURM allocation; per open decision 5 the SLURM/FirecREST
+    # path is assistant-driven via MCP in-session, so there is no autonomous loop here.
+    # (A K8s *engine* target is deployed by the Benchmarker itself, not by this command.)
+    note = "" if state.platform == "slurm" else f" — note: engine target {state.target!r} is K8s (E5)"
+    print(
+        f"Run {run_id}: the Benchmarker is a SLURM allocation driven via FirecREST MCP "
+        f"(open decision 5){note}. Drive the phases through Claude using the "
+        "tools.coordinator helpers + FirecREST MCP; this command runs no autonomous loop.",
+        file=sys.stderr,
     )
-    coordinator = Coordinator(
-        state, backend, args.central_db, poll_interval_s=args.poll_interval,
-    )
-    final = asyncio.run(coordinator.run())
-    print(f"OK: {run_id} → phase={final.phase}")
-    return 0
+    return 2
 
 
 def _cmd_merge(args) -> int:
@@ -105,7 +95,7 @@ def main() -> int:
     parser.add_argument("--central-db", type=Path, default=DEFAULT_CENTRAL_DB)
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    run = sub.add_parser("run", help="drive an experiment (headless for K8s)")
+    run = sub.add_parser("run", help="report how to drive the run (SLURM Benchmarker; assistant-driven)")
     run.add_argument("--exp-dir", type=Path, required=True)
     run.add_argument("--run-id", default=None)
     run.add_argument("--resume", action="store_true")

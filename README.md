@@ -20,9 +20,9 @@ The benchmark targets the inference-serving system end-to-end, exercising the op
 
 ### Workloads and scenarios
 
-Workloads are generated from **semantically realistic prompt and response distributions**. Scenarios include conversational chat, AI-assisted coding, long-context follow-up sessions representative of returning users (typified by a short follow-up prompt issued after an initial large context, as in AI-assisted coding), and reasoning-intensive workloads containing realistic reasoning traces and token distributions rather than arbitrarily long filler. Scenarios are blended within a single experiment via a weighted **`scenario_mix`** (e.g. 80% agentic coding + 20% chat), so cross-class interference — long agentic prefills inflating chat TTFT on a shared instance — is part of every measurement (SPECIFICATIONS.md §10.4). v1 covers text only; multimodality (image, then audio and video) is the next feature on the dataset-generator roadmap — see `TODOs.md`.
+Workloads are generated from **semantically realistic prompt and response distributions**. Scenarios include conversational chat, AI-assisted coding, long-context follow-up sessions representative of returning users (typified by a short follow-up prompt issued after an initial large context, as in AI-assisted coding), and reasoning-intensive workloads containing realistic reasoning traces and token distributions rather than arbitrarily long filler. Scenarios are blended within a single experiment via a weighted **`scenario_mix`** (e.g. 80% agentic coding + 20% chat), so cross-class interference — long agentic prefills inflating chat TTFT on a shared instance — is part of every measurement (SPECIFICATIONS.md §11.4). v1 covers text only; multimodality (image, then audio and video) is the next feature on the dataset-generator roadmap — see `TODOs.md`.
 
-**Agentic workloads** are first-class scenarios. v1 approximates them as **multi-turn sessions with bursty fan-out**: each session models one agentic task, each turn within the session models one model invocation, and tool results are synthesised as injected text in the next turn's prompt. This is enough to answer the framework's primary v1 question — *how many concurrent users can a model instance support under a realistic workload mix?* — by sweeping λ at the LLM endpoint, applying per-class SLOs to find the SLO-attained rate λ* (SPECIFICATIONS.md §12.4), and translating λ* to per-class user counts in the report notebook (§14.1).
+**Agentic workloads** are first-class scenarios. v1 approximates them as **multi-turn sessions with bursty fan-out**: each session models one agentic task, each turn within the session models one model invocation, and tool results are synthesised as injected text in the next turn's prompt. This is enough to answer the framework's primary v1 question — *how many concurrent users can a model instance support under a realistic workload mix?* — by sweeping λ at the LLM endpoint, applying per-class SLOs to find the SLO-attained rate λ* (SPECIFICATIONS.md §13.4), and translating λ* to per-class user counts in the report notebook (§15.1).
 
 The precise mechanics (per-tool JSON schemas, fan-out template DSL, schema-constrained decoding, a dedicated `agent_tasks` table, first-class bimodal output distributions) are deferred to a future iteration — see `TODOs.md` *Precise agentic / tool-calling measurement*.
 
@@ -50,12 +50,12 @@ MLPerf Inference: Datacenter is a valuable, fair, reproducible cross-platform be
 
 1. **Semantic workload realism.** Realistic prompt/response distributions, so semantics-dependent optimizations — speculative decoding, MoE routing, prefix caching, KV-cache reuse, continuous batching — are exercised rather than averaged out.
 2. **Temporal locality.** Long-lived sessions and returning-user follow-ups over established contexts are first-class, capturing locality patterns typical of AI-assisted coding, agentic workflows, and RAG.
-3. **Agentic-workload approximation.** Agentic workloads are modelled as multi-turn sessions with bursty fan-out — enough to derive supportable-user-count from the SLO-attained rate λ* (SPECIFICATIONS.md §12.4, §14.1); precise per-tool modelling deferred (see `TODOs.md`).
+3. **Agentic-workload approximation.** Agentic workloads are modelled as multi-turn sessions with bursty fan-out — enough to derive supportable-user-count from the SLO-attained rate λ* (SPECIFICATIONS.md §13.4, §15.1); precise per-tool modelling deferred (see `TODOs.md`).
 4. **Open-loop queueing dynamics.** Poisson and burst-aware arrivals expose backlog growth, tail-latency amplification, scheduler collapse, admission control, and autoscaling responsiveness — invisible to closed-loop measurement.
 5. **Service-oriented evaluation.** Captures schedulers, batching, routing, distributed runtimes, heterogeneous accelerators, interconnects, autoscaling, and orchestration overhead — not just kernel execution.
 6. **Modern LLM workloads.** Long-context, reasoning-heavy, and heterogeneous request mixes (mixed prefill/decode pressure, mixed latency sensitivity) — exposing memory-hierarchy, scheduling, and interconnect bottlenecks rather than peak FLOPs. (Multimodal request mixes are on the roadmap; v1 is text-only.)
 7. **Forward-looking scenario taxonomy.** Workload taxonomy reviewed on cadence against leading indicators; scenarios carry maturity tags so procurement evidence distinguishes validated patterns from emerging trends.
-8. **Quality-disclosed capacity.** Capacity gains from quality-impacting configurations (quantization, KV dtype) are paired in the same report with measured response-quality deltas — graded evals against the deployed endpoint (SPECIFICATIONS.md §12.5) — and a pre-sweep sanity gate protects every sweep from measuring a corrupted deployment.
+8. **Quality-disclosed capacity.** Capacity gains from quality-impacting configurations (quantization, KV dtype) are paired in the same report with measured response-quality deltas — graded evals against the deployed endpoint (SPECIFICATIONS.md §13.5) — and a pre-sweep sanity gate protects every sweep from measuring a corrupted deployment.
 
 ## Reference documentation
 
@@ -66,21 +66,21 @@ MLPerf Inference: Datacenter is a valuable, fair, reproducible cross-platform be
 
 ## Current models of interest
 
-The operational set under active measurement; [`SPECIFICATIONS.md`](SPECIFICATIONS.md) §8.2 remains authoritative for HF IDs, tokenizers, context lengths, and scenario pairings. **v1 exercises these models on text-only workloads** (multimodality is on the roadmap); the capability columns below are model-level context, not a statement of what the tool measures today.
+The operational set under active measurement; [`SPECIFICATIONS.md`](SPECIFICATIONS.md) §9.2 remains authoritative for HF IDs, tokenizers, context lengths, and scenario pairings. **v1 exercises these models on text-only workloads** (multimodality is on the roadmap); the capability columns below are model-level context, not a statement of what the tool measures today.
 
-| Model | Role (§8.2) | Text | Reasoning / Thinking | Tools |
+| Model | Role (§9.2) | Text | Reasoning / Thinking | Tools |
 |---|---|---|---|---|
 | **Apertus-70B** (Swiss AI / EPFL / ETHZ / CSCS) | target | Yes — multilingual (1000+ languages, incl. Swiss German, Romansh) | No dedicated thinking mode (base model) | Yes — tool-use |
 | **Apertus-8B** (Swiss AI / EPFL / ETHZ / CSCS) | draft — paired with Apertus-70B for speculative decoding (same family, identical tokenizer) | Yes — multilingual | No | — |
 | **Kimi-K2.6** (Moonshot AI) | target | Yes | Yes — deeper reasoning and planning; strong on agentic, multi-step workflows | Yes — strong tool-use reliability; leads open weights on HLE-with-tools |
 
-Candidate future models (e.g. DeepSeek-V4-Pro, GLM-5.1) are tracked in [`TODOs.md`](TODOs.md) and enter the §8.2 operational table when they come under active measurement.
+Candidate future models (e.g. DeepSeek-V4-Pro, GLM-5.1) are tracked in [`TODOs.md`](TODOs.md) and enter the §9.2 operational table when they come under active measurement.
 
 ## Future roadmap
 
 - Support **geo-redundancy scenarios**: load-test multi-site deployments to characterise failover latency (time from primary-site failure to standby serving traffic), in-flight request loss during failover, and the steady-state cost of cross-site routing — making availability and disaster-recovery posture testable by this tool.
 - Cover **resource elasticity**: auto-scaling latency (time from load-spike detection to an additional replica ready and serving), request-loss during scale-up / scale-down events, and pre-warmed-pool sizing trade-offs. Results feed directly into the requirements definition for the elasticity feature of CSCS vClusters.
-- Extend the v1 response-quality evaluation (graded QnA suites per SPECIFICATIONS.md §12.5) toward task efficiency evaluation — measuring how effectively a deployment configuration completes real tasks under realistic agentic workflows. This includes harder suites (MATH-500, HLE, SWE-bench-style) and studying how deployment-time controls such as system prompts, decoding policies, tool availability, and context-management strategies influence token efficiency, task completion quality, and overall operational cost.
+- Extend the v1 response-quality evaluation (graded QnA suites per SPECIFICATIONS.md §13.5) toward task efficiency evaluation — measuring how effectively a deployment configuration completes real tasks under realistic agentic workflows. This includes harder suites (MATH-500, HLE, SWE-bench-style) and studying how deployment-time controls such as system prompts, decoding policies, tool availability, and context-management strategies influence token efficiency, task completion quality, and overall operational cost.
 - Extend **modality coverage** beyond text: v1 of the dataset generator handles text-only scenarios; **image** is the next planned modality, followed by **audio** and **video** (paired corpora, per-second / per-clip token-cost accounting, registry-load-time acceptance of `modalities: [image]` / `[audio]` / `[video]`) — all tracked in [`TODOs.md`](TODOs.md).
 
 ## References
@@ -89,6 +89,6 @@ Resources consulted to develop the methodology in this tool.
 
 - *MLPerf Inference Benchmark* — Reddi et al., 2019 — [arXiv:1911.02549](https://arxiv.org/abs/1911.02549). The MLPerf Inference: Datacenter scenario definitions (Server / Offline) and metric conventions.
 - *InferenceMAX: open-source inference benchmarking* — SemiAnalysis newsletter — [newsletter post](https://newsletter.semianalysis.com/p/inferencemax-open-source-inference) and [project site](https://inferencex.semianalysis.com/).
-- *InferenceX v2: NVIDIA Blackwell vs AMD* — SemiAnalysis newsletter — [newsletter post](https://newsletter.semianalysis.com/p/inferencex-v2-nvidia-blackwell-vs). Source of the endpoint-eval quality-gate architecture adapted in SPECIFICATIONS.md §12.5.
+- *InferenceX v2: NVIDIA Blackwell vs AMD* — SemiAnalysis newsletter — [newsletter post](https://newsletter.semianalysis.com/p/inferencex-v2-nvidia-blackwell-vs). Source of the endpoint-eval quality-gate architecture adapted in SPECIFICATIONS.md §13.5.
 - *DeepSeek-V4 1.6T: Day 0 to Day 43 performance* — SemiAnalysis newsletter — [newsletter post](https://newsletter.semianalysis.com/p/deepseekv4-16t-day-0-to-day-43-performance). Software-maturity-over-time methodology and day-0 kernel-correctness case studies.
 - *InferenceX repository* — [SemiAnalysisAI/InferenceX](https://github.com/SemiAnalysisAI/InferenceX). Reference implementation of lm-eval-based quality gates (`utils/evals/`) and closed-loop concurrency benchmarking.

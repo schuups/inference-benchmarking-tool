@@ -1,8 +1,8 @@
-"""Deterministic sampling (SPECIFICATIONS.md §10.6, §10.8).
+"""Deterministic sampling (SPECIFICATIONS.md §11.6, §11.8).
 
 Per-class, per-axis sub-seeds via blake2b(f"{seed}:{scenario}:{axis}") and one
 run-level `mix` axis. All randomness goes through stdlib `random.Random`, which
-is reproducible across platforms — the §10.8 byte-for-byte contract depends on it.
+is reproducible across platforms — the §11.8 byte-for-byte contract depends on it.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ import random
 
 from .registry import Distribution
 
-THINKING_MEAN_FACTOR = 2.5  # §10.6 thinking widening
+THINKING_MEAN_FACTOR = 2.5  # §11.6 thinking widening
 THINKING_SIGMA_FACTOR = 1.5
 
 
@@ -27,7 +27,7 @@ def class_rng(seed: int, scenario: str, axis: str) -> random.Random:
 
 
 def widen_for_thinking(dist: Distribution) -> Distribution:
-    """§10.6: mean ×2.5, sigma/stdev ×1.5; fixed value ×2.5; min/max kept as clamps."""
+    """§11.6: mean ×2.5, sigma/stdev ×1.5; fixed value ×2.5; min/max kept as clamps."""
     p = dict(dist.params)
     if dist.distribution == "fixed":
         p["value"] = p["value"] * THINKING_MEAN_FACTOR
@@ -63,7 +63,7 @@ def sample_int(dist: Distribution, rng: random.Random, minimum: int = 1) -> int:
 
 
 def expected_mean(dist: Distribution, probes: int = 10_000) -> float:
-    """Deterministic empirical mean (fixed probe seed) — used for the §10.4
+    """Deterministic empirical mean (fixed probe seed) — used for the §11.4
     num_prompts split and the manifest's expected_request_share."""
     if dist.distribution == "fixed":
         return float(dist.params["value"])

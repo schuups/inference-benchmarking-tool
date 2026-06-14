@@ -1,11 +1,11 @@
-"""Arrival processes (SPECIFICATIONS.md §11.3).
+"""Arrival processes (SPECIFICATIONS.md §12.3).
 
-λ counts **session starts** (sessions/s; §11.3 *What λ counts*). Both processes
+λ counts **session starts** (sessions/s; §12.3 *What λ counts*). Both processes
 produce a deterministic schedule of session-start times for one sweep step,
 given a seeded RNG — reproducibility piggybacks on stdlib `random.Random`.
 
 burst_mmpp is a two-state on/off Markov-Modulated Poisson Process at mean rate
-λ. Parameterization from the benchmark YAML (§11.3): `burst_factor` B is the
+λ. Parameterization from the benchmark YAML (§12.3): `burst_factor` B is the
 peak-to-mean ratio (λ_burst = B·λ); `mean_burst_s` / `mean_idle_s` are the
 exponential mean sojourn times of the two states. The idle rate follows from
 keeping the long-run mean at λ:

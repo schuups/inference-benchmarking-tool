@@ -1,4 +1,4 @@
-"""§7.4 pre-check gate observation for the Coordinator's monitor loop (M8).
+"""§8.4 pre-check gate observation for the Coordinator's monitor loop (M8).
 
 The engine container already enforces the gate inline (grade.py's exit code
 gates `&& exec <engine>`), so the *decision* is pre-made by the rendered

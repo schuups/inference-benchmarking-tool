@@ -2,7 +2,7 @@
 
 Inference-engine container images extended with the **Alps HPC network stack**
 (Slingshot-11 / GH200 / MI300A), built from sources in this repo and published to
-the CSCS JFrog Artifactory (SPECIFICATIONS.md §8.1). Each image is identified by
+the CSCS JFrog Artifactory (SPECIFICATIONS.md §9.1). Each image is identified by
 **vendor × backend × backend-version × netstack-version** and is self-contained:
 the network libraries are baked in, so no container-engine CXI / aws-ofi-nccl hook
 is needed at runtime.

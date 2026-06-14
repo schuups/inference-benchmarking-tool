@@ -150,7 +150,7 @@ async def test_session_affinity_routing():
         cfg = _cfg(BASE_PORT + 2, routing="session_affinity", endpoints=endpoints)
         result = await run_step(_pool(n_turns=3), {"test-class": 1.0}, cfg)
         for r in result.requests:
-            assert r.instance_id == f"i{r.session_idx % 2}"  # §11.4
+            assert r.instance_id == f"i{r.session_idx % 2}"  # §12.4
     finally:
         for r in runners:
             await r.cleanup()
@@ -272,7 +272,7 @@ def test_parse_model_load_fixture():
     assert parsed["model_load_weights_s"] == pytest.approx(25.33)
     assert parsed["model_load_engine_init_s"] == pytest.approx(61.20)
     assert parsed["model_load_cuda_graph_capture_s"] == pytest.approx(23)
-    assert parsed["model_load_inductor_compile_s"] is None  # NULL per §9.2
+    assert parsed["model_load_inductor_compile_s"] is None  # NULL per §10.2
 
 
 @pytest.mark.asyncio

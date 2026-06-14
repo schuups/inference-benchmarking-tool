@@ -1,16 +1,16 @@
-"""One sweep step: session-start schedule -> sessions -> request rows (§11).
+"""One sweep step: session-start schedule -> sessions -> request rows (§12).
 
 Semantics implemented here:
-- λ counts session starts (§11.3); each arrival draws its class from the mix
-  weights (axis `mix`, §10.8) and consumes the next pool session of that class.
+- λ counts session starts (§12.3); each arrival draws its class from the mix
+  weights (axis `mix`, §11.8) and consumes the next pool session of that class.
 - `sequential` turns anchor on the previous turn's response + think time;
-  `open_loop` turns anchor on the previous turn's send + think time (§10.7).
+  `open_loop` turns anchor on the previous turn's send + think time (§11.7).
   Open-loop follow-ups carry whatever exchanges have completed by send time —
   the natural client behaviour when not waiting for responses.
-- append_delta (§10.7): turn K+1's messages = prior transcript + new user turn.
+- append_delta (§11.7): turn K+1's messages = prior transcript + new user turn.
 - No new sessions after measurement end; in-flight sessions drain up to
   drain_timeout_s, then are cancelled — issued requests are recorded, the
-  session is left without its final_turn row (truncated, §11.2/§12.2).
+  session is left without its final_turn row (truncated, §12.2/§13.2).
 """
 
 from __future__ import annotations
@@ -96,7 +96,7 @@ class _SessionRunner:
 
     def _route(self, session_idx: int) -> tuple[str, str]:
         if self._cfg.routing == "session_affinity":
-            return self._cfg.endpoints[session_idx % len(self._cfg.endpoints)]  # §11.4
+            return self._cfg.endpoints[session_idx % len(self._cfg.endpoints)]  # §12.4
         return self._cfg.endpoints[self._route_rng.randrange(len(self._cfg.endpoints))]
 
     async def run(self, sess: PoolSession) -> None:
@@ -153,7 +153,7 @@ class _SessionRunner:
         if sess.mode == "sequential":
             for turn in sess.turns:
                 await run_turn(turn, send_at=None)
-        else:  # open_loop: sends anchored on previous send + think (§10.7)
+        else:  # open_loop: sends anchored on previous send + think (§11.7)
             send_at = time.perf_counter()
             for turn in sess.turns:
                 if turn.turn_idx > 0:
@@ -178,7 +178,7 @@ async def _lag_guard(result: StepResult, interval_s: float) -> None:
 
 
 class PoolExhaustedError(RuntimeError):
-    """§10.4: num_prompts must outlast the request budget; never recycle prompts."""
+    """§11.4: num_prompts must outlast the request budget; never recycle prompts."""
 
 
 async def run_step(
@@ -222,11 +222,11 @@ async def run_step(
                 if not queue:
                     raise PoolExhaustedError(
                         f"prompt pool exhausted for class '{slug}' at λ={cfg.rate_lambda} "
-                        "— increase dataset_config.num_prompts (§10.4)"
+                        "— increase dataset_config.num_prompts (§11.4)"
                     )
                 session_tasks.append(asyncio.create_task(runner.run(queue.popleft())))
                 result.sessions_started += 1
-            # drain (§11.2): no new sessions; in-flight complete up to the deadline
+            # drain (§12.2): no new sessions; in-flight complete up to the deadline
             if session_tasks:
                 done, pending = await asyncio.wait(session_tasks, timeout=cfg.drain_timeout_s)
                 result.sessions_truncated = len(pending)

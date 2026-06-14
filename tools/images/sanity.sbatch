@@ -1,23 +1,23 @@
 #!/bin/bash
-# Post-push image sanity (SPECIFICATIONS.md §8.1 / §7): a short-lived 2-node job
+# Post-push image sanity (SPECIFICATIONS.md §9.1 / §8): a short-lived 2-node job
 # that validates the baked Alps network stack loads and achieves Slingshot
 # bandwidth inter-node — NCCL (+ aws-ofi/CXI), OSU, and NVSHMEM, no errors.
 #
 # Submit via FirecREST AFTER build.sh has pushed, passing the digest-pinned EDF
 # it wrote (env var SANITY_EDF). Pinning by registry digest sidesteps the stale
 # enroot tag cache across rebuilds. Example (FirecREST submit_job):
-#   env_vars = { SANITY_EDF = ".../ib/image-builds/<slug>/tests/edf-pinned.toml" }
+#   env_vars = { SANITY_EDF = ".../ibt/image-builds/<slug>/tests/edf-pinned.toml" }
 #
 # Self-contained image model: the EDF disables the CXI hook and we launch with
 # --network=disable_rdzv_get (matches the baked FI_CXI_RDZV_PROTO=alt_read).
 #SBATCH --account=csstaff
 #SBATCH --partition=normal
-#SBATCH --job-name=ib-image-sanity
+#SBATCH --job-name=ibt-image-sanity
 #SBATCH --comment=inference-benchmarking
 #SBATCH --nodes=2
 #SBATCH --ntasks-per-node=4
 #SBATCH --time=00:30:00
-#SBATCH --output=ib-image-sanity-%j.out
+#SBATCH --output=ibt-image-sanity-%j.out
 set -uo pipefail
 
 : "${SANITY_EDF:?set SANITY_EDF to the digest-pinned EDF written by build.sh}"

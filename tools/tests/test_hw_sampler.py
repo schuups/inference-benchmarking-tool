@@ -87,7 +87,7 @@ def test_tick_degrades_gracefully_off_cluster():
     node_row = rows[0]
     assert node_row["gpu_index"] is None
     for field in (*GPU_FIELDS, *NODE_FIELDS):
-        assert field in node_row  # every §13.5 signal present, possibly null
+        assert field in node_row  # every §14.5 signal present, possibly null
     json.dumps(rows)  # NDJSON-serializable
 
 

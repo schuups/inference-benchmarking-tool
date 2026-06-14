@@ -1,4 +1,4 @@
-"""M4 DoD (local half): parsers against fixtures, §7.3/§7.4 grading, gate policy.
+"""M4 DoD (local half): parsers against fixtures, §8.3/§8.4 grading, gate policy.
 
 Container execution on clariden is the cluster half, validated at E1.
 NVSHMEM fixtures are provisional shapes — re-capture from the engine image at E1.
@@ -71,7 +71,7 @@ def test_parse_dd_output_units():
 
 
 def test_grading_rules():
-    # higher is better (tolerance -10): pass / warn / fail bands (§7.3-§7.4)
+    # higher is better (tolerance -10): pass / warn / fail bands (§8.3-§8.4)
     assert grade(100.0, 100.0, -10) == "pass"
     assert grade(91.0, 100.0, -10) == "pass"
     assert grade(85.0, 100.0, -10) == "warn"
@@ -80,7 +80,7 @@ def test_grading_rules():
     assert grade(100.0, 100.0, +20) == "pass"
     assert grade(125.0, 100.0, +20) == "warn"
     assert grade(201.0, 100.0, +20) == "fail"     # > 2x expected
-    # informational: no reference yet (§7.3 TBD)
+    # informational: no reference yet (§8.3 TBD)
     assert grade(100.0, None, None) == "pass"
     # benchmark errored
     assert grade(None, 100.0, -10) == "fail"
@@ -134,12 +134,12 @@ def test_collect_measurements_maps_files_to_reference_rows(tmp_path):
     assert by_benchmark["NCCL all_reduce"]["measured"] == pytest.approx(128.13)
     assert by_benchmark["NVSHMEM alltoall_latency"]["measured"] == pytest.approx(19.46)
     assert by_benchmark["Sequential read"]["measured"] == pytest.approx(1.5)
-    # nvshmem_put_bw.out absent -> skipped-with-warning, no row (§7.1)
+    # nvshmem_put_bw.out absent -> skipped-with-warning, no row (§8.1)
     assert "NVSHMEM shmem_put_bw" not in by_benchmark
 
 
 def test_nvshmem_skip_detected_by_content(tmp_path):
-    """E1 attempt #4: the runner tees the §7.1 skip warning INTO the capture
+    """E1 attempt #4: the runner tees the §8.1 skip warning INTO the capture
     file, so a 'skipped' NVSHMEM must not grade as fail."""
     out_dir = tmp_path / "out"
     out_dir.mkdir()

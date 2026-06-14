@@ -1,5 +1,5 @@
 # E1 — walking skeleton (IMPLEMENTATION_PLAN.md §5): pipeline validation only.
-# smoke-synthetic scenario + stock NGC image, both per the §8.2 smoke-run
+# smoke-synthetic scenario + stock NGC image, both per the §9.2 smoke-run
 # exemption (operator decision 2026-06-12): results are NEVER findings.
 # Validate: .venv/bin/python -m tools.common.config examples/benchmark-configs/e1-walking-skeleton.yaml
 
@@ -26,7 +26,7 @@ dataset_config:
   scenario_mix:
     - scenario: smoke-synthetic
       weight: 1.0
-  num_prompts: 800        # > Σ λ·(warmup+measurement) = 630 expected sessions (§10.4)
+  num_prompts: 800        # > Σ λ·(warmup+measurement) = 630 expected sessions (§11.4)
   seed: 42
 
 rate_levels: [0.5, 1.0, 2.0]   # session starts/s; single-turn => requests/s
@@ -52,7 +52,7 @@ quality_eval:                          # E1 is a pure pipeline shakeout — qual
   skip_quality_compare: true           # (graded quality comes online at E2+)
 
 system_prechecks:
-  skip_system_prechecks: true          # stock NGC image lacks the MPI/NCCL build toolchain (§7.5)
+  skip_system_prechecks: true          # stock NGC image lacks the MPI/NCCL build toolchain (§8.5)
   collective_tests_version: "2.17.1"   # reconciled with the other E1 config (moot while skipped)
 
 server_time_limit: "01:30:00"

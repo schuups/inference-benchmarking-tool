@@ -8,7 +8,7 @@
 # locality and speculative-decoding acceptance reflect production chat structure
 # rather than the near-zero rates synthetic filler would give.
 #
-# `thinking: true` widens the output distribution per SPECIFICATIONS.md §10.6,
+# `thinking: true` widens the output distribution per SPECIFICATIONS.md §11.6,
 # approximating the combined think-trace-plus-answer the model emits per turn.
 
 name: chat-short-turns
@@ -16,7 +16,7 @@ summary: Short-turn conversational chat against a thinking model, with operator 
 maturity: established
 
 source:
-  kind: wildchat                     # see §10.5
+  kind: wildchat                     # see §11.5
   config:
     languages: [en]                  # ISO codes; expand to include other languages as needed
     min_turns: 2                     # drop single-turn conversations — chat-short-turns is multi-turn
@@ -29,7 +29,7 @@ output_length:
   distribution: lognormal
   params: { mean: 250, sigma: 0.4, min: 32, max: 2048 }
 
-thinking: true                       # widens output_length per §10.6
+thinking: true                       # widens output_length per §11.6
 
 session:
   mode: sequential                   # follow-up waits for the previous turn's response
@@ -45,7 +45,7 @@ manifest:
   modelled:
     - "short conversational chat turns with sequential follow-ups (operator types after reading the model's reply)"
     - "real chat material from WildChat — system-prompt prefixes, common opening phrases, language priors, follow-up patterns the prefix cache actually exploits in production"
-    - "thinking traces approximated by widened output-length distribution per §10.6"
+    - "thinking traces approximated by widened output-length distribution per §11.6"
     - "multi-turn prefix-cache benefit via append_delta prefix strategy"
     - "operator think-time between turns sampled from a lognormal distribution"
   not_modelled:

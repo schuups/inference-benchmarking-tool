@@ -69,7 +69,7 @@ async def test_ignore_eos_forces_exact_token_count(server):
     _, gaps, text, _ = await _stream(
         {"messages": [{"role": "user", "content": "capital of France please"}], "max_tokens": 24, "ignore_eos": True}
     )
-    assert len(text.split()) == 24  # §10.6 forced mode: exactly max_tokens tokens
+    assert len(text.split()) == 24  # §11.6 forced mode: exactly max_tokens tokens
 
 
 @pytest.mark.asyncio
@@ -109,6 +109,6 @@ async def test_mid_stream_abort_truncates_without_done():
                         done = True
                     elif line.startswith("data: "):
                         tokens.append(line)
-        assert len(tokens) == 3 and not done  # truncated stream → §12.1 class 'server'
+        assert len(tokens) == 3 and not done  # truncated stream → §13.1 class 'server'
     finally:
         await runner.cleanup()

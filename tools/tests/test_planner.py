@@ -69,21 +69,21 @@ def test_precheck_scope_matches_reference_strings(globals_cfg):
 
 def test_slurm_render_canonical(tmp_path, canonical_dict, globals_cfg):
     exp_dir, run_dirs = _render(tmp_path, canonical_dict, globals_cfg)
-    assert (exp_dir / "benchmark_config.yaml").exists()  # §13.8 provenance copy
+    assert (exp_dir / "benchmark_config.yaml").exists()  # §14.8 provenance copy
     assert len(run_dirs) == 1
     run_dir = run_dirs[0]
     engine = (run_dir / "engine.sbatch").read_text()
     benchmarker = (run_dir / "benchmarker.sbatch").read_text()
     edf = (run_dir / "engine.toml").read_text()
 
-    # §5.1: same account/partition/time limit on every job of the experiment
+    # §6.1: same account/partition/time limit on every job of the experiment
     for content in (engine, benchmarker):
         assert "#SBATCH --account=csstaff" in content
         assert "#SBATCH --partition=normal" in content
         assert "#SBATCH --time=04:00:00" in content
-        assert "#SBATCH --comment=inference-benchmarking" in content  # §6.1
+        assert "#SBATCH --comment=inference-benchmarking" in content  # §7.1
 
-    # M7: the orchestrator is told which deployment it is driving (§15 sweep)
+    # M7: the orchestrator is told which deployment it is driving (§16 sweep)
     assert "--deployment-index 0" in benchmarker
 
     # decision 3: deps from a staged uv venv on capstor; live tools/ on PYTHONPATH
@@ -92,7 +92,7 @@ def test_slurm_render_canonical(tmp_path, canonical_dict, globals_cfg):
     assert '"$VENV/bin/python" -m tools.benchmarker.main' in benchmarker
     assert "PYTHONPATH=" in benchmarker
 
-    # §7.2 concatenation + M3 sampler backgrounding in the same container session
+    # §8.2 concatenation + M3 sampler backgrounding in the same container session
     assert "run_system_prechecks.sh &&" in engine
     assert "hw_sampler.py" in engine and "& " not in engine.split("hw_sampler.py")[0].splitlines()[-1]
     assert 'PRECHECK_SCOPE="16× GH200, 4 nodes"' in engine  # TP4 x PP4 canonical
@@ -104,7 +104,7 @@ def test_slurm_render_canonical(tmp_path, canonical_dict, globals_cfg):
     assert "--safetensors-load-strategy prefetch" in engine
     # EDF
     assert 'workdir = ' in edf and "hf-cache" in edf
-    # §8.1 Alps-extended image (default): CXI hook disabled in the EDF, and the
+    # §9.1 Alps-extended image (default): CXI hook disabled in the EDF, and the
     # srun carries --network=disable_rdzv_get + --mpi=pmix.
     assert 'com.hooks.cxi.enabled = "false"' in edf
     assert "--network=disable_rdzv_get" in engine
@@ -126,29 +126,29 @@ def test_k8s_render(tmp_path, canonical_dict, globals_cfg):
     _, run_dirs = _render(tmp_path, canonical_dict, globals_cfg)
     run_dir = run_dirs[0]
     engine_yaml = (run_dir / "engine.yaml").read_text()
-    pod_yaml = (run_dir / "benchmarker-pod.yaml").read_text()
 
     docs = list(yaml.safe_load_all(engine_yaml))
     assert [d["kind"] for d in docs] == ["Deployment", "Service"]
     deployment = docs[0]
     labels = deployment["metadata"]["labels"]
-    assert labels["app.kubernetes.io/managed-by"] == "inference-benchmarking"  # §6.1
+    assert labels["app.kubernetes.io/managed-by"] == "inference-benchmarking"  # §7.1
     pod_spec = deployment["spec"]["template"]["spec"]
     assert pod_spec["nodeSelector"]["beta.kubernetes.io/instance-type"] == "gh200"
     container = pod_spec["containers"][0]
     assert container["resources"]["limits"]["nvidia.com/gpu"] == 4
-    assert "run_system_prechecks.sh" in container["args"][0]  # §7.2 in-pod gate
+    assert "run_system_prechecks.sh" in container["args"][0]  # §8.2 in-pod gate
     assert "hw_sampler.py" in container["args"][0]
     assert any(v["persistentVolumeClaim"]["claimName"].startswith("model-cache-")
-               for v in pod_spec["volumes"])  # §6.6 retained PVC
+               for v in pod_spec["volumes"])  # §7.6 retained PVC
 
-    pod = yaml.safe_load(pod_yaml)
-    assert pod["kind"] == "Pod"
-    assert pod["metadata"]["labels"]["app.kubernetes.io/managed-by"] == "inference-benchmarking"
+    # The Benchmarker is ALWAYS SLURM (§2) — never a K8s pod. For a K8s engine target the
+    # SLURM Benchmarker wiring is an E5 deliverable, so no benchmarker artifact renders here.
+    assert not (run_dir / "benchmarker-pod.yaml").exists()
+    assert not (run_dir / "benchmarker.sbatch").exists()
 
 
 def test_stock_image_keeps_cxi_hook(tmp_path, canonical_dict, globals_cfg):
-    # §8.1/§8.2: a stock vendor image relies on the host CXI hook, so it stays
+    # §9.1/§9.2: a stock vendor image relies on the host CXI hook, so it stays
     # enabled (no annotation) and the srun drops --network=disable_rdzv_get;
     # --mpi=pmix is always present.
     canonical_dict["deployments"][0]["alps_extended_image"] = False
@@ -173,7 +173,7 @@ def test_renders_one_run_dir_per_deployment(tmp_path, canonical_dict, globals_cf
     second["backend_config"] = dict(second["backend_config"], kv_cache_dtype="fp8")
     canonical_dict["deployments"].append(second)
     _, run_dirs = _render(tmp_path, canonical_dict, globals_cfg)
-    assert len(run_dirs) == 2  # one engine launch == one run_id (§15)
+    assert len(run_dirs) == 2  # one engine launch == one run_id (§16)
     contents = [(d / "engine.sbatch").read_text() for d in run_dirs]
     assert sum("--kv-cache-dtype fp8" in c for c in contents) == 1
     # each benchmarker carries a distinct --deployment-index (run dirs differ only

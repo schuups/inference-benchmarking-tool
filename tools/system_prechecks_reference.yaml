@@ -1,7 +1,7 @@
 # tools/system_prechecks_reference.yaml
 #
-# Per-system reference values for the system performance pre-checks (SPECIFICATIONS.md §7).
-# This file is the authoritative ground truth: §7.4 grades each pre-check measurement as
+# Per-system reference values for the system performance pre-checks (SPECIFICATIONS.md §8).
+# This file is the authoritative ground truth: §8.4 grades each pre-check measurement as
 # pass / warn / fail by comparing it against the matching entry below.
 #
 # Entry shape: { cluster, scope, benchmark, size, expected, tolerance_pct, source }.

@@ -1,8 +1,8 @@
-"""Scenario-registry loader (SPECIFICATIONS.md §10.3).
+"""Scenario-registry loader (SPECIFICATIONS.md §11.3).
 
 The registry is data, not code: one YAML per scenario under tools/scenarios/.
-Loading validates the schema, rejects non-text modalities (§10.5), and enforces
-that multi-turn scenarios carry a think_time_ms distribution (§10.3/§10.7).
+Loading validates the schema, rejects non-text modalities (§11.5), and enforces
+that multi-turn scenarios carry a think_time_ms distribution (§11.3/§11.7).
 """
 
 from __future__ import annotations
@@ -57,7 +57,7 @@ class Session(StrictModel):
     turns_per_session: Distribution
     prefix_strategy: Literal["append_delta"]
     think_time_ms: Distribution | None = None
-    followup_input_length: Distribution | None = None  # defaults to input_length (§10.3)
+    followup_input_length: Distribution | None = None  # defaults to input_length (§11.3)
 
 
 class ManifestLists(StrictModel):
@@ -82,12 +82,12 @@ class Scenario(StrictModel):
         if self.modalities != ["text"]:
             raise ValueError(
                 f"scenario '{self.name}': modalities {self.modalities} not supported — "
-                "v1 is text-only (§10.5); see TODOs.md *Multimodality*"
+                "v1 is text-only (§11.5); see TODOs.md *Multimodality*"
             )
         if self._can_be_multi_turn() and self.session.think_time_ms is None:
             raise ValueError(
                 f"scenario '{self.name}': multi-turn scenarios require "
-                "session.think_time_ms (§10.3)"
+                "session.think_time_ms (§11.3)"
             )
         return self
 

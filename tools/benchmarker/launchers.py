@@ -7,13 +7,13 @@ spawns the inference deployment) and resolve the endpoints the load generator
 targets:
 
 - SlurmEngineLauncher: nested `sbatch engine.sbatch`; endpoint
-  http://<assigned-node>:8000; teardown via scancel (§6.4).
+  http://<assigned-node>:8000; teardown via scancel (§7.4).
 - K8sEngineLauncher: `kubectl apply -f engine.yaml`; endpoint = the in-cluster
   Service DNS name; teardown deletes the Deployment + Service, leaving the
-  model-cache PVC in place (§6.5/§6.6).
+  model-cache PVC in place (§7.5/§7.6).
 
 v1 resolves a single instance per deployment (one engine launch == one run_id,
-§15). Multi-instance deployments (data-parallel replicas, routing studies) extend
+§16). Multi-instance deployments (data-parallel replicas, routing studies) extend
 submit() to return more than one Instance.
 """
 
@@ -97,9 +97,9 @@ class SlurmEngineLauncher:
         raise RuntimeError(f"engine job {self._job_id} not assigned a node within {self._poll_timeout}s")
 
     def _engine_log_path(self) -> Path:
-        # engine.sbatch: --output=%x-%j.out, --job-name=ib-engine-<run_id>, --chdir=run_dir
-        matches = sorted(self._run_dir.glob(f"ib-engine-{self._run_id}-*.out"))
-        return matches[-1] if matches else self._run_dir / f"ib-engine-{self._run_id}-{self._job_id}.out"
+        # engine.sbatch: --output=%x-%j.out, --job-name=ibt-engine-<run_id>, --chdir=run_dir
+        matches = sorted(self._run_dir.glob(f"ibt-engine-{self._run_id}-*.out"))
+        return matches[-1] if matches else self._run_dir / f"ibt-engine-{self._run_id}-{self._job_id}.out"
 
     def engine_log_text(self) -> str:
         path = self._engine_log_path()
@@ -139,19 +139,19 @@ class K8sEngineLauncher:
         if code != 0:
             raise RuntimeError(f"kubectl apply failed (exit {code}): {err.strip() or out.strip()}")
         # In-cluster Service DNS; the engine's startupProbe gates model-load wait.
-        host = f"ib-engine-{self._slug}.{self._ns}.svc"
+        host = f"ibt-engine-{self._slug}.{self._ns}.svc"
         return [Instance("i0", f"http://{host}:{ENGINE_PORT}", node=None)]
 
     def engine_log_text(self) -> str:
         r = subprocess.run(
-            ["kubectl", "logs", "-n", self._ns, f"deployment/ib-engine-{self._slug}", "--tail=500"],
+            ["kubectl", "logs", "-n", self._ns, f"deployment/ibt-engine-{self._slug}", "--tail=500"],
             capture_output=True, text=True,
         )
         return r.stdout if r.returncode == 0 else ""
 
     def is_alive(self) -> bool:
         r = subprocess.run(
-            ["kubectl", "get", "deployment", f"ib-engine-{self._slug}", "-n", self._ns,
+            ["kubectl", "get", "deployment", f"ibt-engine-{self._slug}", "-n", self._ns,
              "-o", "jsonpath={.status.replicas}"],
             capture_output=True, text=True,
         )
@@ -160,7 +160,7 @@ class K8sEngineLauncher:
         return (r.stdout.strip() or "0") != "0"
 
     async def teardown(self) -> None:
-        # Deletes Deployment + Service only; the model-cache PVC is retained (§6.6).
+        # Deletes Deployment + Service only; the model-cache PVC is retained (§7.6).
         code, _, err = await _run("kubectl", "delete", "-f", str(self._manifest), "--ignore-not-found")
         if code == 0:
             log.info("deleted k8s engine objects for %s", self._slug)

@@ -1,4 +1,4 @@
-"""lm-eval-harness EvalBackend (§12.5) — the standard-suite engine.
+"""lm-eval-harness EvalBackend (§13.5) — the standard-suite engine.
 
 Runs the EleutherAI lm-evaluation-harness against the deployed OpenAI-compatible
 endpoint via its `local-chat-completions` model, with natural decoding and the
@@ -48,7 +48,7 @@ class LmEvalBackend:
         except ImportError as exc:
             raise QualityEvalError(
                 "lm-eval-harness is not installed — it is required for standard quality "
-                "suites (§12.5) and ships in the M5 Benchmarker image. Use a builtin suite "
+                "suites (§13.5) and ships in the M5 Benchmarker image. Use a builtin suite "
                 "for a network-free gate, or set skip_quality_gate/skip_quality_compare."
             ) from exc
 

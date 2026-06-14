@@ -1,6 +1,6 @@
 # E1 — walking-skeleton pipeline validation (IMPLEMENTATION_PLAN.md E1).
 #
-# smoke-synthetic on Apertus-8B, 1× GH200 (clariden), stock vLLM image (§8.2
+# smoke-synthetic on Apertus-8B, 1× GH200 (clariden), stock vLLM image (§9.2
 # pipeline-validation exemption: stock image allowed, results are NEVER findings).
 # Single node exercises no Slingshot/CXI path, so the vanilla image is sufficient.
 # Validate the render with:
@@ -10,7 +10,7 @@ name: e1-smoke-clariden
 description: >
   E1 end-to-end pipeline shakeout: pre-checks → engine → primer → Stage-A gate →
   3-λ sweep → Stage-B (skipped) → DB → notebook. Results are pipeline validation
-  only, never published as findings (§8.2 smoke exemption).
+  only, never published as findings (§9.2 smoke exemption).
 
 deployments:
   - target: clariden
@@ -27,11 +27,11 @@ dataset_config:
   scenario_mix:
     - scenario: smoke-synthetic        # synthetic source: no HF dataset egress
       weight: 1.0
-  num_prompts: 1500                  # ≥ Σ(λ × (warmup+measurement)) ≈ 630 sessions + margin (§10.4)
+  num_prompts: 1500                  # ≥ Σ(λ × (warmup+measurement)) ≈ 630 sessions + margin (§11.4)
   seed: 1234
   output_length_mode: forced
 
-rate_levels: [0.5, 1.0, 2.0]           # 3 λ levels (session starts/s, §11.3)
+rate_levels: [0.5, 1.0, 2.0]           # 3 λ levels (session starts/s, §12.3)
 
 arrival_process:
   kind: poisson
@@ -55,9 +55,9 @@ quality_eval:                          # E1 is a pure pipeline shakeout — qual
 
 system_prechecks:
   # E1 runs the stock vLLM image, which lacks the MPI/NCCL dev stack to build
-  # nccl-tests (and a single-GPU collective is degenerate); §7 is validated on the
-  # Alps networking image at E2. §7.5 sanctions skipping in exactly this case.
+  # nccl-tests (and a single-GPU collective is degenerate); §8 is validated on the
+  # Alps networking image at E2. §8.5 sanctions skipping in exactly this case.
   skip_system_prechecks: true
   collective_tests_version: "2.17.1"
 
-server_time_limit: "02:00:00"          # shared by engine + benchmarker (§5.1)
+server_time_limit: "02:00:00"          # shared by engine + benchmarker (§6.1)

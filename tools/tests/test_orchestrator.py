@@ -22,7 +22,7 @@ from tools.benchmarker.orchestrator import (
 )
 from tools.testing.mock_openai_server import MockConfig, run_server
 
-# vLLM-style log lines so parse_model_load (§9.2) populates the instances row.
+# vLLM-style log lines so parse_model_load (§10.2) populates the instances row.
 ENGINE_LOG = (
     "INFO 06-13 [model_runner.py] Model loading took 12.3 GiB and 5.50 seconds\n"
     "INFO 06-13 [llm_engine.py] init engine (profile, create kv cache, warmup model) took 8.20 seconds\n"
@@ -186,7 +186,7 @@ async def test_full_run_persists_all_tables_dataset_before_engine(tmp_path):
         weights, total = conn.execute(
             "SELECT model_load_weights_s, model_load_total_s FROM instances"
         ).fetchone()
-        assert weights == pytest.approx(5.50)   # parsed from ENGINE_LOG (§9.2)
+        assert weights == pytest.approx(5.50)   # parsed from ENGINE_LOG (§10.2)
         assert total is not None and total >= 0
     finally:
         conn.close()
@@ -203,9 +203,9 @@ async def test_smoke_mode_no_persistence_and_two_warnings(tmp_path, caplog):
         )
     assert summary.smoke_test_mode and not summary.persisted
     assert summary.db_path is None
-    assert not (run_dir / f"run_{summary.run_id}.db").exists()  # §7.2: nothing on disk
+    assert not (run_dir / f"run_{summary.run_id}.db").exists()  # §8.2: nothing on disk
     smoke = [r for r in caplog.records if "SMOKE-TEST MODE" in r.getMessage()]
-    assert len(smoke) >= 2  # unmissable at launch and at termination (§7.2)
+    assert len(smoke) >= 2  # unmissable at launch and at termination (§8.2)
 
 
 @pytest.mark.asyncio
@@ -221,7 +221,7 @@ async def test_precheck_gate_abort_persists_prechecks_then_aborts(tmp_path):
         await _run(launcher, run_dir, run_id, quality=StubQuality())
     assert launcher.teardown_called is True
     c = _counts(run_dir / f"run_{run_id}.db")
-    assert c["experiments"] == 1 and c["system_prechecks"] == 1  # §7.4: measurements persisted
+    assert c["experiments"] == 1 and c["system_prechecks"] == 1  # §8.4: measurements persisted
     assert c["requests"] == 0  # engine never started → no sweep
 
 

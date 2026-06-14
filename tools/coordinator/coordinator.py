@@ -6,9 +6,9 @@ Drives one experiment end-to-end over a `ClusterBackend`:
 
 The loop is **resumable** — it reads the recorded phase from `RunState` and skips
 already-completed steps, so a Coordinator killed by laptop sleep / network loss
-reattaches and continues. Teardown (§6) runs on **both** success and failure; on
+reattaches and continues. Teardown (§7) runs on **both** success and failure; on
 failure the loop first makes a best-effort attempt to salvage and merge any
-partial per-run DB the Benchmarker persisted (§7.4), then tears down.
+partial per-run DB the Benchmarker persisted (§8.4), then tears down.
 
 This loop runs autonomously for the K8s (kubectl) backend and in tests (the fake
 backend). For SLURM, the operator's decision routes FirecREST through the MCP
@@ -80,10 +80,10 @@ class Coordinator:
         except Exception as exc:
             self.state.error = str(exc)
             self.state.save()
-            await self._salvage()  # best-effort: rescue a partial per-run DB (§7.4)
-            await self._teardown_once()  # §6: teardown on the failure path
+            await self._salvage()  # best-effort: rescue a partial per-run DB (§8.4)
+            await self._teardown_once()  # §7: teardown on the failure path
             raise
-        await self._teardown_once()  # §6: teardown on the success path
+        await self._teardown_once()  # §7: teardown on the success path
         return self.state
 
     # ----------------------------------------------------------- phases
@@ -172,7 +172,7 @@ class Coordinator:
         self.teardown_results = await execute_teardown(self.state, self.backend)
         failed = [(a, detail) for a, ok, detail in self.teardown_results if not ok]
         if failed:
-            # Don't record teardown as complete on partial failure (§6 "leave no
+            # Don't record teardown as complete on partial failure (§7 "leave no
             # orphans"): keep the phase so a later --resume retries the actions,
             # and surface the failures to the operator without clobbering any
             # pre-existing run error.

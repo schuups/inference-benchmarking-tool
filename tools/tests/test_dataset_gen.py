@@ -1,4 +1,4 @@
-"""M1 DoD tests: §10.8 byte-identity, §10.6 mechanics, §13.7 manifest, §10.1 aborts."""
+"""M1 DoD tests: §11.8 byte-identity, §11.6 mechanics, §14.7 manifest, §11.1 aborts."""
 
 import json
 import statistics
@@ -92,7 +92,7 @@ def _records(out_dir: Path) -> list[dict]:
         return [json.loads(line) for line in f]
 
 
-# ----------------------------------------------------------------- §10.8/§10.6
+# ----------------------------------------------------------------- §11.8/§11.6
 
 
 def test_byte_identical_regeneration(tmp_path, registry_dir):
@@ -210,7 +210,7 @@ def test_per_class_override_applies(tmp_path, registry_dir):
     assert any("fixed" in a for a in manifest["classes"][0]["assumptions"])
 
 
-# ----------------------------------------------------------------------- §13.7
+# ----------------------------------------------------------------------- §14.7
 
 
 def test_manifest_schema(tmp_path, registry_dir):
@@ -224,7 +224,7 @@ def test_manifest_schema(tmp_path, registry_dir):
         assert needle in joined
 
 
-# ------------------------------------------------------------------ §10.1/§10.5
+# ------------------------------------------------------------------ §11.1/§11.5
 
 
 FAKE_TRACES = [

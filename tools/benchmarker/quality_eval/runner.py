@@ -1,13 +1,13 @@
-"""Quality-eval runner (§12.5, M11) — implements M7's QualityEvaluator seam.
+"""Quality-eval runner (§13.5, M11) — implements M7's QualityEvaluator seam.
 
 Stage A (pre-sweep sanity gate): grade a small subset of `gate.suite` against a
 blunt absolute `gate.floor`; pass/fail. Stage B (post-sweep comparison): grade
 each `compare.suites` at each `compare.eval_concurrency` level; measurement, not
-a gate. Both produce `quality_evals` rows (§13.9) without `run_id` — the
+a gate. Both produce `quality_evals` rows (§14.9) without `run_id` — the
 orchestrator (M7) stamps `run_id` and persists them.
 
 There is no standing quality reference: Stage-B deltas are computed in-report
-across the experiment's deployment configs (§12.5).
+across the experiment's deployment configs (§13.5).
 """
 
 from __future__ import annotations

@@ -1,4 +1,4 @@
-"""Eval suites for the builtin grader (§12.5).
+"""Eval suites for the builtin grader (§13.5).
 
 The builtin backend covers small, network-free suites — a cheap sanity gate
 vehicle and the deterministic target for the M11 tests (graded against the mock

@@ -1,6 +1,6 @@
-"""Results database schema + access (SPECIFICATIONS.md §13) — seven tables.
+"""Results database schema + access (SPECIFICATIONS.md §14) — seven tables.
 
-Canonical home for the shared §13 contract. The Benchmarker writes it (cluster
+Canonical home for the shared §14 contract. The Benchmarker writes it (cluster
 side); the Coordinator's central-DB merge and the Reports generator read it
 (laptop side). It lives under `tools/common/` so every component depends on the
 schema without a laptop-side module reaching into the cluster-side package.
@@ -11,7 +11,7 @@ loop; the hardware sampler is a separate *process on the engine nodes* writing
 NDJSON, ingested here at finalisation) — so a process-local lock suffices and a
 threaded contention test asserts it.
 
-Smoke-test mode (§7.2): `ResultsDB(path, persist=False)` runs the identical
+Smoke-test mode (§8.2): `ResultsDB(path, persist=False)` runs the identical
 write path against an in-memory database — the pipeline is exercised
 end-to-end, nothing lands on disk.
 """
@@ -189,7 +189,7 @@ class ResultsDB:
             self._conn.commit()
 
     def insert_request_rows(self, run_id: str, rows: list) -> None:
-        """Persist scheduler RequestRow dataclasses (§13.3)."""
+        """Persist scheduler RequestRow dataclasses (§14.3)."""
         self.insert_many(
             "requests", [{"run_id": run_id, **asdict(r)}for r in rows]
         )
@@ -204,10 +204,10 @@ class ResultsDB:
         instance_id: str,
         windows: list[tuple[float, datetime, datetime]],
     ) -> int:
-        """Map sampler NDJSON rows onto sweep steps by timestamp (§13.5).
+        """Map sampler NDJSON rows onto sweep steps by timestamp (§14.5).
 
         `windows` = [(rate_lambda, start, end), …] covering warmup+measurement+
-        drain of each step (§12.3); samples outside every window (engine
+        drain of each step (§13.3); samples outside every window (engine
         bring-up, idle gaps) are skipped. Returns ingested row count.
         """
         hardware_columns = {name for name, _ in SCHEMA["hardware_stats"]}

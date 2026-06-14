@@ -40,7 +40,7 @@ _MANIFEST = {
         "assumptions": ["input length: lognormal mean=512", "max output tokens = 256"],
     }],
     "run_assumptions": [
-        "arrival process: poisson — λ counts session starts (§11.3)",
+        "arrival process: poisson — λ counts session starts (§12.3)",
         "routing strategy: random", "output_length_mode: forced",
         "master seed: 1", "tokenizer: word",
     ],

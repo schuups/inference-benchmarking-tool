@@ -1,4 +1,4 @@
-"""Builtin in-process grader (§12.5) — the tested EvalBackend.
+"""Builtin in-process grader (§13.5) — the tested EvalBackend.
 
 Sends each suite item to the deployed OpenAI-compatible endpoint via the load
 generator's streaming client (natural decoding, `ignore_eos=False`), scores the
@@ -64,7 +64,7 @@ class BuiltinEvalBackend:
                         model=model,
                         messages=[{"role": "user", "content": item.prompt}],
                         max_tokens=self._max_tokens,
-                        ignore_eos=False,  # natural decoding (§12.5)
+                        ignore_eos=False,  # natural decoding (§13.5)
                         request_timeout_s=self._request_timeout_s,
                     )
                     if not outcome.success:

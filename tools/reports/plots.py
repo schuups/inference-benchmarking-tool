@@ -1,4 +1,4 @@
-"""Matplotlib figures for the report notebook (§14.1). Headless (Agg backend).
+"""Matplotlib figures for the report notebook (§15.1). Headless (Agg backend).
 
 Thin presentation over analysis.py: latency percentiles vs λ with the per-class
 SLO line and a failure-rate panel, and the hardware-headroom overlay vs λ.
@@ -25,7 +25,7 @@ def set_style() -> None:
 
 
 def latency_figure(report: analysis.ReportData, metric: str, slo_threshold: float | None = None):
-    """p50/p95/p99 of `metric` vs λ (log x) + a failure-rate panel (§14.1)."""
+    """p50/p95/p99 of `metric` vs λ (log x) + a failure-rate panel (§15.1)."""
     mreq = analysis.measurement_requests(report)
     lat = analysis.latency_vs_lambda(mreq, metric)
     fail = analysis.failure_rate_vs_lambda(mreq)
@@ -51,7 +51,7 @@ def latency_figure(report: analysis.ReportData, metric: str, slo_threshold: floa
 
 
 def hardware_figure(report: analysis.ReportData, signals: list[str]):
-    """Telemetry signals vs λ — untapped-headroom overlay (§12.3/§14.1). None if no data."""
+    """Telemetry signals vs λ — untapped-headroom overlay (§13.3/§15.1). None if no data."""
     fig, ax = plt.subplots(figsize=(7, 3.5))
     plotted = False
     for signal in signals:

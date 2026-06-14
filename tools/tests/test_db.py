@@ -1,4 +1,4 @@
-"""M3 DoD: §13 schema conformance, write contention, smoke-mode, NDJSON ingestion."""
+"""M3 DoD: §14 schema conformance, write contention, smoke-mode, NDJSON ingestion."""
 
 import json
 import threading
@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from tools.common.results_db import ResultsDB
 from tools.benchmarker.load_gen.scheduler import RequestRow
 
-# Independent copy of the §13 column lists — catches silent drift in db.SCHEMA.
+# Independent copy of the §14 column lists — catches silent drift in db.SCHEMA.
 SPEC_COLUMNS = {
     "experiments": [
         "run_id", "model", "backend", "backend_config", "dataset_config",
@@ -130,7 +130,7 @@ def test_smoke_mode_persists_nothing(tmp_path):
     path = tmp_path / "run.db"
     db = ResultsDB(path, persist=False)
     db.insert("experiments", {"run_id": "r1", "created_at": "x"})
-    assert db.count("experiments") == 1  # write path fully exercised (§7.2)
+    assert db.count("experiments") == 1  # write path fully exercised (§8.2)
     db.close()
     assert not path.exists()  # nothing landed on disk
 

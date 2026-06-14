@@ -1,6 +1,6 @@
-"""Dataset sources (SPECIFICATIONS.md §10.5).
+"""Dataset sources (SPECIFICATIONS.md §11.5).
 
-Source-failure semantics per §10.1: any failure aborts the run with a clear
+Source-failure semantics per §11.1: any failure aborts the run with a clear
 error — there is no silent fallback to synthetic data.
 
 v1 status (IMPLEMENTATION_PLAN.md M1 source order):
@@ -8,7 +8,7 @@ v1 status (IMPLEMENTATION_PLAN.md M1 source order):
 - longbench               — implemented via HuggingFace `datasets` (pre-staged
                             or cached locally; lazily imported).
 - wildchat                — implemented (conversation-driven: real turn
-                            boundaries shape the session per §10.5; per-turn
+                            boundaries shape the session per §11.5; per-turn
                             lengths clamped to the scenario's bounds).
 - reasoning_trace_replay  — implemented for gsm8k; other trace datasets abort
                             with a clear error until their loaders are added.
@@ -29,7 +29,7 @@ from .tokenizers import Tokenizer
 
 
 class DatasetSourceError(RuntimeError):
-    """§10.1: source failures abort the run; never silently fall back."""
+    """§11.1: source failures abort the run; never silently fall back."""
 
 
 _FILLER_VOCABULARY = (
@@ -52,7 +52,7 @@ class SyntheticSource:
 
 
 class LongBenchSource:
-    """Real code/text drawn from THUDM/LongBench tasks (§10.5)."""
+    """Real code/text drawn from THUDM/LongBench tasks (§11.5)."""
 
     def __init__(self, source: Source, tokenizer: Tokenizer):
         self._tokenizer = tokenizer
@@ -91,7 +91,7 @@ def _load_longbench_items(tasks: list[str]) -> list[str]:
     except ImportError as exc:
         raise DatasetSourceError(
             "longbench source requires the `huggingface_hub` package "
-            "(uv pip install datasets) and pre-staged/cached data (§10.1)"
+            "(uv pip install datasets) and pre-staged/cached data (§11.1)"
         ) from exc
     try:
         zip_path = hf_hub_download(repo_id="THUDM/LongBench", filename="data.zip", repo_type="dataset")
@@ -118,7 +118,7 @@ def _load_longbench_items(tasks: list[str]) -> list[str]:
 
 
 class ConversationSource:
-    """Marker base for sources whose corpus drives the session structure (§10.5)."""
+    """Marker base for sources whose corpus drives the session structure (§11.5)."""
 
 
 # ISO codes (registry config) -> WildChat language labels; raw labels also accepted.
@@ -137,7 +137,7 @@ def _wildchat_row_matches(row: dict, language_labels: set[str], min_turns: int) 
 
 
 class WildChatSource(ConversationSource):
-    """Real user<->assistant conversations from allenai/WildChat-1M (§10.5).
+    """Real user<->assistant conversations from allenai/WildChat-1M (§11.5).
 
     Conversation turn boundaries drive the session structure; the generator
     clamps per-turn lengths to the scenario's declared distribution bounds.
@@ -168,14 +168,14 @@ def _load_wildchat_conversations(
     # unauthenticated streaming, which rate-limits to a crawl on this 3.4 GB
     # dataset. Shards are read in order until `cap` matches are collected.
     # NOTE: order is fixed per dataset revision — pin the revision for strict
-    # cross-machine reproducibility (§10.8).
+    # cross-machine reproducibility (§11.8).
     try:
         from huggingface_hub import hf_hub_download, list_repo_files
         import pyarrow.parquet as pq
     except ImportError as exc:
         raise DatasetSourceError(
             "wildchat source requires `huggingface_hub` and `pyarrow` "
-            "(uv pip install datasets) and pre-staged/cached data (§10.1)"
+            "(uv pip install datasets) and pre-staged/cached data (§11.1)"
         ) from exc
     repo = "allenai/WildChat-1M"
     try:
@@ -211,7 +211,7 @@ def _load_wildchat_conversations(
 
 
 class TraceSource:
-    """Marker base for sources replaying recorded (prompt, output) pairs (§10.5)."""
+    """Marker base for sources replaying recorded (prompt, output) pairs (§11.5)."""
 
 
 # dataset name (registry config) -> (HF repo, config, split, question field, answer field)
@@ -252,7 +252,7 @@ def _load_reasoning_traces(name: str) -> list[tuple[str, str]]:
     except ImportError as exc:
         raise DatasetSourceError(
             "reasoning_trace_replay requires the `datasets` package "
-            "(uv pip install datasets) and pre-staged/cached data (§10.1)"
+            "(uv pip install datasets) and pre-staged/cached data (§11.1)"
         ) from exc
     try:
         ds = load_dataset(repo, config, split=split)
@@ -262,7 +262,7 @@ def _load_reasoning_traces(name: str) -> list[tuple[str, str]]:
 
 
 def trim_to_tokens(text: str, max_tokens: int, tokenizer: Tokenizer) -> str:
-    """Clamp real text to a token budget by dropping trailing words (§10.5)."""
+    """Clamp real text to a token budget by dropping trailing words (§11.5)."""
     if tokenizer.count(text) <= max_tokens:
         return text
     words = text.split()
@@ -296,5 +296,5 @@ def make_source(source: Source, tokenizer: Tokenizer):
     if source.kind == "reasoning_trace_replay":
         return ReasoningTraceSource(source, tokenizer)
     raise DatasetSourceError(  # unreachable for registry-validated kinds; defensive
-        f"source kind '{source.kind}' has no implementation; aborting per §10.1"
+        f"source kind '{source.kind}' has no implementation; aborting per §11.1"
     )

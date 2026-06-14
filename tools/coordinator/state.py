@@ -3,7 +3,7 @@
 A per-run JSON state file lets the Coordinator reattach to an in-flight
 experiment after laptop sleep / network loss and skip already-completed phases.
 It lives in the local run directory (`experiments/<exp>/<run_id>/`) next to the
-planner artifacts and the downloaded per-run DB (§13.8).
+planner artifacts and the downloaded per-run DB (§14.8).
 
 Phases are linear; `phase` records the last completed step. Failure does not get
 its own phase — the error is recorded in `error` and `phase` stays at the last
@@ -27,7 +27,7 @@ PHASES = (
     "completed",  # benchmarker job finished (sweep done)
     "collected",  # per-run DB downloaded to the local run dir
     "merged",     # per-run DB merged into the centralized results DB
-    "torn_down",  # §6 teardown applied
+    "torn_down",  # §7 teardown applied
 )
 
 
@@ -44,7 +44,7 @@ class RunState:
     run_dir_remote: str  # <scratch_base>/<run_id>
     phase: str = "created"
     benchmarker_handle: str | None = None  # SLURM job id / K8s pod name
-    engine_handles: list[str] = field(default_factory=list)  # discovered, for §6.4/§6.5 teardown
+    engine_handles: list[str] = field(default_factory=list)  # discovered, for §7.4/§7.5 teardown
     db_sha256: str | None = None  # checksum of the collected per-run DB
     error: str | None = None
     created_at: str | None = None

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Hardware telemetry sampler (SPECIFICATIONS.md §12.3) — single-file, stdlib-only.
+"""Hardware telemetry sampler (SPECIFICATIONS.md §13.3) — single-file, stdlib-only.
 
 Runs ON the inference-server nodes, backgrounded inside the engine container
 session before `exec <engine>` (plan M3/M6; review finding H3). Therefore:
 NO third-party imports, NO repo imports — it must execute in any engine image
 with a bare python3. Signals a platform cannot expose are emitted as null and
-stored as NULL (§12.3).
+stored as NULL (§13.3).
 
 Output: NDJSON, one node-scoped row (gpu_index=null) plus one row per GPU per
 tick. Ingested into `hardware_stats` by the Benchmarker at finalisation
@@ -267,7 +267,7 @@ class Sampler:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="§12.3 hardware sampler (stdlib-only)")
+    parser = argparse.ArgumentParser(description="§13.3 hardware sampler (stdlib-only)")
     parser.add_argument("--out", required=True)
     parser.add_argument("--interval", type=float, default=1.0)
     parser.add_argument("--duration", type=float, default=None, help="seconds; default: until killed")
