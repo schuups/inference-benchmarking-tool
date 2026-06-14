@@ -51,7 +51,7 @@ Additional targets may be added (e.g. systems outside CSCS).
 - `experiments/` — per-experiment folders (`YYYY-MM-DD_description/`) with config, deployment artifacts (Dockerfiles, sbatch, K8s YAML), and raw results.
 - `reports/` — curated, audience-facing reports synthesised from one or many `experiments/` runs. Distinct from the per-experiment notebook (which lives under `experiments/<run>/`). See §15.3.
 - `examples/` — image build, communication-plane pre-checks (`nccl-tests`), benchmark-config examples, and vLLM deployment on K8s and SLURM.
-- `firecrest-mcp/` — FirecREST MCP server registered in Claude Code. Do not modify; use via its registered tools.
+- `firecrest-mcp/` — FirecREST MCP server registered in Claude Code, launched **per platform** with a required `--env-file` (no default `.env`): ML Platform for `clariden`/`bristen`, HPC Platform for `beverin` (see `firecrest-mcp/README.md`). Prefer using it via its registered tools; change the server only deliberately.
 - `SPECIFICATIONS.md` — authoritative reference for detailed requirements, schema, known constraints, and cluster-specific workarounds. Read it before making changes to the tool.
 - `IMPLEMENTATION_PLAN.md` — build order: component milestones (M0–M11), experiments track (E1–E5), dependencies, definitions of done, open decisions, review log. Living document; consult and update it when starting or finishing implementation work.
 - `TODOs.md` — tracked future work; deferred activities per the working agreement (see "How we work together" below).

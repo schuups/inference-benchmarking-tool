@@ -7,15 +7,18 @@ import subprocess
 import sys
 from pathlib import Path
 
+# Two FirecREST MCP servers, one per platform (see firecrest-mcp/README.md):
+#   firecrest-mlp -> clariden, bristen   ·   firecrest-hpc -> beverin
+FIRECREST_SERVERS = ("firecrest-mlp", "firecrest-hpc")
+_FIRECREST_TOOLS = (
+    "get_userinfo", "stat_path", "get_job_status", "tail_file",
+    "download_file", "get_systems", "view_file", "list_files",
+)
 REQUIRED_CLAUDE_PERMISSIONS = {
-    "mcp__firecrest__get_userinfo",
-    "mcp__firecrest__stat_path",
-    "mcp__firecrest__get_job_status",
-    "mcp__firecrest__tail_file",
-    "mcp__firecrest__download_file",
-    "mcp__firecrest__get_systems",
-    "mcp__firecrest__view_file",
-    "mcp__firecrest__list_files",
+    f"mcp__{server}__{tool}"
+    for server in FIRECREST_SERVERS
+    for tool in _FIRECREST_TOOLS
+} | {
     "WebFetch(domain:docs.cscs.ch)",
     "Bash(kubectl get *)",
     "Bash(kubectl logs *)",
@@ -61,7 +64,8 @@ def check_claude_permissions(path):
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--firecrest-host", default="clariden")
+    p.add_argument("--mlp-host", default="clariden", help="a host on the ML Platform (clariden/bristen)")
+    p.add_argument("--hpc-host", default="beverin", help="a host on the HPC Platform (beverin)")
     p.add_argument("--firecrest-user", default="stefschu")
     p.add_argument("--kube-context", default="breithorn")
     p.add_argument("--kube-namespace", default="ml")
@@ -108,18 +112,17 @@ def main():
         if r.returncode != 0:
             die(r.stderr.strip() or " ".join(cmd))
 
-    print("\n==> FirecREST MCP check")
-    prompt = (
-        f"Using the FirecREST MCP server: connect to {args.firecrest_host}, "
-        f"verify remote user is {args.firecrest_user}, and finally check "
-        f"{args.storage_conf} exists there. Return only SUCCESS or FAILURE."
-    )
-
-    r = run(["claude", "-p", prompt])
-    print(r.stdout.strip())
-
-    if r.returncode != 0 or "SUCCESS" not in r.stdout:
-        die("FirecREST MCP check failed")
+    print("\n==> FirecREST MCP check (both platform servers)")
+    for server, host in zip(FIRECREST_SERVERS, (args.mlp_host, args.hpc_host)):
+        prompt = (
+            f"Using the {server} MCP server, connect to {host}, verify the remote user "
+            f"is {args.firecrest_user}, and check that {args.storage_conf} exists there. "
+            "Return only SUCCESS or FAILURE."
+        )
+        r = run(["claude", "-p", prompt])
+        print(f"[{server} -> {host}] {r.stdout.strip()}")
+        if r.returncode != 0 or "SUCCESS" not in r.stdout:
+            die(f"FirecREST MCP check failed for {server} ({host})")
 
     print("\nSUCCESS")
 

@@ -1,22 +1,16 @@
 from typing import List, Optional, Dict, Any
 from fastmcp import FastMCP
-from config import settings
+from config import load_settings
 import firecrest as fc
 import argparse
 import logging
 
 mcp = FastMCP("firecrest-mcp")
 
-auth = fc.ClientCredentialsAuth(
-    client_id=settings.oauth_client_id,
-    client_secret=settings.oauth_client_secret,
-    token_uri=settings.oauth_token_url,
-)
-
-client = fc.v2.AsyncFirecrest(
-    firecrest_url=settings.backend_api_base_url,
-    authorization=auth,
-)
+# Built in main() from the explicit --env-file. One MCP instance per FirecREST platform
+# (ML Platform for clariden/bristen, HPC Platform for beverin), each with its own
+# credentials file — so there is no module-level client and no default-.env load.
+client: "fc.v2.AsyncFirecrest" = None  # type: ignore[assignment]
 
 
 # ---------------------------------------------------------------------------
@@ -768,12 +762,30 @@ async def wait_for_job(
 
 def parse_args():
     parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--env-file",
+        required=True,
+        help="Path to the .env credentials file for this FirecREST platform "
+             "(required — there is no default; clariden/bristen and beverin use "
+             "different files).",
+    )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8888)
     return parser.parse_args()
 
 
 def main(args):
+    global client
+    settings = load_settings(args.env_file)
+    auth = fc.ClientCredentialsAuth(
+        client_id=settings.oauth_client_id,
+        client_secret=settings.oauth_client_secret,
+        token_uri=settings.oauth_token_url,
+    )
+    client = fc.v2.AsyncFirecrest(
+        firecrest_url=settings.backend_api_base_url,
+        authorization=auth,
+    )
     # FIXME: stateless_http=True was added to simplify the invokations debugging during development (implications unclear!)
     mcp.run(transport="http", stateless_http=True, host=args.host, port=args.port)
 
