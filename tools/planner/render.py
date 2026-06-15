@@ -146,6 +146,12 @@ def render_experiment(
             "collective_tests_cache_dir": glob.collective_tests_cache_dir,
             "prechecks": cfg.system_prechecks,
             "precheck_scope": precheck_scope(deployment, glob),
+            # §8.1 collective set: TP all-reduce / SP weight-gather / MoE alltoall,
+            # plus sendrecv for the inter-node PP point-to-point link when PP>1.
+            "precheck_collectives": (
+                "all_reduce all_gather alltoall"
+                + (" sendrecv" if deployment.backend_config.pipeline_parallel_size > 1 else "")
+            ),
             "precheck_storage_scope": (
                 "Ceph PVC weights mount" if cluster.type == "k8s"
                 else "capstor weights mount (Lustre, HDD)"

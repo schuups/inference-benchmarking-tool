@@ -58,20 +58,24 @@ fi
 bash "${THIS_DIR}/build-nccl-tests.sh"
 
 # ------------------------------------------------------------- collectives
-# run-collectives.sh prints one nccl-tests table per collective; split the
-# capture per collective so grade.py maps files onto reference rows.
-for c in all_reduce all_gather alltoall; do
+# run-collectives.sh prints one nccl-tests table per collective; split the capture
+# per collective so grade.py maps files onto reference rows. The set is the
+# deployment's comm pattern (PRECHECK_COLLECTIVES: TP all-reduce / SP weight-gather /
+# MoE alltoall, + sendrecv for the PP link). rank 0 grades the captured tables, so a
+# per-rank error must NOT abort the run — the trailing `true` keeps the other PEs
+# alive (this step runs one rank per GPU; §8.2).
+for c in ${PRECHECK_COLLECTIVES:-all_reduce all_gather alltoall}; do
     COLLECTIVES="$c" bash "${THIS_DIR}/run-collectives.sh" \
-        > "${PRECHECK_OUT}/collective_${c}.out" 2>&1 || {
-        rank0 && echo "[prechecks] ${c} errored (graded as fail):" && tail -5 "${PRECHECK_OUT}/collective_${c}.out"
-    }
+        > "${PRECHECK_OUT}/collective_${c}.out" 2>&1 \
+        || { rank0 && { echo "[prechecks] ${c} errored (graded as fail):"; tail -5 "${PRECHECK_OUT}/collective_${c}.out"; }; true; }
 done
 
 # ------------------------------------------------------------- NVSHMEM / SHMEM
+# alltoall_latency is the MoE-relevant all-to-all collective; it wires up across all
+# PEs of this dedicated step (SLURM PMIx). shmem_put_bw needs EXACTLY 2 PEs (pt-to-pt),
+# which an N-rank step (N≥4) can't provide — deferred to its own 2-rank step (TODOs.md, §8.1).
 NVSHMEM_TESTS="device/coll/alltoall_latency" \
     bash "${THIS_DIR}/run-nvshmem.sh" > "${PRECHECK_OUT}/nvshmem_alltoall_latency.out" 2>&1 || true
-NVSHMEM_TESTS="device/pt-to-pt/shmem_put_bw" \
-    bash "${THIS_DIR}/run-nvshmem.sh" > "${PRECHECK_OUT}/nvshmem_put_bw.out" 2>&1 || true
 # run-nvshmem.sh exits 0 with a warning when the SDK is absent (skipped row,
 # §8.1) unless NVSHMEM_REQUIRED=1, in which case the `|| true` above must not
 # mask it — re-check explicitly:

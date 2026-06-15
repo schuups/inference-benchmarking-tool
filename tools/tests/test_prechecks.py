@@ -125,7 +125,7 @@ def test_grading_rules():
 
 def test_reference_loads_real_yaml():
     refs = load_reference("clariden", REFERENCE_PATH)
-    assert len(refs) == 12
+    assert len(refs) == 13  # 1-node (3 NCCL + 2 NVSHMEM) + 2-node (3 NCCL + sendrecv + 2 NVSHMEM) + 2 storage
     assert all(r["cluster"] == "clariden" for r in refs)
     # clariden 4× GH200 1-node NCCL is characterised at E2a -> enforceable grading
     rows = build_rows(
@@ -140,6 +140,19 @@ def test_reference_loads_real_yaml():
         refs,
     )
     assert rows_tbd[0]["expected"] is None and rows_tbd[0]["status"] == "pass"
+
+
+def test_collect_measurements_sendrecv_2node(tmp_path):
+    """The PP-link `sendrecv` collective maps to 'NCCL sendrecv' at the 2-node scope
+    with no grade.py change (collective_*.out → 'NCCL <name>')."""
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    (out_dir / "collective_sendrecv.out").write_text(NCCL_FIXTURE)
+    refs = load_reference("clariden", REFERENCE_PATH)
+    measurements = collect_measurements(out_dir, "clariden", "8× GH200, 2 nodes", "", refs)
+    by = {m["benchmark"]: m for m in measurements}
+    assert by["NCCL sendrecv"]["measured"] == pytest.approx(128.13)
+    assert by["NCCL sendrecv"]["scope"] == "8× GH200, 2 nodes"
 
 
 def test_outcome_exit_codes():

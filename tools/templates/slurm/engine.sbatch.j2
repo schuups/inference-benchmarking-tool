@@ -9,15 +9,18 @@
 #SBATCH --comment=inference-benchmarking
 #SBATCH --output=%x-%j.out
 #SBATCH --nodes={{ nodes }}
-#SBATCH --ntasks-per-node=1
+#SBATCH --ntasks-per-node={{ gpus_per_node }}
 #SBATCH --gpus-per-node={{ gpus_per_node }}
 #SBATCH --time={{ time_limit }}
 #SBATCH --chdir={{ run_dir_remote }}
+#
+# The allocation carries {{ gpus_per_node }} tasks/node so the §8 pre-check step can
+# run one rank per GPU (SPMD, --mpi=pmix); the engine step below uses 1 task/node.
 
 export HUGGING_FACE_HUB_TOKEN=$(cat ~/.hf_token 2>/dev/null || true)
 export HF_HOME={{ scratch_base }}/hf-cache
 
-# §8.2 pre-check surface (graded by tools/benchmarker/prechecks/grade.py)
+# §8 pre-check surface (graded by tools/benchmarker/prechecks/grade.py)
 export PRECHECK_CLUSTER={{ cluster }}
 export PRECHECK_SCOPE="{{ precheck_scope }}"
 export PRECHECK_STORAGE_SCOPE="{{ precheck_storage_scope }}"
@@ -29,36 +32,48 @@ export NCCL_TESTS_VERSION={{ prechecks.collective_tests_version or "2.17.1" }}
 export NCCL_TESTS_CACHE={{ prechecks.collective_tests_cache_dir or collective_tests_cache_dir }}
 export NVSHMEM_REQUIRED={{ "1" if prechecks.shmem_required else "0" }}
 export MSG_END=128M
-export NCCL_TESTS_MPI={{ "1" if nodes > 1 else "0" }}
-export PRECHECK_GPUS={{ total_gpus if nodes == 1 else 1 }}
+# The pre-check runs as a dedicated step with one rank per GPU, so the collective
+# build is always MPI (each rank drives a single GPU via -g 1); §8.2.
+export NCCL_TESTS_MPI=1
+export PRECHECK_GPUS=1
+export PRECHECK_COLLECTIVES="{{ precheck_collectives }}"
 
-{% if nodes > 1 %}
-# ---- multi-node Ray bring-up (validated at the E3 ladder; see plan §6/E3) ----
-# Head starts Ray, workers join, vLLM launches on the head with the Ray backend.
+{# Alps-extended images need --network=disable_rdzv_get alongside the CXI hook   #}
+{# being disabled in the EDF; --mpi=pmix bootstraps both the SPMD pre-check ranks #}
+{# and the engine (§9.1; docs.cscs.ch/software/alps-extended-images "Danger").    #}
+{%- set net = " --network=disable_rdzv_get" if disable_cxi_hook else "" %}
+
+# ---- §8 pre-checks: dedicated step, one rank per GPU (SPMD via PMIx) — gates the engine ----
+# Same EDF (image / libfabric / CUDA / NCCL / mounts / --network / --mpi) as the engine, so the
+# foundation measured is the engine's; the per-GPU rank topology is the engine's actual one (§8.2).
+srun --environment={{ run_dir_remote }}/engine.toml{{ net }} --ntasks-per-node={{ gpus_per_node }} --mpi=pmix \
+    bash {{ tools_remote }}/benchmarker/prechecks/run_system_prechecks.sh
+precheck_rc=$?
+if [ "${precheck_rc}" -ne 0 ]; then
+    echo "[engine.sbatch] §8 pre-checks gated the run (exit ${precheck_rc}); not starting the engine" >&2
+    exit "${precheck_rc}"
+fi
+
+{% if nodes > 1 -%}
+# ---- multi-node Ray bring-up (E3 ladder) — head starts Ray, workers join, vLLM on the head ----
 nodes_list=$(scontrol show hostnames "$SLURM_JOB_NODELIST")
 head_node=$(echo "$nodes_list" | head -1)
 export VLLM_HOST_IP=$(hostname --ip-address)
 RAY_CMD='if [ "$SLURM_NODEID" = "0" ]; then ray start --head --port=6379; else sleep 10 && ray start --address='"$head_node"':6379 --block; fi'
 {% endif %}
-
-{# Alps-extended images require --network=disable_rdzv_get alongside the CXI    #}
-{# hook being disabled in the EDF, and PMIx for the MPI-built pre-check         #}
-{# collectives (§9.1; docs.cscs.ch/software/alps-extended-images "Danger").     #}
-srun --environment={{ run_dir_remote }}/engine.toml{% if disable_cxi_hook %} --network=disable_rdzv_get{% endif %} --mpi=pmix bash -c '
+# ---- engine step: 1 task/node; §13.3 sampler backgrounded in the SAME container session ----
+srun --environment={{ run_dir_remote }}/engine.toml{{ net }} --ntasks-per-node=1 --mpi=pmix bash -c '
 set -eo pipefail
-bash {{ tools_remote }}/benchmarker/prechecks/run_system_prechecks.sh && {
-    # §13.3 sampler backgrounded in the SAME container session before exec (M3/H3)
-    python3 {{ tools_remote }}/benchmarker/hw_sampler.py \
-        --out {{ run_dir_remote }}/hw-$(hostname).ndjson --interval {{ hardware_sampling_interval_s }} &
+python3 {{ tools_remote }}/benchmarker/hw_sampler.py \
+    --out {{ run_dir_remote }}/hw-$(hostname).ndjson --interval {{ hardware_sampling_interval_s }} &
 {% if nodes > 1 %}
-    '"$RAY_CMD"'
-    if [ "$SLURM_NODEID" = "0" ]; then
-        exec {{ engine_command }} --distributed-executor-backend ray
-    else
-        wait  # workers stay alive for Ray
-    fi
+'"$RAY_CMD"'
+if [ "$SLURM_NODEID" = "0" ]; then
+    exec {{ engine_command }} --distributed-executor-backend ray
+else
+    wait  # workers stay alive for Ray
+fi
 {% else %}
-    exec {{ engine_command }}
+exec {{ engine_command }}
 {% endif %}
-}
 '

@@ -23,6 +23,8 @@
 - { cluster: clariden, scope: "8× GH200, 2 nodes", benchmark: NCCL all_reduce,           size: 128 MiB, expected: TBD GB/s busbw, tolerance_pct: -10, source: TBD }
 - { cluster: clariden, scope: "8× GH200, 2 nodes", benchmark: NCCL all_gather,           size: 128 MiB, expected: TBD GB/s busbw, tolerance_pct: -10, source: TBD }
 - { cluster: clariden, scope: "8× GH200, 2 nodes", benchmark: NCCL alltoall,             size: 128 MiB, expected: TBD GB/s busbw, tolerance_pct: -10, source: TBD }
+# sendrecv = the inter-node point-to-point link the PP boundary uses (TP4×PP2); populated by E2b.
+- { cluster: clariden, scope: "8× GH200, 2 nodes", benchmark: NCCL sendrecv,            size: 128 MiB, expected: TBD GB/s busbw, tolerance_pct: -10, source: TBD }
 - { cluster: clariden, scope: "8× GH200, 2 nodes", benchmark: NVSHMEM alltoall_latency,  size: 128 KiB, expected: TBD µs,         tolerance_pct: +20, source: TBD }
 - { cluster: clariden, scope: "8× GH200, 2 nodes", benchmark: NVSHMEM shmem_put_bw,      size: 128 MiB, expected: TBD GB/s,       tolerance_pct: -10, source: TBD }
 # Single-stream O_DIRECT read of a real Apertus-8B safetensors blob (4 GiB). Measured 62.9 MB/s

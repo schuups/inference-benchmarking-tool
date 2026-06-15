@@ -1,0 +1,90 @@
+# E2b — multi-node characterisation (IMPLEMENTATION_PLAN.md §5, experiments track).
+# Purpose: capture the clariden "8× GH200, 2 nodes" foundation reference values
+# (tools/system_prechecks_reference.yaml) — inter-node NCCL collectives + the PP-link
+# `sendrecv` + NVSHMEM `alltoall_latency` over Slingshot — so the §8.4 gate becomes
+# enforceable at E3's actual cross-node rank topology, AND validate the multi-node
+# machinery before graded E3 measurement.
+#
+# This is the first run on the refactored §8 path: pre-checks run as a DEDICATED srun
+# step at one rank per GPU (8 PEs across 2 nodes, SPMD via PMIx), separate from the
+# 1-task-per-node Ray engine step (SPECIFICATIONS.md §8.2). That dedicated step is what
+# finally gives multi-node NCCL its real per-GPU topology and wires up multi-PE NVSHMEM.
+#
+# Topology: TP4 × PP2 = 8 GPUs → 2× GH200 nodes (4 GPUs/node). TP all-reduce is intra-node
+# (NVLink-C2C); the PP boundary is the inter-node link (Slingshot) → `sendrecv` is the
+# genuinely-new measurement. Apertus-70B is a real dense cross-node PP workload (E3 ladder
+# rung), not over-served like E2a's 8B.
+#
+# PREREQUISITE (separate, not part of this config): Apertus-70B weights (~140 GB) must be in
+# the capstor hf-cache — confirm the HF id below and download before running. capstor is
+# currently degraded (slow reads), so the download + model load will be slow.
+#
+# Results are characterisation, not findings: quality is skipped; the smoke-synthetic sweep
+# only exercises the multi-node pipeline — the reference values come from the §8 pre-check
+# step at engine bring-up.
+# Validate: .venv/bin/python -m tools.common.config examples/benchmark-configs/e2b-multinode-clariden.yaml
+
+name: e2b-multinode-clariden
+description: >
+  Multi-node (8× GH200, 2 nodes) characterisation on clariden against the self-contained
+  Alps vLLM image: Apertus-70B at TP4×PP2 exercises the inter-node fabric. Runs the §8
+  pre-checks as a dedicated one-rank-per-GPU step (NCCL all_reduce/all_gather/alltoall +
+  sendrecv for the PP link + NVSHMEM alltoall_latency + capstor sequential read) to populate
+  the 2-node foundation reference values, plus a light smoke sweep to validate the Ray
+  multi-node engine bring-up end-to-end.
+
+deployments:
+  - target: clariden
+    backend: vllm
+    backend_version: "0.22.1"
+    # Repo-built, self-contained, hook-disabled Alps netstack image (§9.1), gh200 variant.
+    # Model-agnostic vLLM image — 70B runs on the same image as 8B; only the weights differ.
+    image: jfrog.svc.cscs.ch/ml/inference/vllm:0.22.1-alps.net.v1-gh200
+    model: swiss-ai/Apertus-70B-Instruct-2509   # confirm HF id + stage weights to hf-cache first
+    backend_config:
+      tensor_parallel_size: 4          # intra-node TP (NVLink-C2C), one stage per node
+      pipeline_parallel_size: 2        # → 8 GPUs → 2 nodes; PP boundary = inter-node Slingshot
+      max_model_len: 8192
+      max_num_batched_tokens: 8192
+      gpu_memory_utilization: 0.90
+      enable_prefix_caching: true
+
+dataset_config:
+  scenario_mix:
+    - scenario: smoke-synthetic
+      weight: 1.0
+  num_prompts: 400        # > Σ λ·(warmup+measurement); the sweep is secondary for E2b
+  seed: 42
+
+rate_levels: [0.5, 1.0]   # light sweep; pre-check reference values are independent of it
+
+arrival_process:
+  kind: poisson
+
+routing_strategy: random
+
+phases:
+  warmup_s: 60            # covers session-population ramp-up (§12.2)
+  measurement_s: 90
+  drain_timeout_s: 60
+  request_timeout_s: 120
+  server_ready_timeout_s: 3000   # 70B load over (degraded) capstor + multi-node Ray bring-up
+
+slos:                     # lax — only to exercise the λ* machinery
+  - { scenario: smoke-synthetic, metric: ttft_ms, percentile: p95, threshold: 5000 }
+  - { scenario: all, metric: error_rate_pct, threshold: 1.0 }
+
+quality_eval:             # characterisation run — no graded quality (lm-eval not in the venv)
+  skip_quality_gate: true
+  skip_quality_compare: true
+
+system_prechecks:
+  skip_system_prechecks: false        # the point of E2b — run the §8 foundation pre-checks
+  system_prechecks_on_warn: continue  # 2-node references are still TBD → capture, don't gate
+  system_prechecks_on_fail: continue
+  collective_tests_version: "2.18.2"  # matches the Alps image's NCCL/nccl-tests ecosystem
+  shmem_required: false               # NVSHMEM alltoall runs in the dedicated step; false avoids
+                                      # aborting the whole characterisation on an inter-node NVSHMEM
+                                      # hiccup (the Slingshot NVSHMEM path is being validated here)
+
+server_time_limit: "02:30:00"

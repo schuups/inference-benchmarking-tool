@@ -446,7 +446,7 @@ Pre-checks cover the three planes whose performance directly bounds LLM serving:
 
 | Plane | Benchmark | Validates |
 |---|---|---|
-| Collective communication | NCCL / RCCL `all_reduce`, `all_gather`, and `alltoall` (see `examples/nccl-tests/`), run at the engine's rank topology | Intra-node (NVLink / NVLink-C2C on GH200, Infinity Fabric on MI300A) and inter-node (Slingshot 11 on Alps) bandwidth in one pass. The three-collective set covers TP all-reduce, sequence-parallel / weight-gather, and MoE expert dispatch; add `reduce_scatter` / `sendrecv` / `broadcast` for PP. |
+| Collective communication | NCCL / RCCL `all_reduce`, `all_gather`, and `alltoall` (see `examples/nccl-tests/`), run at the engine's rank topology | Intra-node (NVLink / NVLink-C2C on GH200, Infinity Fabric on MI300A) and inter-node (Slingshot 11 on Alps) bandwidth in one pass. The three-collective set covers TP all-reduce, sequence-parallel / weight-gather, and MoE expert dispatch; the planner appends `sendrecv` for the inter-node PP point-to-point link when `pipeline_parallel_size > 1` (and `reduce_scatter` / `broadcast` can be added similarly). |
 | GPU-initiated one-sided RMA (vendor SHMEM) | SHMEM perftest binaries shipped with the engine image — **NVSHMEM** on NVIDIA targets, **ROCm SHMEM** on AMD targets (e.g. `device/coll/alltoall_latency`, `device/pt-to-pt/shmem_put_bw`) — run at the engine's rank topology | Put / get bandwidth and one-sided all-to-all latency. Used by MoE engines that bypass NCCL / RCCL for expert dispatch (DeepEP and equivalents). Skipped with a warning if the engine image lacks the relevant SHMEM library; `shmem_required: true` to enforce. |
 | Storage | Sequential read against the engine's model-weights mount (`capstor` / `iopsstor` on SLURM, Ceph PVC on K8s) | Read throughput as seen by the engine — **contextualises the model-loading times collected later** (§10.2), so a slow `model_load_weights_s` can be attributed to either storage or engine overhead. On Lustre also validates that `safetensors_load_strategy=prefetch` is taking effect (see §6.1). |
 
@@ -457,17 +457,29 @@ test adds maintenance without adding signal.
 
 ### 8.2 Execution
 
-- Pre-checks run in the **same container instance** the LLM engine will run in — not a
-  sibling container, not an init container. Pre-check + engine commands are **concatenated
-  into one container invocation** on both targets, so the dynamic linker has resolved the
-  exact same libfabric / CUDA / NCCL / OpenMPI build for the checks and the engine:
-  - **SLURM**: `srun --environment=<engine-edf> bash -c "run_system_prechecks && exec <engine>"`.
-    One container session per task, shared between the pre-check and the engine. Same
-    `--mpi`, `--container-mounts`, `--env`, and NUMA / CPU bindings apply throughout.
-  - **Kubernetes**: pre-launch command in the engine's own pod and container —
-    `command: ["bash", "-c", "run_system_prechecks && exec <engine>"]`. Same engine container,
-    same env vars, mounts, `securityContext`, and resource requests in effect during
-    the checks.
+- Pre-checks run as a **dedicated step inside the engine's allocation**, immediately before —
+  and gating — the engine step, using the **same EDF / container** as the engine (same image,
+  libfabric / CUDA / NCCL / OpenMPI build, mounts, `--network`, `--mpi`). The dynamic linker
+  resolves the identical stack, so the foundation measured is the one the engine sits on. The
+  two steps differ only in **rank topology**, by design:
+  - **Pre-check step (SLURM)**: `srun --environment=<engine-edf> --ntasks-per-node=<gpus_per_node>
+    --mpi=pmix bash run_system_prechecks` — **one rank per GPU** (SPMD, PMIx-bootstrapped), the
+    topology the collective / SHMEM micro-benchmarks need to measure the real per-GPU fabric
+    (intra-node NVLink *and* inter-node Slingshot) and to wire up multi-PE NVSHMEM. A non-zero
+    exit (warn/fail, §8.4) aborts the job before the engine starts.
+  - **Engine step (SLURM)**: `srun --environment=<engine-edf> --ntasks-per-node=1 --mpi=pmix bash -c
+    "<engine>"` — one task per node (vLLM drives its GPUs in-process, or via Ray for multi-node).
+    The allocation is sized `--ntasks-per-node=<gpus_per_node>` so the pre-check step gets one task
+    per GPU; the engine step simply uses fewer.
+  - **Kubernetes**: an equivalent pre-check container/step runs before the engine container in
+    the engine's own pod (same image, env, mounts, `securityContext`); K8s rank-topology details
+    are finalised at E2c.
+
+  This replaces the earlier welded `run_system_prechecks && exec <engine>` single-invocation model,
+  which could only give the pre-checks the engine's **1-task-per-node** topology — adequate
+  intra-node (one process drives all local GPUs over NVLink) but unable to measure the cross-node
+  fabric or wire up multi-PE NVSHMEM (both collapsed to 1 rank/node). The dedicated step keeps the
+  same *foundation* while measuring it at the engine's true per-GPU rank topology.
 - The collective benchmark uses the upstream test suite for the engine's stack —
   [`NVIDIA/nccl-tests`](https://github.com/NVIDIA/nccl-tests) on NVIDIA targets (`clariden`,
   `bristen`, `breithorn`) and [`ROCm/rccl-tests`](https://github.com/ROCm/rccl-tests) on
@@ -491,16 +503,20 @@ test adds maintenance without adding signal.
   only works when the container runs as root.** On the CSCS Container Engine the container
   runs as the invoking user (non-root), so the install does not succeed and the build fails
   for want of the toolchain (a missing `mpi.h` / `g++` / NCCL headers — observed at E1 on the
-  stock vLLM image). To minimise that surface, the collective build defaults to an **MPI-less
-  single-process flavor** (`NCCL_TESTS_MPI=0`; one process drives all GPUs of a node via
-  `-g N`), so single-node scopes need no MPI runtime at all; multi-node scopes set
-  `NCCL_TESTS_MPI=1` (one rank per GPU) and require the image's MPI built against the Alps
-  libfabric/CXI stack. Either way the **engine image must pre-ship the build toolchain** — the
-  repo-built Alps image (§9.1) does; stock vendor images (§9.2) do not, so
-  `skip_system_prechecks: true` is required when running on them (§8.5).
+  stock vLLM image). Because the dedicated pre-check step always runs **one rank per GPU**, the
+  collective build is always the **MPI flavor** (`NCCL_TESTS_MPI=1`; each rank drives a single
+  GPU via `-g 1`), which requires the image's MPI built against the Alps libfabric/CXI stack.
+  The **engine image must therefore pre-ship the build toolchain** — the repo-built Alps image
+  (§9.1) does; stock vendor images (§9.2) do not, so `skip_system_prechecks: true` is required
+  when running on them (§8.5).
 - The NVSHMEM benchmark uses the perftest binaries that ship with the engine image's
-  NVSHMEM SDK (no separate build). If NVSHMEM is absent the row is skipped with a warning;
-  set `nvshmem_required: true` in the benchmark YAML to make absence a failure.
+  NVSHMEM SDK (no separate build), bootstrapped over the dedicated step's SLURM PMIx ranks
+  (`PMIX_MCA_psec=native`, `NVSHMEM_DISABLE_CUDA_VMM=1`; libfabric/cxi from the image's own
+  Alps stack, host hooks disabled). `device/coll/alltoall_latency` (the MoE all-to-all
+  collective) runs across all PEs of the step; `device/pt-to-pt/shmem_put_bw` needs **exactly
+  two PEs**, so it runs in its own 2-rank step (its inter-node form gives the PP-link put
+  bandwidth). If NVSHMEM is absent the row is skipped with a warning; set `shmem_required:
+  true` in the benchmark YAML to make absence a failure.
 - Total wall-clock budget for the full pre-check suite: ≤ 120 s (configurable via
   `system_prechecks_timeout_s`), achievable only when the collective-tests cache and the
   build toolchain are already in place. A cache miss — first-time collective-tests build

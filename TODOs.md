@@ -110,22 +110,23 @@
   the clariden capstor `Sequential read` (0.063 GB/s = 62.9 MB/s) was a single sample taken
   while capstor was under general slowness — replace with a healthy-mount median (a few
   samples; consider `lfs getstripe` / stripe-count sensitivity, and an iopsstor/flash sample).
-  NVSHMEM rows stay TBD until the dedicated multi-task step lands (see below).
-- [ ] **Dedicated NVSHMEM pre-check srun step** (§8.1) — NVSHMEM perftest is multi-PROCESS
-  (1 PE per task, bootstrapped by SLURM's PMIx; CSCS guidance:
-  docs.cscs.ch/software/communication/nvshmem), so it **cannot** run inside the engine's
-  single-task `srun` session. Confirmed at E2a (2026-06-14): in-session it collapses to
-  npes=1 — `alltoall` reports busbw≡0, `put_bw` aborts "requires exactly two processes".
-  `run-nvshmem.sh` now skips cleanly in a single-task step and `grade.py` skips degenerate
-  npes=1 results, so no bogus number is recorded — but NVSHMEM is therefore **uncharacterised**.
-  To characterise it, add a pre-engine step to `engine.sbatch.j2`:
-  `srun --ntasks-per-node=N --mpi=pmix --environment=engine.toml bash run-nvshmem.sh`
-  (N PEs for `alltoall_latency`, exactly 2 for `shmem_put_bw` — two steps, set `NVSHMEM_TESTS`
-  per step), writing captures to `PRECHECK_OUT`, with `grade.py` run after. Keep the host CXI /
-  `aws_ofi_nccl` hooks **disabled** — the self-contained Alps net image (§9.1) provides its own
-  libfabric/cxi; verify on-image that NVSHMEM bootstraps without host injection (intra-node
-  NVLink P2P first, then inter-node). Also rework the `NVSHMEM_REQUIRED=1` path: a single-PE
-  engine session must surface as "needs a dedicated step", not silently pass the `|| true`.
+  NVSHMEM `alltoall_latency` + the 2-node NCCL/sendrecv rows get characterised via the dedicated
+  pre-check step (below): single-node (intra-node NVLink) at the E2a re-validation, 2-node
+  (inter-node Slingshot) at E2b.
+- [ ] **NVSHMEM `shmem_put_bw` 2-rank step + single-node re-validation** (§8.1/§8.2) — the dedicated
+  one-rank-per-GPU pre-check step is now **implemented**: `engine.sbatch.j2` runs
+  `srun --ntasks-per-node=<gpus_per_node> --mpi=pmix bash run_system_prechecks.sh` (NCCL collectives
+  + `sendrecv` for PP + NVSHMEM `alltoall_latency`, all across the step's PEs via SLURM PMIx), gating
+  a separate 1-task-per-node engine step. Two follow-ups remain:
+  (a) **`shmem_put_bw`** is point-to-point and needs **exactly 2 PEs**, which the N≥4 step can't give
+  — add a separate `srun --ntasks=2` step (1 PE/node for the inter-node link), capture to
+  `PRECHECK_OUT`, grade after, and populate the `shmem_put_bw` reference rows.
+  (b) **Re-validate single-node** under the dedicated step: re-run the 8B 1-node config, confirm the
+  4-rank-MPI NCCL busbw and re-baseline the committed clariden 1-node reference rows if they shifted
+  from the old `-g 4` values, and capture the (now-enabled) single-node NVSHMEM `alltoall_latency`
+  (intra-node NVLink — the low-risk case to validate NVSHMEM on the hook-disabled image before E2b's
+  inter-node Slingshot path). Host CXI / `aws_ofi_nccl` hooks stay **disabled** (image provides
+  libfabric/cxi).
 
 ## Candidate models
 

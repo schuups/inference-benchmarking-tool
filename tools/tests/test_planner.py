@@ -92,8 +92,15 @@ def test_slurm_render_canonical(tmp_path, canonical_dict, globals_cfg):
     assert '"$VENV/bin/python" -m tools.benchmarker.main' in benchmarker
     assert "PYTHONPATH=" in benchmarker
 
-    # §8.2 concatenation + M3 sampler backgrounding in the same container session
-    assert "run_system_prechecks.sh &&" in engine
+    # §8.2: pre-checks run as a DEDICATED one-rank-per-GPU srun step that gates the engine
+    # (the welded `run_system_prechecks && exec` model is retired) + M3 sampler backgrounding.
+    assert "run_system_prechecks.sh &&" not in engine                       # welded model gone
+    assert "#SBATCH --ntasks-per-node=4" in engine                          # alloc sized for the step
+    assert "--ntasks-per-node=4 --mpi=pmix" in engine                       # precheck step: 1 rank/GPU
+    assert "--ntasks-per-node=1 --mpi=pmix bash -c" in engine               # engine step: 1 task/node
+    assert "precheck_rc=$?" in engine                                       # gate before the engine
+    assert "NCCL_TESTS_MPI=1" in engine and "PRECHECK_GPUS=1" in engine     # always MPI, -g 1
+    assert 'PRECHECK_COLLECTIVES="all_reduce all_gather alltoall sendrecv"' in engine  # PP → +sendrecv
     assert "hw_sampler.py" in engine and "& " not in engine.split("hw_sampler.py")[0].splitlines()[-1]
     assert 'PRECHECK_SCOPE="16× GH200, 4 nodes"' in engine  # TP4 x PP4 canonical
     assert "#SBATCH --nodes=4" in engine
@@ -118,6 +125,11 @@ def test_slurm_single_node_has_no_ray(tmp_path, canonical_dict, globals_cfg):
     assert "#SBATCH --nodes=1" in engine
     assert "ray start" not in engine
     assert 'PRECHECK_SCOPE="4× GH200, 1 node"' in engine
+    # single-node also uses the dedicated step (4 ranks on 1 node), not the welded model;
+    # PP=1 → no sendrecv in the collective set
+    assert "run_system_prechecks.sh &&" not in engine
+    assert "--ntasks-per-node=4 --mpi=pmix" in engine
+    assert 'PRECHECK_COLLECTIVES="all_reduce all_gather alltoall"' in engine
 
 
 def test_k8s_render(tmp_path, canonical_dict, globals_cfg):
