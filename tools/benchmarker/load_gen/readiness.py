@@ -23,9 +23,12 @@ MODEL_LOAD_PATTERNS = {
     # Same line, the GiB — lets the report compare the §8 storage benchmark (GB/s) against
     # vLLM's own effective weight-load bandwidth (gib / weights_s).
     "model_load_weights_gib": re.compile(r"Model loading took ([\d.]+) GiB(?:\s+\w+)? and [\d.]+ seconds"),
-    "model_load_engine_init_s": re.compile(r"init engine \([^)]*\) took ([\d.]+) seconds"),
+    # vLLM 0.22.1: "init engine (profile, create kv cache, warmup model) took 18.66 s" — the unit
+    # is "s", not "seconds" (the old regex silently captured nothing). `s(?:econds)?\b` tolerates both.
+    "model_load_engine_init_s": re.compile(r"init engine \([^)]*\) took ([\d.]+) s(?:econds)?\b"),
     "model_load_cuda_graph_capture_s": re.compile(r"Graph capturing finished in ([\d.]+) secs"),
-    "model_load_inductor_compile_s": re.compile(r"torch\.compile takes ([\d.]+) s"),
+    # vLLM 0.22.1: "torch.compile took 7.57 s in total" — "took", not "takes" (old regex missed it).
+    "model_load_inductor_compile_s": re.compile(r"torch\.compile took ([\d.]+) s(?:econds)?\b"),
 }
 
 

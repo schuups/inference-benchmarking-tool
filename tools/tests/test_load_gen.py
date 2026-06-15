@@ -263,23 +263,27 @@ def test_parse_metrics():
 
 
 def test_parse_model_load_fixture():
-    # Real vLLM 0.22.1 line carries a "memory" token ("… GiB memory and … seconds"),
-    # captured on the Alps image at E2a (2026-06-15) — the parser must tolerate it.
+    # The exact vLLM 0.22.1 lines captured on the Alps image at E2a (2026-06-15): "GiB memory and",
+    # engine-init/torch.compile report "s" (not "seconds"), torch.compile says "took" (not "takes").
     log = (
         "INFO 06-12 [gpu_model_runner.py] Model loading took 123.45 GiB memory and 25.33 seconds\n"
-        "INFO 06-12 [llm_engine.py] init engine (profile, create kv cache, warmup model) took 61.20 seconds\n"
-        "INFO 06-12 [model_runner.py] Graph capturing finished in 23 secs\n"
+        "INFO 06-12 [core.py] init engine (profile, create kv cache, warmup model) took 18.66 s (compilation: 7.73 s)\n"
+        "INFO 06-12 [model_runner.py] Graph capturing finished in 7 secs, took 0.40 GiB\n"
+        "INFO 06-12 [backends.py] torch.compile took 7.57 s in total\n"
     )
     parsed = parse_model_load(log)
     assert parsed["model_load_weights_s"] == pytest.approx(25.33)
     assert parsed["model_load_weights_gib"] == pytest.approx(123.45)  # → effective load BW vs §8 storage
-    assert parsed["model_load_engine_init_s"] == pytest.approx(61.20)
-    assert parsed["model_load_cuda_graph_capture_s"] == pytest.approx(23)
-    assert parsed["model_load_inductor_compile_s"] is None  # NULL per §10.2
-    # older builds without the "memory" token still parse
-    older = parse_model_load("Model loading took 7.0 GiB and 9.0 seconds\n")
+    assert parsed["model_load_engine_init_s"] == pytest.approx(18.66)   # "took … s", not "seconds"
+    assert parsed["model_load_cuda_graph_capture_s"] == pytest.approx(7)
+    assert parsed["model_load_inductor_compile_s"] == pytest.approx(7.57)  # "took", not "takes"
+    # older builds without the "memory" token (and "seconds" spelled out) still parse
+    older = parse_model_load(
+        "Model loading took 7.0 GiB and 9.0 seconds\ntorch.compile took 3.0 seconds in total\n"
+    )
     assert older["model_load_weights_s"] == pytest.approx(9.0)
     assert older["model_load_weights_gib"] == pytest.approx(7.0)
+    assert older["model_load_inductor_compile_s"] == pytest.approx(3.0)
 
 
 @pytest.mark.asyncio
