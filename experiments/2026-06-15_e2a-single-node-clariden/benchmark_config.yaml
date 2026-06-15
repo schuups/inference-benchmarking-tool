@@ -1,0 +1,80 @@
+# E2a — single-node characterisation (IMPLEMENTATION_PLAN.md §5, experiments track).
+# Purpose: capture the clariden "4× GH200, 1 node" foundation reference values
+# (tools/system_prechecks_reference.yaml) so the §8.4 gate becomes enforceable at
+# single-node scope — and validate the §8 in-container pre-checks on the
+# self-contained Alps image (M4 cluster half).
+#
+# Differs from E1 in exactly the ways that matter for E2a:
+#   - repo-built **Alps netstack image** (§9.1), not the stock NGC image, so the
+#     pre-checks' nccl-tests build finds the MPI/NCCL toolchain baked in (the stock
+#     image ran non-root and could not, hence E1 skipped §8);
+#   - **§8 pre-checks ENABLED** (skip_system_prechecks: false);
+#   - **TP=4** → the engine holds all 4 GPUs of the node, so PRECHECK_GPUS=4 and the
+#     NCCL/NVSHMEM checks exercise the intra-node NVLink-C2C fabric (the scope the
+#     reference rows are keyed on). Apertus-8B is over-served at TP=4, but E2a measures
+#     the *fabric*, not model efficiency.
+# Results are characterisation, not findings: quality is skipped (lm-eval is not in the
+# E1/E2 venv); the sweep just exercises the pipeline — the reference values come from the
+# one §8 pre-check pass at engine bring-up.
+# Validate: .venv/bin/python -m tools.common.config examples/benchmark-configs/e2a-single-node-clariden.yaml
+
+name: e2a-single-node-clariden
+description: >
+  Single-node (4× GH200) characterisation on clariden against the self-contained Alps
+  vLLM image: runs the §8 pre-checks (NCCL collectives, NVSHMEM, capstor sequential read)
+  to populate the 1-node foundation reference values, plus a light load sweep to exercise
+  the full pipeline end-to-end on the repo-built image.
+
+deployments:
+  - target: clariden
+    backend: vllm
+    backend_version: "0.22.1"
+    # Repo-built, self-contained, hook-disabled Alps netstack image (§9.1), gh200 variant.
+    image: jfrog.svc.cscs.ch/ml/inference/vllm:0.22.1-alps.net.v1-gh200
+    model: swiss-ai/Apertus-8B-Instruct-2509
+    backend_config:
+      tensor_parallel_size: 4          # full node → PRECHECK_GPUS=4 (intra-node NVLink-C2C)
+      max_model_len: 8192
+      max_num_batched_tokens: 8192
+      gpu_memory_utilization: 0.90
+      enable_prefix_caching: true
+
+dataset_config:
+  scenario_mix:
+    - scenario: smoke-synthetic
+      weight: 1.0
+  num_prompts: 400        # > Σ λ·(warmup+measurement); the sweep is secondary for E2a
+  seed: 42
+
+rate_levels: [0.5, 1.0]   # light sweep; pre-check reference values are independent of it
+
+arrival_process:
+  kind: poisson
+
+routing_strategy: random
+
+phases:
+  warmup_s: 60            # covers session-population ramp-up (§12.2)
+  measurement_s: 90
+  drain_timeout_s: 60
+  request_timeout_s: 120
+  server_ready_timeout_s: 1800
+
+slos:                     # lax — only to exercise the λ* machinery
+  - { scenario: smoke-synthetic, metric: ttft_ms, percentile: p95, threshold: 2000 }
+  - { scenario: all, metric: error_rate_pct, threshold: 1.0 }
+
+quality_eval:             # characterisation run — no graded quality (lm-eval not in the venv)
+  skip_quality_gate: true
+  skip_quality_compare: true
+
+system_prechecks:
+  skip_system_prechecks: false        # the point of E2a — run the §8 foundation pre-checks
+  system_prechecks_on_warn: continue  # references are still TBD → capture measurements, don't gate
+  system_prechecks_on_fail: continue
+  collective_tests_version: "2.18.2"  # matches the Alps image's NCCL/nccl-tests ecosystem
+  shmem_required: false               # image ships NVSHMEM, so the perftest still runs (captures
+                                      # its reference rows); false just avoids aborting the whole
+                                      # characterisation run on a NVSHMEM hiccup
+
+server_time_limit: "01:30:00"
