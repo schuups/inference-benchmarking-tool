@@ -2,12 +2,15 @@
 source "$(dirname "$0")/_helpers.sh"
 setup_env
 
-# Use JFrog Artifactory as an APT proxy/cache for Ubuntu packages, to speed
-# up installs and reduce load on Ubuntu mirrors.
+# Use JFrog Artifactory as an APT proxy/cache for x86 Ubuntu packages, to speed up
+# installs and reduce load on Ubuntu mirrors. NOTE: aarch64 (GH200) uses
+# ports.ubuntu.com, which we deliberately do NOT redirect to the JFrog ubuntu-ports
+# mirror — that mirror has lagged upstream (2026-06-15: libudev1 8.16 present but udev
+# only 8.15, so rdma-core's udev dep -> "held broken packages"). Upstream ports is
+# reachable from the build nodes and stays internally consistent.
 sed -i \
     -e 's|http://archive.ubuntu.com/ubuntu|https://jfrog.svc.cscs.ch/artifactory/ubuntu|' \
     -e 's|http://security.ubuntu.com/ubuntu|https://jfrog.svc.cscs.ch/artifactory/ubuntu|' \
-    -e 's|http://ports.ubuntu.com/ubuntu-ports|https://jfrog.svc.cscs.ch/artifactory/ubuntu-ports|' \
     /etc/apt/sources.list.d/ubuntu.sources
 printf '%s\n%s' "Acquire::http::AllowRedirect "true";" "Acquire::http::Pipeline-Depth "0";" \
     > /etc/apt/apt.conf.d/99-jfrog-proxy
