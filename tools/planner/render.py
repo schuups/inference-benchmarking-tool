@@ -21,7 +21,13 @@ from tools.common.config import (
     load_benchmark_config,
     load_global_config,
 )
-from tools.common.runid import make_run_id, model_slug, run_id_slug
+from tools.common.runid import (
+    k8s_slug,
+    make_run_id,
+    model_cache_slug,
+    model_slug,
+    run_id_slug,
+)
 
 TEMPLATES_DIR = Path(__file__).resolve().parents[1] / "templates"
 
@@ -126,8 +132,10 @@ def render_experiment(
         context = {
             "run_id": run_id,
             "run_id_slug": run_id_slug(run_id),
+            "k8s_slug": k8s_slug(run_id),  # bounded (<=51) DNS-1035 slug for K8s object names
             "deployment_index": deployment_index,  # M7 selects cfg.deployments[index]
             "model_slug": model_slug(deployment.model),
+            "model_cache_slug": model_cache_slug(deployment.model),  # k8s PVC claim (org-inclusive)
             "model_id": deployment.model,  # §8.1 storage check targets this model's HF-cache shards
             "cluster": deployment.target,
             "image": default_image(deployment, glob),
@@ -143,6 +151,9 @@ def render_experiment(
             "partition": cluster.partition,
             "namespace": cluster.namespace,
             "node_type": cluster.node_type,
+            "ingress_domain": cluster.ingress_domain,      # k8s: engine Ingress host domain (§6.2)
+            "image_pull_secret": cluster.image_pull_secret,  # k8s: JFrog dockerconfigjson secret
+            "engine_port": 8000,
             "time_limit": cfg.server_time_limit or "04:00:00",
             "scratch_base": glob.scratch_base,
             "run_dir_remote": f"{glob.scratch_base}/{run_id}",

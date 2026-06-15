@@ -21,10 +21,10 @@ import sys
 from pathlib import Path
 
 from tools.common.config import SCENARIOS_DIR, load_benchmark_config, load_global_config
-from tools.common.runid import run_id_slug
+from tools.common.runid import k8s_slug
 
 from .dataset_gen.tokenizers import load_tokenizer
-from .launchers import K8sEngineLauncher, SlurmEngineLauncher
+from .launchers import ExternalEndpointLauncher, K8sEngineLauncher, SlurmEngineLauncher
 from .orchestrator import RunAborted, run_experiment
 from .quality_eval.base import QualityEvalError
 from .quality_eval.lm_eval_backend import LmEvalBackend
@@ -41,6 +41,12 @@ def main() -> int:
     parser.add_argument("--engine-sbatch", type=Path, help="SLURM engine job (SLURM path)")
     parser.add_argument("--engine-manifest", type=Path, help="K8s engine manifest (K8s path)")
     parser.add_argument("--k8s", action="store_true", help="Kubernetes deployment target")
+    parser.add_argument(
+        "--endpoint-url",
+        help="Option B (§6.2): drive load against an already-deployed engine at this URL "
+        "(e.g. the K8s Ingress). The engine is deployed/torn-down out-of-band by the "
+        "laptop/Coordinator; the Benchmarker invokes no kubectl. Overrides --k8s/--engine-*.",
+    )
     parser.add_argument(
         "--deployment-index", type=int, default=0,
         help="index into config.deployments this run corresponds to (§16 deployment sweep)",
@@ -61,12 +67,16 @@ def main() -> int:
 
     tokenizer = load_tokenizer(cfg.dataset_config.tokenizer_id or deployment.model)
 
-    if args.k8s:
+    if args.endpoint_url:
+        # Option B (§6.2): engine deployed out-of-band; Benchmarker only load-gens.
+        launcher = ExternalEndpointLauncher(args.endpoint_url)
+    elif args.k8s:
         cluster = glob.clusters[deployment.target]
         launcher = K8sEngineLauncher(
             engine_manifest=args.engine_manifest or (args.run_dir / "engine.yaml"),
             namespace=cluster.namespace,
-            run_id_slug=run_id_slug(args.run_id),
+            slug=k8s_slug(args.run_id),  # bounded slug matching the rendered manifest
+            ingress_domain=cluster.ingress_domain,
         )
     else:
         launcher = SlurmEngineLauncher(

@@ -24,9 +24,11 @@ clusters:
   breithorn:
     type: k8s
     namespace: ml
-    node_type: gh200               # nodeSelector beta.kubernetes.io/instance-type
+    node_type: gh200               # nodeSelector node.kubernetes.io/instance-type
     gpus_per_node: 4
     gpu_label: gh200
+    ingress_domain: breithorn.svc.cscs.ch   # engine Ingress host: ibt-engine-<slug>.<this>; nginx + cert-manager letsencrypt, reachable from the SLURM Benchmarker (§6.2)
+    image_pull_secret: jfrog-pull            # dockerconfigjson secret in ns ml for jfrog.svc.cscs.ch (anonymous pull is 403)
 
 slurm:
   account: csstaff                 # never use other accounts (§6.1)

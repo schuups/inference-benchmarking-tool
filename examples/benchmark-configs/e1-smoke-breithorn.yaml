@@ -1,0 +1,69 @@
+# E1-class walking-skeleton on Kubernetes (breithorn) — platform-path validation.
+#
+# Same shape as e1-smoke-clariden.yaml but the engine deploys on breithorn (K8s).
+# Per the Option-B decision (decision-5 analog): the laptop/Coordinator runs
+# `kubectl apply`; the SLURM Benchmarker only dataset-gens + load-gens against the
+# engine's Ingress (https://ibt-engine-<slug>.breithorn.svc.cscs.ch). Drive the
+# benchmarker with `--endpoint-url <that URL>` (no kubectl from the SLURM job).
+#
+# Uses the repo-built, K8s-ready Alps image (self-contained, hook-disabled, §9.1).
+# Weights load from the pre-populated, READ-ONLY model-cache PVC (HF_HOME=/model-cache,
+# HF_HUB_OFFLINE=1) — no HF egress/token, and the shared PVC is never mutated.
+# Results are pipeline/platform validation only, never findings (§9.2 smoke exemption).
+# Render with:
+#   .venv/bin/python -m tools.planner.render examples/benchmark-configs/e1-smoke-breithorn.yaml --out /tmp/e1k8s
+
+name: e1-smoke-breithorn
+description: >
+  E1 walking skeleton on K8s: kubectl-apply engine on breithorn -> ingress+cert ->
+  readiness -> primer -> 3-lambda sweep against the ingress -> DB -> notebook. Validates
+  the K8s engine path + SLURM->ingress reachability. Never published as findings (§9.2).
+
+deployments:
+  - target: breithorn
+    backend: vllm
+    backend_version: "0.22.1"
+    model: swiss-ai/Apertus-8B-Instruct-2509
+    image: jfrog.svc.cscs.ch/ml/inference/vllm:0.22.1-alps.net.v1-gh200   # repo-built, K8s-ready
+    backend_config:
+      tensor_parallel_size: 1          # single GH200 — Apertus-8B fits; leaves GPUs free
+      max_model_len: 16384             # covers smoke-synthetic's <=8K input + output
+      gpu_memory_utilization: 0.90
+
+dataset_config:
+  scenario_mix:
+    - scenario: smoke-synthetic        # synthetic source: no HF dataset egress
+      weight: 1.0
+  num_prompts: 1500
+  seed: 1234
+  output_length_mode: forced
+
+rate_levels: [0.5, 1.0, 2.0]           # 3 lambda levels (session starts/s, §12.3)
+
+arrival_process:
+  kind: poisson
+
+routing_strategy: random
+
+phases:
+  warmup_s: 60
+  measurement_s: 120
+  drain_timeout_s: 120
+  request_timeout_s: 120
+  server_ready_timeout_s: 1800         # >> the ~2-3 min ingress+letsencrypt provisioning window
+
+slos:                                  # loose — validates the pipeline, not performance
+  - { scenario: smoke-synthetic, metric: ttft_ms, percentile: p95, threshold: 2000 }
+  - { scenario: all,             metric: error_rate_pct,            threshold: 5.0 }
+
+quality_eval:
+  skip_quality_gate: true
+  skip_quality_compare: true
+
+system_prechecks:
+  # §8 pre-checks (NCCL/NVSHMEM/storage) on breithorn are E2c's deliverable; this
+  # smoke validates the deployment+reachability path, so the in-pod gate is skipped.
+  skip_system_prechecks: true
+  collective_tests_version: "2.17.1"
+
+server_time_limit: "02:00:00"          # benchmarker (SLURM) wall-clock

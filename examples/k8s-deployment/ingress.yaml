@@ -13,10 +13,10 @@ spec:
   ingressClassName: nginx
   tls:
   - hosts:
-    - hackathon-stefschu.swissai.svc.cscs.ch
+    - temp-example-deployment.breithorn.svc.cscs.ch
     secretName: temp-example-deployment-cert
   rules:
-  - host: temp-example-deployment.swissai.svc.cscs.ch
+  - host: temp-example-deployment.breithorn.svc.cscs.ch
     http:
       paths:
       - path: /
