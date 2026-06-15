@@ -48,6 +48,7 @@ SCHEMA: dict[str, list[tuple[str, str]]] = {
         ("node", "TEXT"),
         ("model_load_total_s", "REAL"),
         ("model_load_weights_s", "REAL"),
+        ("model_load_weights_gib", "REAL"),  # GiB read off storage (vLLM log) → effective load BW
         ("model_load_engine_init_s", "REAL"),
         ("model_load_cuda_graph_capture_s", "REAL"),
         ("model_load_inductor_compile_s", "REAL"),

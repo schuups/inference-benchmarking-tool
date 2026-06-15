@@ -263,16 +263,23 @@ def test_parse_metrics():
 
 
 def test_parse_model_load_fixture():
+    # Real vLLM 0.22.1 line carries a "memory" token ("… GiB memory and … seconds"),
+    # captured on the Alps image at E2a (2026-06-15) — the parser must tolerate it.
     log = (
-        "INFO 06-12 [model_runner.py] Model loading took 123.45 GiB and 25.33 seconds\n"
+        "INFO 06-12 [gpu_model_runner.py] Model loading took 123.45 GiB memory and 25.33 seconds\n"
         "INFO 06-12 [llm_engine.py] init engine (profile, create kv cache, warmup model) took 61.20 seconds\n"
         "INFO 06-12 [model_runner.py] Graph capturing finished in 23 secs\n"
     )
     parsed = parse_model_load(log)
     assert parsed["model_load_weights_s"] == pytest.approx(25.33)
+    assert parsed["model_load_weights_gib"] == pytest.approx(123.45)  # → effective load BW vs §8 storage
     assert parsed["model_load_engine_init_s"] == pytest.approx(61.20)
     assert parsed["model_load_cuda_graph_capture_s"] == pytest.approx(23)
     assert parsed["model_load_inductor_compile_s"] is None  # NULL per §10.2
+    # older builds without the "memory" token still parse
+    older = parse_model_load("Model loading took 7.0 GiB and 9.0 seconds\n")
+    assert older["model_load_weights_s"] == pytest.approx(9.0)
+    assert older["model_load_weights_gib"] == pytest.approx(7.0)
 
 
 @pytest.mark.asyncio

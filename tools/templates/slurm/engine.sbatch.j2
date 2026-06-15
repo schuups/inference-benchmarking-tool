@@ -23,7 +23,8 @@ export HF_HOME={{ scratch_base }}/hf-cache
 # §8 pre-check surface (graded by tools/benchmarker/prechecks/grade.py)
 export PRECHECK_CLUSTER={{ cluster }}
 export PRECHECK_SCOPE="{{ precheck_scope }}"
-export PRECHECK_STORAGE_SCOPE="{{ precheck_storage_scope }}"
+export PRECHECK_STORAGE_SCOPE="{{ precheck_storage_scope }}"   # fallback; run-storage.sh derives the real mount
+export MODEL_ID="{{ model_id }}"                              # §8.1 storage check reads THIS model's shards
 export PRECHECK_OUT={{ run_dir_remote }}/prechecks
 export PRECHECK_ON_WARN={{ prechecks.system_prechecks_on_warn }}
 export PRECHECK_ON_FAIL={{ prechecks.system_prechecks_on_fail }}

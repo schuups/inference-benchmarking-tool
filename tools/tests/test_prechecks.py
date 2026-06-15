@@ -23,7 +23,15 @@ from tools.benchmarker.prechecks.grade import (
     parse_dd_output,
     parse_nccl_output,
     parse_nvshmem_output,
+    parse_storage_parallel,
     size_label_to_bytes,
+)
+
+STORAGE_PARALLEL_FIXTURE = (
+    "PARALLEL_READ streams=8 bytes=17179869184 t0=1000.0 t1=1003.4567\n"
+    "seconds=3.4567 gbps=4.9700\n"
+    "--- per-stream dd ---\n"
+    "2147483648 bytes (2.1 GB, 2.0 GiB) copied, 3.4 s, 0.63 GB/s\n"
 )
 
 NCCL_FIXTURE = """\
@@ -125,7 +133,7 @@ def test_grading_rules():
 
 def test_reference_loads_real_yaml():
     refs = load_reference("clariden", REFERENCE_PATH)
-    assert len(refs) == 13  # 1-node (3 NCCL + 2 NVSHMEM) + 2-node (3 NCCL + sendrecv + 2 NVSHMEM) + 2 storage
+    assert len(refs) == 15  # 1-node (3 NCCL + 2 NVSHMEM) + 2-node (3 NCCL + sendrecv + 2 NVSHMEM) + 2 mounts × (seq + parallel)
     assert all(r["cluster"] == "clariden" for r in refs)
     # clariden 4× GH200 1-node NCCL is characterised at E2a -> enforceable grading
     rows = build_rows(
@@ -178,6 +186,12 @@ def _write_fixture_outputs(out_dir: Path):
         (out_dir / f"collective_{c}.out").write_text(NCCL_FIXTURE)
     (out_dir / "nvshmem_alltoall_latency.out").write_text(NVSHMEM_LATENCY_FIXTURE)
     (out_dir / "storage_read.out").write_text(DD_FIXTURE)
+    (out_dir / "storage_parallel.out").write_text(STORAGE_PARALLEL_FIXTURE)
+
+
+def test_parse_storage_parallel():
+    assert parse_storage_parallel(STORAGE_PARALLEL_FIXTURE) == pytest.approx(4.97)
+    assert parse_storage_parallel("no summary here\n") is None
 
 
 def test_collect_measurements_maps_files_to_reference_rows(tmp_path):
@@ -191,6 +205,9 @@ def test_collect_measurements_maps_files_to_reference_rows(tmp_path):
     assert by_benchmark["NCCL all_reduce"]["measured"] == pytest.approx(128.13)
     assert by_benchmark["NVSHMEM alltoall_latency"]["measured"] == pytest.approx(19.46)
     assert by_benchmark["Sequential read"]["measured"] == pytest.approx(1.5)
+    # parallel aggregate read recorded at the (storage) scope, comparable to vLLM load
+    assert by_benchmark["Parallel read"]["measured"] == pytest.approx(4.97)
+    assert by_benchmark["Parallel read"]["scope"] == "capstor weights mount (Lustre, HDD)"
     # nvshmem_put_bw.out absent -> skipped-with-warning, no row (§8.1)
     assert "NVSHMEM shmem_put_bw" not in by_benchmark
 
@@ -257,7 +274,7 @@ def test_grade_cli_end_to_end(tmp_path):
     assert proc.returncode == 0, proc.stderr
     payload = json.loads(results.read_text())
     assert payload["smoke_test_mode"] is True
-    assert len(payload["rows"]) == 5
+    assert len(payload["rows"]) == 6  # 3 NCCL + NVSHMEM alltoall + Sequential + Parallel read
     assert "SMOKE-TEST MODE" in proc.stdout
 
 

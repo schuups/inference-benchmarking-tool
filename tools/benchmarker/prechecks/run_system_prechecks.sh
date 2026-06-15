@@ -96,30 +96,24 @@ if [ "${NVSHMEM_REQUIRED:-0}" = "1" ]; then
     }
 fi
 
-# ------------------------------------------------------------- storage read
-# O_DIRECT sequential read of a real weights file (§8.1) — rank 0 only.
-# Auto-discover the largest weights shard under HF_HOME if not set explicitly, so the
-# read measures the actual weights mount the engine loads from (no planner wiring needed).
-# `find -L` / `ls -LS` FOLLOW symlinks on purpose: the HF hub cache stores
-# snapshots/<rev>/*.safetensors as symlinks into blobs/<sha> (the real files carry
-# no extension), so a plain `-type f -name '*.safetensors'` matches nothing — we
-# must resolve the link to reach (and size-rank) the actual blob on the mount.
-if [ -z "${STORAGE_BENCH_FILE:-}" ] && [ -n "${HF_HOME:-}" ]; then
-    STORAGE_BENCH_FILE="$(find -L "${HF_HOME}" -type f -name '*.safetensors' 2>/dev/null \
-        | xargs -r ls -LS 2>/dev/null | head -1)"
-fi
-if rank0 && [ -n "${STORAGE_BENCH_FILE:-}" ] && [ -r "${STORAGE_BENCH_FILE}" ]; then
-    dd if="${STORAGE_BENCH_FILE}" of=/dev/null bs=1M count=4096 iflag=direct \
-        > "${PRECHECK_OUT}/storage_read.out" 2>&1 || true
+# ------------------------------------------------------------- storage read (rank 0)
+# run-storage.sh reads the deployed model's real shards off their actual mount: a single-stream
+# O_DIRECT floor + a bounded parallel aggregate (vLLM-load-comparable). It resolves the mount →
+# reference scope (capstor/iopsstor/fallback) and writes it to storage_scope.txt (§8.1).
+if rank0; then
+    bash "${THIS_DIR}/run-storage.sh" || true
 fi
 
 # ------------------------------------------------------------- grade (rank 0)
 if rank0; then
+    # Prefer the mount-derived scope from run-storage.sh; fall back to the planner default.
+    STORAGE_SCOPE="$(cat "${PRECHECK_OUT}/storage_scope.txt" 2>/dev/null || true)"
+    [ -n "${STORAGE_SCOPE}" ] || STORAGE_SCOPE="${PRECHECK_STORAGE_SCOPE:-}"
     python3 "${THIS_DIR}/grade.py" \
         --out-dir "${PRECHECK_OUT}" \
         --cluster "${PRECHECK_CLUSTER}" \
         --scope "${PRECHECK_SCOPE}" \
-        --storage-scope "${PRECHECK_STORAGE_SCOPE:-}" \
+        --storage-scope "${STORAGE_SCOPE}" \
         --on-warn "${PRECHECK_ON_WARN:-abort}" \
         --on-fail "${PRECHECK_ON_FAIL:-abort}" \
         ${SMOKE_FLAG} \

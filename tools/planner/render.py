@@ -124,6 +124,7 @@ def render_experiment(
             "run_id_slug": run_id_slug(run_id),
             "deployment_index": deployment_index,  # M7 selects cfg.deployments[index]
             "model_slug": model_slug(deployment.model),
+            "model_id": deployment.model,  # §8.1 storage check targets this model's HF-cache shards
             "cluster": deployment.target,
             "image": default_image(deployment, glob),
             # Alps-extended images bundle their own CXI/libfabric stack → disable

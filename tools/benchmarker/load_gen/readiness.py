@@ -17,7 +17,12 @@ import aiohttp
 from .client import execute_request
 
 MODEL_LOAD_PATTERNS = {
-    "model_load_weights_s": re.compile(r"Model loading took [\d.]+ GiB and ([\d.]+) seconds"),
+    # vLLM 0.22.1 logs "Model loading took 3.77 GiB memory and 5.34 seconds"; older builds omit
+    # the "memory" token. `(?:\s+\w+)?` tolerates both so the weights load is actually captured.
+    "model_load_weights_s": re.compile(r"Model loading took [\d.]+ GiB(?:\s+\w+)? and ([\d.]+) seconds"),
+    # Same line, the GiB — lets the report compare the §8 storage benchmark (GB/s) against
+    # vLLM's own effective weight-load bandwidth (gib / weights_s).
+    "model_load_weights_gib": re.compile(r"Model loading took ([\d.]+) GiB(?:\s+\w+)? and [\d.]+ seconds"),
     "model_load_engine_init_s": re.compile(r"init engine \([^)]*\) took ([\d.]+) seconds"),
     "model_load_cuda_graph_capture_s": re.compile(r"Graph capturing finished in ([\d.]+) secs"),
     "model_load_inductor_compile_s": re.compile(r"torch\.compile takes ([\d.]+) s"),

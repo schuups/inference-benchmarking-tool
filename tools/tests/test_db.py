@@ -16,7 +16,7 @@ SPEC_COLUMNS = {
     ],
     "instances": [
         "run_id", "instance_id", "endpoint", "node", "model_load_total_s",
-        "model_load_weights_s", "model_load_engine_init_s",
+        "model_load_weights_s", "model_load_weights_gib", "model_load_engine_init_s",
         "model_load_cuda_graph_capture_s", "model_load_inductor_compile_s",
     ],
     "requests": [

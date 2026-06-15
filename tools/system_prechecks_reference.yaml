@@ -32,8 +32,13 @@
 # representative baseline — a conservative floor only, pending re-characterisation in a later
 # phase (TODOs.md). A healthy capstor reads faster, so the -15% band won't false-fail; vLLM's
 # parallel shard loads also aggregate higher than this single-stream floor.
+# Sequential read = single-stream O_DIRECT floor; Parallel read = aggregate over concurrent
+# streams (vLLM-load-comparable, §8.1). The scope is derived at runtime from where the weights
+# actually live (capstor vs iopsstor), so the matching row below is what grades the run.
 - { cluster: clariden, scope: "capstor weights mount (Lustre, HDD)",  benchmark: Sequential read, size: 1 MiB blocks, expected: 0.063 GB/s, tolerance_pct: -15, source: "E2a 2026-06-14 (single sample during capstor degradation — re-characterise)" }
+- { cluster: clariden, scope: "capstor weights mount (Lustre, HDD)",  benchmark: Parallel read,   size: aggregate,    expected: TBD GB/s, tolerance_pct: -15, source: TBD }
 - { cluster: clariden, scope: "iopsstor weights mount (Lustre, flash)", benchmark: Sequential read, size: 1 MiB blocks, expected: TBD GB/s, tolerance_pct: -15, source: TBD }
+- { cluster: clariden, scope: "iopsstor weights mount (Lustre, flash)", benchmark: Parallel read,   size: aggregate,    expected: TBD GB/s, tolerance_pct: -15, source: TBD }
 
 # ── bristen (NVIDIA A100 — 4 GPUs / node) ──────────────────────────────────────
 - { cluster: bristen, scope: "4× A100, 1 node",  benchmark: NCCL all_reduce,           size: 128 MiB, expected: TBD GB/s busbw, tolerance_pct: -10, source: TBD }
@@ -47,7 +52,9 @@
 - { cluster: bristen, scope: "8× A100, 2 nodes", benchmark: NVSHMEM alltoall_latency,  size: 128 KiB, expected: TBD µs,         tolerance_pct: +20, source: TBD }
 - { cluster: bristen, scope: "8× A100, 2 nodes", benchmark: NVSHMEM shmem_put_bw,      size: 128 MiB, expected: TBD GB/s,       tolerance_pct: -10, source: TBD }
 - { cluster: bristen, scope: "capstor weights mount (Lustre, HDD)",  benchmark: Sequential read, size: 1 MiB blocks, expected: TBD GB/s, tolerance_pct: -15, source: TBD }
+- { cluster: bristen, scope: "capstor weights mount (Lustre, HDD)",  benchmark: Parallel read,   size: aggregate,    expected: TBD GB/s, tolerance_pct: -15, source: TBD }
 - { cluster: bristen, scope: "iopsstor weights mount (Lustre, flash)", benchmark: Sequential read, size: 1 MiB blocks, expected: TBD GB/s, tolerance_pct: -15, source: TBD }
+- { cluster: bristen, scope: "iopsstor weights mount (Lustre, flash)", benchmark: Parallel read,   size: aggregate,    expected: TBD GB/s, tolerance_pct: -15, source: TBD }
 
 # ── beverin (AMD MI300A — 4 GPUs / node) ───────────────────────────────────────
 - { cluster: beverin, scope: "4× MI300A, 1 node",  benchmark: RCCL all_reduce,                size: 128 MiB, expected: TBD GB/s busbw, tolerance_pct: -10, source: TBD }
@@ -61,7 +68,9 @@
 - { cluster: beverin, scope: "8× MI300A, 2 nodes", benchmark: ROCm SHMEM alltoall_latency,    size: 128 KiB, expected: TBD µs,         tolerance_pct: +20, source: TBD }
 - { cluster: beverin, scope: "8× MI300A, 2 nodes", benchmark: ROCm SHMEM shmem_put_bw,        size: 128 MiB, expected: TBD GB/s,       tolerance_pct: -10, source: TBD }
 - { cluster: beverin, scope: "capstor weights mount (Lustre, HDD)",  benchmark: Sequential read, size: 1 MiB blocks, expected: TBD GB/s, tolerance_pct: -15, source: TBD }
+- { cluster: beverin, scope: "capstor weights mount (Lustre, HDD)",  benchmark: Parallel read,   size: aggregate,    expected: TBD GB/s, tolerance_pct: -15, source: TBD }
 - { cluster: beverin, scope: "iopsstor weights mount (Lustre, flash)", benchmark: Sequential read, size: 1 MiB blocks, expected: TBD GB/s, tolerance_pct: -15, source: TBD }
+- { cluster: beverin, scope: "iopsstor weights mount (Lustre, flash)", benchmark: Parallel read,   size: aggregate,    expected: TBD GB/s, tolerance_pct: -15, source: TBD }
 
 # ── breithorn (Kubernetes — GH200 pod, Ceph PVC) ───────────────────────────────
 - { cluster: breithorn, scope: "4× gh200, 1 pod", benchmark: NCCL all_reduce,          size: 128 MiB, expected: TBD GB/s busbw, tolerance_pct: -10, source: TBD }
@@ -70,3 +79,4 @@
 - { cluster: breithorn, scope: "4× gh200, 1 pod", benchmark: NVSHMEM alltoall_latency, size: 128 KiB, expected: TBD µs,         tolerance_pct: +20, source: TBD }
 - { cluster: breithorn, scope: "4× gh200, 1 pod", benchmark: NVSHMEM shmem_put_bw,     size: 128 MiB, expected: TBD GB/s,       tolerance_pct: -10, source: TBD }
 - { cluster: breithorn, scope: "Ceph PVC weights mount", benchmark: Sequential read,   size: 1 MiB blocks, expected: TBD GB/s, tolerance_pct: -15, source: TBD }
+- { cluster: breithorn, scope: "Ceph PVC weights mount", benchmark: Parallel read,     size: aggregate,    expected: TBD GB/s, tolerance_pct: -15, source: TBD }

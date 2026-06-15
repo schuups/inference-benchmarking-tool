@@ -102,6 +102,13 @@ def parse_dd_output(text: str) -> float | None:
     return float(m.group(1)) * _BW_TO_GBS[m.group(2)]
 
 
+def parse_storage_parallel(text: str) -> float | None:
+    """Aggregate read bandwidth (GB/s) from run-storage.sh's parallel summary line
+    (`PARALLEL_READ … gbps=<G>`) — bytes read across all streams / wall-clock."""
+    m = re.search(r"gbps=([\d.]+)", text)
+    return float(m.group(1)) if m else None
+
+
 def nvshmem_max_busbw(text: str) -> float:
     """Largest busbw(GB/s) across every NVSHMEM perftest row.
 
@@ -254,6 +261,14 @@ def collect_measurements(out_dir: Path, cluster: str, scope: str, storage_scope:
         measurements.append(
             {"benchmark": "Sequential read", "scope": storage_scope, "size": "1 MiB blocks",
              "measured": parse_dd_output(storage.read_text())}
+        )
+    # Parallel aggregate read (vLLM-load-comparable, §8.1). find_reference matches on
+    # benchmark+scope, so the "aggregate" size label only shapes the metric slug.
+    storage_par = out_dir / "storage_parallel.out"
+    if storage_par.exists():
+        measurements.append(
+            {"benchmark": "Parallel read", "scope": storage_scope, "size": "aggregate",
+             "measured": parse_storage_parallel(storage_par.read_text())}
         )
     return measurements
 
