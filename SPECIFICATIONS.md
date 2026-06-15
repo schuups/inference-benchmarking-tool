@@ -730,7 +730,7 @@ different models from different systems.
 
 | Model | capstor (Lustre, HDD) | iopsstor (Lustre, flash) | breithorn (Ceph PVC) |
 |---|---|---|---|
-| **Apertus-70B** | TBD | TBD | TBD |
+| **Apertus-70B** | `/capstor/scratch/cscs/stefschu/ibt/hf-cache` (HF cache; downloaded 2026-06-15, 132 GiB / 30 shards) | TBD | TBD |
 | **Apertus-8B**  | `/capstor/scratch/cscs/stefschu/ibt/hf-cache` (HF cache; used at E1/E2a) | TBD | TBD |
 | **Kimi-K2.6**   | TBD | TBD | TBD |
 - **Pipeline-validation smoke runs are exempt from these pairings.** The
