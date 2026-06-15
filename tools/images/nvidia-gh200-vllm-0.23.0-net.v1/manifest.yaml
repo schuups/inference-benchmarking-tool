@@ -1,0 +1,99 @@
+# Image manifest (SPECIFICATIONS.md §9.1).
+# Authoritative per-image record: identity, base, baked-in component pins,
+# published tag, build provenance, and sanity status. build.sh reads the pins
+# below and passes them to `podman build` as --build-arg (manifest wins over the
+# Containerfile ARG defaults). Keep `status` + `sanity` in sync with the
+# catalogue table in ../README.md.
+
+# ---- identity ----
+slug: nvidia-gh200-vllm-0.23.0-net.v1
+vendor: nvidia
+node_type: gh200                    # GPU/platform target (arch aarch64). Part of the
+                                    # identity: disambiguates the otherwise-identically-named
+                                    # A100 (x86_64) and MI300A (AMD) builds. -> tag suffix.
+backend: vllm
+backend_version: "0.23.0"
+netstack: nvidia/v1                 # -> core/nvidia/netstack/v1
+description: >-
+  Official vLLM 0.23.0 image (aarch64 / Ubuntu 24.04, for GH200) extended with the
+  Alps Slingshot-11 network stack (netstack v1) AND Ray (ray[default], baked in via
+  variant/hooks.d/10-ray.sh) for spawning multi-node vLLM. vLLM comes from the BASE
+  IMAGE (not pip); only Ray is pip-installed. Self-contained: no container-engine
+  CXI / aws-ofi-nccl hook required at runtime.
+
+# ---- lifecycle status ----
+# pending-build -> building -> built -> pushed -> sanity-pending -> verified -> benchmarked
+#                                                              \-> failed
+#   verified    = netstack sanity green (components load + Slingshot reference
+#                 bandwidth); usable, but inference performance scaling not yet tested.
+#   benchmarked = additionally validated in inference performance-scaling experiments.
+status: verified         # vLLM 0.23.0 (+ Ray) GH200 image; built+pushed+sanity-green on
+                         # clariden 2026-06-15 (2-node 151.7 GB/s; ray 2.55.1 + vllm 0.23.0
+                         # confirmed in pushed image).
+
+# ---- source base + published tag ----
+base_image: docker.io/vllm/vllm-openai:v0.23.0-aarch64-ubuntu2404
+image_tag: jfrog.svc.cscs.ch/ml/inference/vllm:0.23.0-alps.net.v1-gh200
+
+# ---- baked-in netstack component pins ("what it contains") ----
+# Mirror core/nvidia/netstack/v1 Containerfile ARG defaults; override per-image
+# here. NOTE: nccl_ver must be reconciled with the NCCL/CUDA the base ships
+# (torch's bundled nvidia-nccl wheel) — confirmed during the build loop.
+netstack_pins:
+  xpmem_ref: 3bcab55479489fdd93847fa04c58ab16e9c0b3fd
+  gdrcopy_ver: "2.5.1"
+  cxi_shs: release/shs-13.0.0          # cassini-headers + cxi-driver + libcxi
+  libfabric_commit: 79fd4514977a8f15844fbe26df9f5930eb96311a
+  libfabric_version: "2.5.0"     # resolved from the commit (fi_info --version)
+  libfabric_patch: libfabric/prov_cxi_netns_support.79fd451.patch
+  nccl_ver: "2.28.9-1"           # matches base torch 2.11.0+cu130 (NCCL 2.28.9)
+  nccl_patch: nccl/net.cc.2.29.7-1.patch   # benign plugin-unload fix; drop if it won't apply
+  ucx_version: "1.20.0"
+  ucc_version: "1.7.0"
+  ompi_ver: "5.0.10"
+  aws_ofi_nccl_commit: 93fa84ca880325013b2f639356bbb60f075148af
+  aws_ofi_nccl_version: "1.17.3"  # resolved from the commit (NCCL NET/OFI init banner)
+  aws_ofi_nccl_patch: ""
+  nvshmem_ver: "3.6.5-0"
+  nvshmem_patch: nvshmem/requirements-v3.6.5-0.patch
+  nccl_tests_ver: "2.18.2"
+  osu_version: "7.5.2"
+
+# ---- provenance (filled at build time by build.sh) ----
+provenance:
+  containerfile: core/nvidia/netstack/v1/Containerfile
+  netstack_git_sha: 603772acd787485e5225cdeeeec19a3e80305eb5  # repo HEAD at build; note: the
+                             # shared core/nvidia/netstack/v1/phases/apt_install_build_deps.sh was
+                             # modified in this same change (dropped the ports.ubuntu.com -> JFrog
+                             # ubuntu-ports rewrite; that mirror lagged: libudev1 8.16 vs udev 8.15).
+  base_digest: sha256:330d9a65d5d86b9467297114269562a248a9ab721154edc02990d412c81ecc1a
+  base_probe:                # observed in the v0.23.0 base on clariden 2026-06-15
+    os: Ubuntu 24.04.3 LTS
+    arch: aarch64
+    python: "3.12.3"
+    cuda: "13.0"
+    torch: 2.11.0+cu130
+    torch_nccl: "2.28.9"     # -> netstack_pins.nccl_ver (identical toolchain to the 0.22.1 base)
+    vllm: "0.23.0"
+    ray: "added via variant/hooks.d/10-ray.sh (ray[default]; absent in base)"
+    entrypoint: ["vllm", "serve"]
+  built_by: stefschu
+  built_at: "2026-06-15T20:06:58+02:00"
+  image_id: sha256:92e994628807dc6c09b466e50f6c0c13f56106b3c2e8b6f8058e41079c27753b
+  registry_digest: sha256:01510dc2b80db09171a848fec6d4238e2df45d43024ba127e4af4ab75897b25e
+  # No durable build_log: build/staging under /capstor/.../ibt is EPHEMERAL (can be
+  # reclaimed anytime). Reproducibility = netstack_git_sha + the pins above +
+  # base_digest + registry_digest.
+
+# ---- post-push sanity (filled by tests/, see tests/README) ----
+sanity:
+  status: pass               # job 2539970, 2-node, clariden 2026-06-15
+  ran_at: "2026-06-15T20:30:00+02:00"
+  nodes: 2
+  notes: >-
+    2-node netstack sanity GREEN: peak inter-node all_reduce busbw 151.7 GB/s
+    (clears the ~122 GB/s Slingshot reference @128 MiB; job 2539970). Ray confirmed
+    in the pushed image: vllm=0.23.0 ray=2.55.1. Same netstack (nvidia/v1) and
+    IDENTICAL toolchain as the verified 0.22.1 GH200 image (torch 2.11.0+cu130,
+    NCCL 2.28.9, CUDA 13) — only vLLM (0.23.0) and the baked-in Ray differ.
+  todo_inter_node: false

@@ -1,0 +1,13 @@
+# Container Engine EDF for running this image on Alps (post-push sanity +
+# experiments). The Alps network stack is baked into the image, so the image is
+# SELF-CONTAINED: NO container-engine CXI hook and NO aws-ofi-nccl hook
+# (SPECIFICATIONS.md §9.1). Launch collectives with
+# `srun --network=disable_rdzv_get` to match the baked FI_CXI_RDZV_PROTO=alt_read
+# (see core/nvidia/netstack/v1/runtime/alps-runtime.env; otherwise the runtime emits a warning).
+#
+# `#` separates the registry host from the repo path in CE EDF image refs.
+image = "jfrog.svc.cscs.ch#ml/inference/vllm:0.23.0-alps.net.v1-gh200"
+mounts = ["/users", "/capstor", "/iopsstor"]
+
+[annotations]
+com.hooks.cxi.enabled = "false"

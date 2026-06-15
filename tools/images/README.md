@@ -27,6 +27,7 @@ Status legend: `pending-build` → `building` → `built` → `pushed` →
 | Image (slug) | Vendor | Node | Backend | Version | Netstack | Tag | Status | Sanity |
 |---|---|---|---|---|---|---|---|---|
 | [`nvidia-gh200-vllm-0.22.1-net.v1`](nvidia-gh200-vllm-0.22.1-net.v1/) | nvidia | gh200 | vllm | 0.22.1 | nvidia/v1 | `…/vllm:0.22.1-alps.net.v1-gh200` | **verified** | pass (2-node, 129 GB/s) |
+| [`nvidia-gh200-vllm-0.23.0-net.v1`](nvidia-gh200-vllm-0.23.0-net.v1/) | nvidia | gh200 | vllm | 0.23.0 (+Ray) | nvidia/v1 | `…/vllm:0.23.0-alps.net.v1-gh200` | **verified** | pass (2-node, 151.7 GB/s) |
 | [`amd-mi300a-vllm-0.23.0-net.v1`](amd-mi300a-vllm-0.23.0-net.v1/) | amd | mi300a | vllm | 0.23.0 | amd/v1 | `…/vllm:0.23.0-alps.net.amd.v1-mi300a` | **built** | partial: intra + small-inter ✓; large inter-node blocked (TODOs.md) |
 
 <!-- Keep this table in sync with each image's manifest.yaml (status + sanity). -->
