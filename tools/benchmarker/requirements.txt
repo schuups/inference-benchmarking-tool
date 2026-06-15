@@ -12,9 +12,9 @@ aiohttp>=3.12        # load generator + quality grader (streaming client)
 transformers         # target-model tokenizer (dataset_gen.tokenizers.HFTokenizer)
                      # (pulls huggingface_hub, tokenizers, numpy — but NOT torch)
 
-# --- graded E2+ extras: install into the shared venv when needed (NOT for E1) ---
-# These pull torch and large data libs; deferred until real HF sources / graded
-# quality come online (E2/E3), so E1's first venv build stays light.
-# datasets             # longbench / wildchat / reasoning_trace_replay sources
-# pyarrow              # wildchat parquet reads
+# --- real-text dataset sources (activated for the real-scenario runs, E2/E3) ---
+datasets             # longbench / reasoning_trace_replay sources (HF datasets)
+pyarrow              # wildchat parquet shard reads (dataset_gen.sources.WildChatSource)
+
+# --- graded quality extras: install when Stage-A/B quality comes online ---
 # lm-eval              # Stage-A/B quality evaluation (pulls torch)
