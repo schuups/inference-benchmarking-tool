@@ -9,6 +9,7 @@ validate scratch-dir names) so the field layout is defined in exactly one place.
 
 from __future__ import annotations
 
+import hashlib
 import re
 import secrets
 from datetime import datetime, timezone
@@ -38,6 +39,31 @@ class RunIdParts(NamedTuple):
 def model_slug(model_id: str) -> str:
     """HF id -> filesystem/label-safe slug (last path segment, lowercased)."""
     return _SLUG_RE.sub("-", model_id.rsplit("/", 1)[-1].lower()).strip("-")
+
+
+def k8s_slug(run_id: str, max_len: int = 51) -> str:
+    """DNS-1035-safe slug (<=max_len) for K8s object names derived from run_id.
+
+    K8s resource names and label values cap at 63 chars; the longest prefix we add
+    is `ibt-results-` (12), so the slug is bounded to 51. run_id_slug routinely
+    overflows that (timestamp + model + backend + target + suffix), so when it does
+    we truncate and append a short stable hash to keep names unique. The FULL run_id
+    is always preserved in the `inference-benchmarking/run-id` label for traceability,
+    so the compact name costs nothing for discovery/teardown."""
+    base = run_id_slug(run_id)
+    if len(base) <= max_len:
+        return base
+    h = hashlib.sha1(run_id.encode()).hexdigest()[:6]
+    return f"{base[: max_len - len(h) - 1].rstrip('-')}-{h}"
+
+
+def model_cache_slug(model_id: str) -> str:
+    """Full HF id (org included) -> model-cache PVC slug, matching the breithorn
+    convention `model-cache-<org>-<name>`. Unlike model_slug (last segment, used
+    for run-ids), this keeps the org so the rendered K8s claim binds the
+    pre-populated cache PVC, e.g. swiss-ai/Apertus-70B-Instruct-2509 ->
+    swiss-ai-apertus-70b-instruct-2509 (PVC model-cache-swiss-ai-apertus-70b-instruct-2509)."""
+    return _SLUG_RE.sub("-", model_id.lower()).strip("-")
 
 
 def make_run_id(

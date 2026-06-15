@@ -40,6 +40,11 @@ class ClusterInfo(StrictModel):
     partition: str | None = None
     namespace: str | None = None
     node_type: str | None = None
+    # k8s only: DNS domain for the engine Ingress host (must be reachable from the
+    # SLURM Benchmarker, §6.2) and the dockerconfigjson pull secret for the engine
+    # image registry (JFrog requires auth — anonymous pull is 403).
+    ingress_domain: str | None = None
+    image_pull_secret: str | None = None
 
     @model_validator(mode="after")
     def _per_type_fields(self) -> "ClusterInfo":

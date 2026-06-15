@@ -128,23 +128,67 @@ def test_k8s_render(tmp_path, canonical_dict, globals_cfg):
     engine_yaml = (run_dir / "engine.yaml").read_text()
 
     docs = list(yaml.safe_load_all(engine_yaml))
-    assert [d["kind"] for d in docs] == ["Deployment", "Service"]
+    assert [d["kind"] for d in docs] == ["Deployment", "Service", "Ingress"]
     deployment = docs[0]
     labels = deployment["metadata"]["labels"]
     assert labels["app.kubernetes.io/managed-by"] == "inference-benchmarking"  # §7.1
     pod_spec = deployment["spec"]["template"]["spec"]
-    assert pod_spec["nodeSelector"]["beta.kubernetes.io/instance-type"] == "gh200"
+    assert pod_spec["nodeSelector"]["node.kubernetes.io/instance-type"] == "gh200"
+    assert pod_spec["imagePullSecrets"][0]["name"] == "jfrog-pull"  # JFrog auth (anon = 403)
     container = pod_spec["containers"][0]
     assert container["resources"]["limits"]["nvidia.com/gpu"] == 4
     assert "run_system_prechecks.sh" in container["args"][0]  # §8.2 in-pod gate
     assert "hw_sampler.py" in container["args"][0]
-    assert any(v["persistentVolumeClaim"]["claimName"].startswith("model-cache-")
-               for v in pod_spec["volumes"])  # §7.6 retained PVC
+    # Model-cache PVC: org-inclusive name (binds the cluster's pre-populated PVC) and
+    # mounted READ-ONLY so a run never mutates a shared cache (§7.6).
+    cache_vol = next(v for v in pod_spec["volumes"]
+                     if v["persistentVolumeClaim"]["claimName"].startswith("model-cache-"))
+    assert cache_vol["persistentVolumeClaim"]["claimName"] == "model-cache-moonshotai-kimi-k2.6"
+    cache_mount = next(m for m in container["volumeMounts"] if m["name"] == "model-cache")
+    assert cache_mount["readOnly"] is True
+    # Weights served from the cache; no HF egress / token.
+    env = {e["name"]: e["value"] for e in container["env"]}
+    assert env["HF_HOME"] == "/model-cache"
+    assert env["HF_HUB_OFFLINE"] == "1"
+
+    # Ingress is the SLURM-Benchmarker-reachable endpoint (§6.2): nginx + letsencrypt,
+    # host ibt-engine-<slug>.<ingress_domain>, backed by the engine Service.
+    ingress = docs[2]
+    assert ingress["spec"]["ingressClassName"] == "nginx"
+    assert ingress["metadata"]["annotations"]["cert-manager.io/cluster-issuer"] == "letsencrypt"
+    host = ingress["spec"]["rules"][0]["host"]
+    assert host.startswith("ibt-engine-") and host.endswith(".breithorn.svc.cscs.ch")
+    assert ingress["spec"]["tls"][0]["hosts"] == [host]
+    backend = ingress["spec"]["rules"][0]["http"]["paths"][0]["backend"]["service"]
+    assert backend["name"] == docs[1]["metadata"]["name"]  # → the engine Service
+    assert backend["port"]["number"] == 8000
 
     # The Benchmarker is ALWAYS SLURM (§2) — never a K8s pod. For a K8s engine target the
     # SLURM Benchmarker wiring is an E5 deliverable, so no benchmarker artifact renders here.
     assert not (run_dir / "benchmarker-pod.yaml").exists()
     assert not (run_dir / "benchmarker.sbatch").exists()
+
+
+def test_k8s_names_within_63_chars(tmp_path, canonical_dict, globals_cfg):
+    # A long run_id (real models do this — see Apertus-70B) overflows the K8s 63-char
+    # name/label cap; k8s_slug must bound every rendered object name + label value.
+    canonical_dict["deployments"][0]["target"] = "breithorn"
+    canonical_dict["deployments"][0]["model"] = "swiss-ai/Apertus-70B-Instruct-2509"
+    canonical_dict["deployments"][0]["backend_config"]["pipeline_parallel_size"] = 1
+    canonical_dict["deployments"][0]["backend_config"]["tensor_parallel_size"] = 4
+    _, run_dirs = _render(tmp_path, canonical_dict, globals_cfg)
+    docs = list(yaml.safe_load_all((run_dirs[0] / "engine.yaml").read_text()))
+    for d in docs:
+        assert len(d["metadata"]["name"]) <= 63, d["kind"]
+    dep = docs[0]
+    assert len(dep["spec"]["selector"]["matchLabels"]["app"]) <= 63
+    # claimNames referenced by the pod (results PVC) must also fit 63.
+    for v in dep["spec"]["template"]["spec"]["volumes"]:
+        assert len(v["persistentVolumeClaim"]["claimName"]) <= 63
+    # the model-cache PVC still binds the real, org-inclusive name (unbounded — it
+    # must match whatever pre-exists on the cluster).
+    assert any(v["persistentVolumeClaim"]["claimName"] == "model-cache-swiss-ai-apertus-70b-instruct-2509"
+               for v in dep["spec"]["template"]["spec"]["volumes"])
 
 
 def test_stock_image_keeps_cxi_hook(tmp_path, canonical_dict, globals_cfg):

@@ -33,6 +33,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import ssl
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -235,11 +236,18 @@ async def _await_ready(
 ) -> float:
     """Wait for /health 200; abort early on an in-container gate abort or a dead job.
 
+    Tolerates the K8s Ingress + cert-manager TLS provisioning window (§6.2): for
+    ~2-3 min after `kubectl apply` the endpoint refuses connections, fails TLS
+    verification (cert not yet issued), or 50x's from nginx — all expected and
+    retried until `timeout_s` (server_ready_timeout_s, default 3600 ≫ the window).
+
     Returns seconds waited → the instance's model_load_total_s input (§10.2; this
     coarse total covers scheduling + pre-checks + load, with the precise
     breakdown carried by the parsed model_load_* components).
     """
     start = time.perf_counter()
+    last_note = 0.0
+    last_probe = "no response yet"
     while True:
         gate_code = _read_precheck(results_path).get("gate_exit_code", 0)
         if gate_code != 0:
@@ -248,8 +256,11 @@ async def _await_ready(
             async with http.get(f"{base_url}/health") as resp:
                 if resp.status == 200:
                     return time.perf_counter() - start
-        except aiohttp.ClientError:
-            pass
+                last_probe = f"HTTP {resp.status}"  # 404/502/503 while ingress+backend wire up
+        except (aiohttp.ClientError, ssl.SSLError, asyncio.TimeoutError, OSError) as exc:
+            # Connection refused / TLS-cert-not-yet-valid while the Ingress and its
+            # cert-manager letsencrypt cert provision — expected; keep polling.
+            last_probe = type(exc).__name__
         if not launcher.is_alive():
             # The §8.4 gate may have aborted the engine job *after* writing its
             # results.json (run_system_prechecks.sh && exec <engine>): the job
@@ -264,11 +275,19 @@ async def _await_ready(
                 "engine job exited before readiness — last engine log lines:\n"
                 + _tail(launcher.engine_log_text())
             )
-        if time.perf_counter() - start > timeout_s:
+        elapsed = time.perf_counter() - start
+        if elapsed > timeout_s:
             raise RunAborted(
                 f"engine at {base_url} not ready within server_ready_timeout_s={timeout_s} "
-                "(§10.1/§12.1)"
+                f"(§10.1/§12.1); last probe: {last_probe}"
             )
+        if elapsed - last_note >= 30:  # heartbeat so a long ingress/cert wait isn't mistaken for a hang
+            log.info(
+                "waiting for engine at %s — %.0fs elapsed, last probe: %s "
+                "(a K8s ingress + letsencrypt cert can take ~2-3 min)",
+                base_url, elapsed, last_probe,
+            )
+            last_note = elapsed
         await asyncio.sleep(poll_s)
 
 

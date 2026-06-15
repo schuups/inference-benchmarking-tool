@@ -1,11 +1,15 @@
-# Engine Deployment + Service (breithorn) — rendered by the Planner (§5).
+# Engine Deployment + Service + Ingress (breithorn) — rendered by the Planner (§5).
 # Labels per §7.1 so the Cleaner and per-run teardown can discover everything.
-# Ingress/TLS wiring lands with E5 (plan §6).
+# The Ingress (host ibt-engine-<slug>.<ingress_domain>, nginx + cert-manager
+# letsencrypt) is what the SLURM Benchmarker's load generator targets (§6.2); it
+# renders only when the cluster declares an ingress_domain. Cert issuance +
+# ingress wiring take ~2-3 min after apply — the orchestrator readiness wait
+# tolerates that window (_await_ready).
 # run_id: {{ run_id }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: ibt-engine-{{ run_id_slug }}
+  name: ibt-engine-{{ k8s_slug }}
   namespace: {{ namespace }}
   labels:
     app.kubernetes.io/managed-by: inference-benchmarking
@@ -14,15 +18,19 @@ spec:
   replicas: 1
   selector:
     matchLabels:
-      app: ibt-engine-{{ run_id_slug }}
+      app: ibt-engine-{{ k8s_slug }}
   template:
     metadata:
       labels:
-        app: ibt-engine-{{ run_id_slug }}
+        app: ibt-engine-{{ k8s_slug }}
         app.kubernetes.io/managed-by: inference-benchmarking
     spec:
+{% if image_pull_secret %}
+      imagePullSecrets:
+      - name: {{ image_pull_secret }}   # JFrog dockerconfigjson (anonymous pull is 403)
+{% endif %}
       nodeSelector:
-        beta.kubernetes.io/instance-type: {{ node_type }}
+        node.kubernetes.io/instance-type: {{ node_type }}
       tolerations:
       - { key: hpc, operator: Equal, value: "true", effect: NoSchedule }
       - { key: hpc, operator: Equal, value: "true", effect: NoExecute }
@@ -53,6 +61,10 @@ spec:
         - { name: PRECHECK_GPUS, value: "{{ total_gpus }}" }
         - { name: NCCL_TESTS_MPI, value: "0" }
         - { name: MSG_END, value: "128M" }
+        # Resolve weights from the pre-populated HF cache on the model-cache PVC
+        # (mounted read-only below) — no HF egress, no HF_TOKEN, no writes.
+        - { name: HF_HOME, value: "/model-cache" }
+        - { name: HF_HUB_OFFLINE, value: "1" }
         ports:
         - { containerPort: 8000, name: http, protocol: TCP }
         resources:
@@ -66,26 +78,68 @@ spec:
           periodSeconds: 10
           failureThreshold: {{ startup_failure_threshold }}
         volumeMounts:
-        - { name: model-cache, mountPath: /model-cache }
+        # read-only: the model-cache PVC is shared and may be owned/used by others —
+        # a run must never mutate it (§7.6). Weights are pre-populated out-of-band.
+        - { name: model-cache, mountPath: /model-cache, readOnly: true }
         - { name: results, mountPath: /results }
       volumes:
       - name: model-cache
         persistentVolumeClaim:
-          claimName: model-cache-{{ model_slug }}   # §7.6: kept across runs
+          # Org-inclusive slug to match the cluster's PVC naming (model_cache_slug,
+          # NOT model_slug which drops the org). §7.6: kept across runs, never written.
+          claimName: model-cache-{{ model_cache_slug }}
       - name: results
         persistentVolumeClaim:
-          claimName: ibt-results-{{ run_id_slug }}
+          claimName: ibt-results-{{ k8s_slug }}
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: ibt-engine-{{ run_id_slug }}
+  name: ibt-engine-{{ k8s_slug }}
   namespace: {{ namespace }}
   labels:
     app.kubernetes.io/managed-by: inference-benchmarking
     inference-benchmarking/run-id: "{{ run_id }}"
 spec:
   selector:
-    app: ibt-engine-{{ run_id_slug }}
+    app: ibt-engine-{{ k8s_slug }}
   ports:
   - { port: 8000, targetPort: 8000, name: http }
+{% if ingress_domain %}
+---
+# SLURM-Benchmarker-reachable endpoint (§6.2). nginx + cert-manager letsencrypt;
+# the TLS cert is issued ~1-2 min after apply (HTTP-01), so the load generator's
+# readiness wait must tolerate connection/cert errors during that window.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ibt-engine-{{ k8s_slug }}
+  namespace: {{ namespace }}
+  labels:
+    app.kubernetes.io/managed-by: inference-benchmarking
+    inference-benchmarking/run-id: "{{ run_id }}"
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt
+    # Long LLM streaming requests + large prompt bodies.
+    nginx.ingress.kubernetes.io/proxy-body-size: "16m"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "75"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
+spec:
+  ingressClassName: nginx
+  tls:
+  - hosts:
+    - ibt-engine-{{ k8s_slug }}.{{ ingress_domain }}
+    secretName: ibt-engine-{{ k8s_slug }}-cert
+  rules:
+  - host: ibt-engine-{{ k8s_slug }}.{{ ingress_domain }}
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: ibt-engine-{{ k8s_slug }}
+            port:
+              number: {{ engine_port }}
+{% endif %}

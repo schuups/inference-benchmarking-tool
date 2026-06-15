@@ -10,7 +10,7 @@ Then,
 - `--insecure` might be necessary until the certificate is issued.
 
 ```
-curl --insecure https://temp-example-deployment.swissai.svc.cscs.ch/v1/chat/completions \ 
+curl --insecure https://temp-example-deployment.breithorn.svc.cscs.ch/v1/chat/completions \ 
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer YOUR_API_KEY" \
   -d '{

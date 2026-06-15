@@ -8,9 +8,15 @@ targets:
 
 - SlurmEngineLauncher: nested `sbatch engine.sbatch`; endpoint
   http://<assigned-node>:8000; teardown via scancel (§7.4).
-- K8sEngineLauncher: `kubectl apply -f engine.yaml`; endpoint = the in-cluster
-  Service DNS name; teardown deletes the Deployment + Service, leaving the
-  model-cache PVC in place (§7.5/§7.6).
+- K8sEngineLauncher: `kubectl apply -f engine.yaml`; endpoint = the engine's
+  Ingress URL (https://ibt-engine-<slug>.<ingress_domain>) when the cluster
+  declares an ingress_domain (§6.2 — reachable from the SLURM Benchmarker), else
+  the in-cluster Service DNS (same-cluster only); teardown deletes the
+  Deployment + Service + Ingress, leaving the model-cache PVC in place (§7.5/§7.6).
+- ExternalEndpointLauncher: the engine is deployed/torn-down out-of-band (the
+  laptop/Coordinator runs kubectl — the decision-5 analog for K8s, Option B); the
+  SLURM Benchmarker only waits on a given endpoint URL and drives load. No kubectl,
+  so it works from a SLURM allocation that cannot reach the K8s API.
 
 v1 resolves a single instance per deployment (one engine launch == one run_id,
 §16). Multi-instance deployments (data-parallel replicas, routing studies) extend
@@ -129,18 +135,32 @@ class SlurmEngineLauncher:
 
 
 class K8sEngineLauncher:
-    def __init__(self, engine_manifest: Path, namespace: str, run_id_slug: str):
+    def __init__(
+        self, engine_manifest: Path, namespace: str, slug: str,
+        ingress_domain: str | None = None,
+    ):
+        # `slug` MUST be the bounded k8s_slug(run_id) the Planner rendered into the
+        # manifest (object names cap at 63 chars) — not run_id_slug — so the names
+        # this launcher builds (ibt-engine-<slug>, the ingress host, the kubectl
+        # deployment ref) match the applied objects.
         self._manifest = Path(engine_manifest)
         self._ns = namespace
-        self._slug = run_id_slug
+        self._slug = slug
+        self._ingress_domain = ingress_domain
 
     async def submit(self, run_dir: Path) -> list[Instance]:
         code, out, err = await _run("kubectl", "apply", "-f", str(self._manifest))
         if code != 0:
             raise RuntimeError(f"kubectl apply failed (exit {code}): {err.strip() or out.strip()}")
-        # In-cluster Service DNS; the engine's startupProbe gates model-load wait.
-        host = f"ibt-engine-{self._slug}.{self._ns}.svc"
-        return [Instance("i0", f"http://{host}:{ENGINE_PORT}", node=None)]
+        if self._ingress_domain:
+            # SLURM-Benchmarker-reachable endpoint via the rendered Ingress (§6.2).
+            # The cert-manager letsencrypt cert is issued ~1-2 min after apply, so the
+            # endpoint 503s / fails TLS during that window — _await_ready tolerates it.
+            url = f"https://ibt-engine-{self._slug}.{self._ingress_domain}"
+        else:
+            # In-cluster Service DNS — reachable only from a same-cluster benchmarker.
+            url = f"http://ibt-engine-{self._slug}.{self._ns}.svc:{ENGINE_PORT}"
+        return [Instance("i0", url, node=None)]
 
     def engine_log_text(self) -> str:
         r = subprocess.run(
@@ -160,9 +180,35 @@ class K8sEngineLauncher:
         return (r.stdout.strip() or "0") != "0"
 
     async def teardown(self) -> None:
-        # Deletes Deployment + Service only; the model-cache PVC is retained (§7.6).
+        # Deletes Deployment + Service + Ingress (manifest-scoped); the model-cache
+        # PVC lives outside the manifest and is retained (§7.6).
         code, _, err = await _run("kubectl", "delete", "-f", str(self._manifest), "--ignore-not-found")
         if code == 0:
             log.info("deleted k8s engine objects for %s", self._slug)
         else:
             log.warning("kubectl delete failed: %s", err.strip())
+
+
+class ExternalEndpointLauncher:
+    """Option B: the engine is deployed and torn down out-of-band (the laptop /
+    Coordinator runs `kubectl` — the decision-5 analog for K8s). The SLURM
+    Benchmarker only waits on the given endpoint URL and generates load. No
+    kubectl is invoked here, so this works from a SLURM allocation with no access
+    to the K8s API. Liveness is owned by the external deployer; the orchestrator's
+    own /health readiness poll is the signal, so is_alive() is always True."""
+
+    def __init__(self, endpoint_url: str):
+        self._url = endpoint_url.rstrip("/")
+
+    async def submit(self, run_dir: Path) -> list[Instance]:
+        log.info("using externally-managed engine endpoint %s", self._url)
+        return [Instance("i0", self._url, node=None)]
+
+    def engine_log_text(self) -> str:
+        return ""  # engine logs live on the other cluster — not reachable from SLURM
+
+    def is_alive(self) -> bool:
+        return True  # external deployer owns liveness; readiness /health poll is the signal
+
+    async def teardown(self) -> None:
+        log.info("external endpoint %s — teardown owned by the deployer (no-op)", self._url)
