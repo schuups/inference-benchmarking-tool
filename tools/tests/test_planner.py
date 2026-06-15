@@ -96,8 +96,11 @@ def test_slurm_render_canonical(tmp_path, canonical_dict, globals_cfg):
     # (the welded `run_system_prechecks && exec` model is retired) + M3 sampler backgrounding.
     assert "run_system_prechecks.sh &&" not in engine                       # welded model gone
     assert "#SBATCH --ntasks-per-node=4" in engine                          # alloc sized for the step
-    assert "--ntasks-per-node=4 --mpi=pmix" in engine                       # precheck step: 1 rank/GPU
-    assert "--ntasks-per-node=1 --mpi=pmix bash -c" in engine               # engine step: 1 task/node
+    # task counts are set EXPLICITLY on each step (canonical = 16 GPUs over 4 nodes): the
+    # pre-check uses all ranks (total_gpus), the engine uses one PER NODE — and must NOT
+    # inherit the allocation's SLURM_NTASKS=16 (that bug launched one vLLM per GPU).
+    assert "--ntasks=16 --ntasks-per-node=4 --mpi=pmix" in engine           # precheck: 1 rank/GPU
+    assert "--ntasks=4 --ntasks-per-node=1 --mpi=pmix bash -c" in engine    # engine: 1 task/node, not 16
     assert "precheck_rc=$?" in engine                                       # gate before the engine
     assert "NCCL_TESTS_MPI=1" in engine and "PRECHECK_GPUS=1" in engine     # always MPI, -g 1
     assert 'PRECHECK_COLLECTIVES="all_reduce all_gather alltoall sendrecv"' in engine  # PP → +sendrecv
@@ -128,7 +131,10 @@ def test_slurm_single_node_has_no_ray(tmp_path, canonical_dict, globals_cfg):
     # single-node also uses the dedicated step (4 ranks on 1 node), not the welded model;
     # PP=1 → no sendrecv in the collective set
     assert "run_system_prechecks.sh &&" not in engine
-    assert "--ntasks-per-node=4 --mpi=pmix" in engine
+    # single node = 4 GPUs: precheck runs 4 ranks, engine runs exactly 1 task (not the
+    # inherited SLURM_NTASKS=4 — that would launch 4 vLLM servers contending for the GPUs).
+    assert "--ntasks=4 --ntasks-per-node=4 --mpi=pmix" in engine            # precheck: 4 ranks
+    assert "--ntasks=1 --ntasks-per-node=1 --mpi=pmix bash -c" in engine    # engine: exactly 1 task
     assert 'PRECHECK_COLLECTIVES="all_reduce all_gather alltoall"' in engine
 
 

@@ -483,32 +483,26 @@ test adds maintenance without adding signal.
 - The collective benchmark uses the upstream test suite for the engine's stack —
   [`NVIDIA/nccl-tests`](https://github.com/NVIDIA/nccl-tests) on NVIDIA targets (`clariden`,
   `bristen`, `breithorn`) and [`ROCm/rccl-tests`](https://github.com/ROCm/rccl-tests) on
-  AMD targets (`beverin`). It is compiled inside the engine container at first use and
-  cached on persistent storage. No dedicated test image. Because binaries built against
-  one CUDA / NCCL (or ROCm / RCCL) / OpenMPI / libfabric combination are not ABI-portable
-  to another, the cache directory is keyed by a **stack fingerprint** — a hash of the
-  versions of CUDA or ROCm, NCCL or RCCL, OpenMPI, libfabric, and the test-suite tag
-  detected in the engine container. Changing the engine image lands in a new cache
-  directory; older caches survive in parallel and can be reused if the engine reverts.
-  Configuration knobs flow from the benchmark YAML / sweep:
-  - `collective_tests_version` — git tag to build (e.g. `nccl-tests` `2.17.1` or the
-    matching `rccl-tests` tag). Pinned per experiment.
-  - `collective_tests_cache_dir` — persistent path where compiled binaries live (default
+  AMD targets (`beverin`). The repo-built Alps image (§9.1) **pre-ships the `*_perf` binaries**
+  (MPI-linked, compiled by root at image-build time — e.g. `/usr/local/bin/all_reduce_perf`),
+  alongside the OSU micro-benchmarks and the NVSHMEM perftest. The pre-check **discovers and
+  runs the prebuilt binaries** (one MPI rank per GPU under `srun --mpi=pmix`; only rank 0
+  captures each table, the other ranks are co-participants); it does **not** build when they
+  are present — the non-root CSCS Container Engine cannot install an MPI build toolchain anyway
+  (confirmed at E2a: `mpi.h` absent, `sudo`/`apt-get` blocked). Override the search with
+  `NCCL_TESTS_BIN_DIR`.
+- *Build-from-source is a fallback* for images that lack the prebuilt set: it compiles inside
+  the container and caches on persistent storage, keyed by a **stack fingerprint** — a hash of
+  CUDA/ROCm, NCCL/RCCL, OpenMPI, libfabric, the MPI build flavor, and the test-suite tag — so
+  an ABI-incompatible engine change lands in a fresh cache (older caches survive in parallel).
+  A cold build cache flips the run into smoke-test mode (§8.2); discovery of prebuilt binaries
+  does **not** (results persist on the first run). The fallback tries to install missing tools
+  (`make`/`g++`/OpenMPI-dev) via `apt`/`dnf`/`yum` (rank 0 only), which only works as root — so
+  an image without the prebuilt set must pre-ship the full toolchain or set
+  `skip_system_prechecks: true` (§8.5). Configuration knobs (benchmark YAML / sweep):
+  - `collective_tests_version` — test-suite tag for the build fallback (e.g. `nccl-tests` `2.18.2`).
+  - `collective_tests_cache_dir` — persistent path for the build fallback's binaries (default
     `/capstor/scratch/cscs/$USER/ibt/collective-tests-cache` on SLURM; a PVC mount on K8s).
-    Shared across experiments; safe to delete to force a rebuild.
-
-  The pre-check script attempts to **install missing build tools** (`make`, `g++`, OpenMPI
-  dev, `curl`, `tar`) inside the engine container via `apt-get` / `dnf` / `yum`, rank 0 only
-  (other ranks wait on a sentinel, so apt is not hammered by `N` ranks). **This fallback
-  only works when the container runs as root.** On the CSCS Container Engine the container
-  runs as the invoking user (non-root), so the install does not succeed and the build fails
-  for want of the toolchain (a missing `mpi.h` / `g++` / NCCL headers — observed at E1 on the
-  stock vLLM image). Because the dedicated pre-check step always runs **one rank per GPU**, the
-  collective build is always the **MPI flavor** (`NCCL_TESTS_MPI=1`; each rank drives a single
-  GPU via `-g 1`), which requires the image's MPI built against the Alps libfabric/CXI stack.
-  The **engine image must therefore pre-ship the build toolchain** — the repo-built Alps image
-  (§9.1) does; stock vendor images (§9.2) do not, so `skip_system_prechecks: true` is required
-  when running on them (§8.5).
 - The NVSHMEM benchmark uses the perftest binaries that ship with the engine image's
   NVSHMEM SDK (no separate build), bootstrapped over the dedicated step's SLURM PMIx ranks
   (`PMIX_MCA_psec=native`, `NVSHMEM_DISABLE_CUDA_VMM=1`; libfabric/cxi from the image's own

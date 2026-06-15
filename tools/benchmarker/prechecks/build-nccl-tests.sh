@@ -31,10 +31,19 @@ THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=_stack-fingerprint.sh
 source "${THIS_DIR}/_stack-fingerprint.sh"
 
+rank0() { [ "${SLURM_PROCID:-0}" = "0" ]; }
+
+# ---------------------------------------------------------------- prebuilt short-circuit
+# The Alps engine image ships prebuilt, MPI-linked nccl-tests (e.g. /usr/local/bin/*_perf).
+# Prefer them: the non-root container can't install an MPI build toolchain, and the image's
+# binaries already match its CUDA/NCCL/MPI/libfabric stack. Nothing to build.
+if nccl_tests_prebuilt; then
+    rank0 && echo "[build] prebuilt nccl-tests present ($(nccl_tests_bindir)) — skipping build"
+    exit 0
+fi
+
 CACHE_DIR="$(cache_dir_for_stack)"
 SENTINEL="${CACHE_DIR}/build/.built"
-
-rank0() { [ "${SLURM_PROCID:-0}" = "0" ]; }
 
 # ---------------------------------------------------------------- cache hit
 if [ -f "${SENTINEL}" ]; then

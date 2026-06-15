@@ -32,7 +32,8 @@ set -eo pipefail
 THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=_stack-fingerprint.sh
 source "${THIS_DIR}/_stack-fingerprint.sh"
-BUILD_DIR="$(cache_dir_for_stack)/build"
+# Prebuilt binaries in the image if present (Alps net image), else the build cache.
+BUILD_DIR="$(nccl_tests_bindir)"
 
 rank0() { [ "${SLURM_PROCID:-0}" = "0" ]; }
 

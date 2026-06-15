@@ -54,3 +54,35 @@ cache_dir_for_stack() {
     : "${NCCL_TESTS_CACHE:?must be set}"
     echo "${NCCL_TESTS_CACHE}/v${NCCL_TESTS_VERSION}-$(stack_fingerprint)"
 }
+
+# nccl-tests `*_perf` binaries are PREBUILT (MPI-linked, by root) in the engine image
+# on Alps (e.g. /usr/local/bin/all_reduce_perf). Prefer them so the pre-check never
+# builds at run time — the non-root container can't install an MPI toolchain, and the
+# image's binaries already match its CUDA/NCCL/MPI/libfabric stack. Same discover-don't-
+# build model as run-nvshmem.sh. Override with NCCL_TESTS_BIN_DIR.
+_NCCL_TESTS_PREBUILT_DIRS="/usr/local/bin /usr/local/nccl-tests/build /opt/nccl-tests/build"
+
+# True (exit 0) if a prebuilt nccl-tests set is available in the image.
+nccl_tests_prebuilt() {
+    if [ -n "${NCCL_TESTS_BIN_DIR:-}" ] && [ -x "${NCCL_TESTS_BIN_DIR}/all_reduce_perf" ]; then
+        return 0
+    fi
+    local d
+    for d in ${_NCCL_TESTS_PREBUILT_DIRS}; do
+        [ -x "${d}/all_reduce_perf" ] && return 0
+    done
+    return 1
+}
+
+# Echoes the directory holding the nccl-tests `*_perf` binaries: a prebuilt set if
+# present, else the build cache dir (populated on demand by build-nccl-tests.sh).
+nccl_tests_bindir() {
+    if [ -n "${NCCL_TESTS_BIN_DIR:-}" ] && [ -x "${NCCL_TESTS_BIN_DIR}/all_reduce_perf" ]; then
+        echo "${NCCL_TESTS_BIN_DIR}"; return 0
+    fi
+    local d
+    for d in ${_NCCL_TESTS_PREBUILT_DIRS}; do
+        [ -x "${d}/all_reduce_perf" ] && { echo "${d}"; return 0; }
+    done
+    echo "$(cache_dir_for_stack)/build"
+}

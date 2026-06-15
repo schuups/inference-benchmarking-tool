@@ -46,7 +46,9 @@ export PRECHECK_COLLECTIVES="{{ precheck_collectives }}"
 # ---- §8 pre-checks: dedicated step, one rank per GPU (SPMD via PMIx) — gates the engine ----
 # Same EDF (image / libfabric / CUDA / NCCL / mounts / --network / --mpi) as the engine, so the
 # foundation measured is the engine's; the per-GPU rank topology is the engine's actual one (§8.2).
-srun --environment={{ run_dir_remote }}/engine.toml{{ net }} --ntasks-per-node={{ gpus_per_node }} --mpi=pmix \
+# --ntasks is set EXPLICITLY (one rank per GPU) — the allocation's SLURM_NTASKS would otherwise
+# leak into the step and the engine step below must not inherit it (see its --ntasks).
+srun --environment={{ run_dir_remote }}/engine.toml{{ net }} --nodes={{ nodes }} --ntasks={{ total_gpus }} --ntasks-per-node={{ gpus_per_node }} --mpi=pmix \
     bash {{ tools_remote }}/benchmarker/prechecks/run_system_prechecks.sh
 precheck_rc=$?
 if [ "${precheck_rc}" -ne 0 ]; then
@@ -61,8 +63,12 @@ head_node=$(echo "$nodes_list" | head -1)
 export VLLM_HOST_IP=$(hostname --ip-address)
 RAY_CMD='if [ "$SLURM_NODEID" = "0" ]; then ray start --head --port=6379; else sleep 10 && ray start --address='"$head_node"':6379 --block; fi'
 {% endif %}
-# ---- engine step: 1 task/node; §13.3 sampler backgrounded in the SAME container session ----
-srun --environment={{ run_dir_remote }}/engine.toml{{ net }} --ntasks-per-node=1 --mpi=pmix bash -c '
+# ---- engine step: one task PER NODE (vLLM drives its GPUs in-process / via Ray) ----
+# --ntasks={{ nodes }} is EXPLICIT: the allocation is sized {{ gpus_per_node }} tasks/node for the
+# pre-check step, so without this the engine step would inherit SLURM_NTASKS and launch one vLLM
+# per GPU (4 servers contending for memory + clobbered hw-sampler). §13.3 sampler backgrounded
+# in the same container session.
+srun --environment={{ run_dir_remote }}/engine.toml{{ net }} --nodes={{ nodes }} --ntasks={{ nodes }} --ntasks-per-node=1 --mpi=pmix bash -c '
 set -eo pipefail
 python3 {{ tools_remote }}/benchmarker/hw_sampler.py \
     --out {{ run_dir_remote }}/hw-$(hostname).ndjson --interval {{ hardware_sampling_interval_s }} &

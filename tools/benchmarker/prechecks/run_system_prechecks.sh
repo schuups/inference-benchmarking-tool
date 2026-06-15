@@ -45,17 +45,23 @@ fi
 
 mkdir -p "${PRECHECK_OUT}"
 
-# ------------------------------------------------------------- build (cached)
-# Cache miss => smoke-test mode (§8.2): pipeline still runs end-to-end but the
-# orchestrator must not persist results. The flag is part of results.json.
+# ------------------------------------------------------- collective binaries
+# Prefer prebuilt nccl-tests baked into the image (the Alps net image ships them in
+# /usr/local/bin); only build — and risk smoke-test mode on a cold cache — when no
+# prebuilt set exists (e.g. a stock image). A build cache miss flips the run into
+# smoke-test mode (§8.2): the pipeline runs end-to-end but results are NOT persisted.
 # shellcheck source=_stack-fingerprint.sh
 source "${THIS_DIR}/_stack-fingerprint.sh"
 SMOKE_FLAG=""
-if [ ! -f "$(cache_dir_for_stack)/build/.built" ]; then
-    rank0 && echo "[prechecks] collective-tests cache MISS — entering smoke-test mode (§8.2)"
-    SMOKE_FLAG="--smoke"
+if nccl_tests_prebuilt; then
+    rank0 && echo "[prechecks] using prebuilt nccl-tests from the image: $(nccl_tests_bindir)"
+else
+    if [ ! -f "$(cache_dir_for_stack)/build/.built" ]; then
+        rank0 && echo "[prechecks] collective-tests cache MISS — entering smoke-test mode (§8.2)"
+        SMOKE_FLAG="--smoke"
+    fi
+    bash "${THIS_DIR}/build-nccl-tests.sh"
 fi
-bash "${THIS_DIR}/build-nccl-tests.sh"
 
 # ------------------------------------------------------------- collectives
 # run-collectives.sh prints one nccl-tests table per collective; split the capture
@@ -65,8 +71,10 @@ bash "${THIS_DIR}/build-nccl-tests.sh"
 # per-rank error must NOT abort the run — the trailing `true` keeps the other PEs
 # alive (this step runs one rank per GPU; §8.2).
 for c in ${PRECHECK_COLLECTIVES:-all_reduce all_gather alltoall}; do
-    COLLECTIVES="$c" bash "${THIS_DIR}/run-collectives.sh" \
-        > "${PRECHECK_OUT}/collective_${c}.out" 2>&1 \
+    # Every PE runs the binary (one MPI program across the step's ranks), but only rank 0
+    # captures the table to the shared file — otherwise N ranks clobber the same path.
+    if rank0; then cap="${PRECHECK_OUT}/collective_${c}.out"; else cap=/dev/null; fi
+    COLLECTIVES="$c" bash "${THIS_DIR}/run-collectives.sh" > "${cap}" 2>&1 \
         || { rank0 && { echo "[prechecks] ${c} errored (graded as fail):"; tail -5 "${PRECHECK_OUT}/collective_${c}.out"; }; true; }
 done
 
@@ -74,8 +82,10 @@ done
 # alltoall_latency is the MoE-relevant all-to-all collective; it wires up across all
 # PEs of this dedicated step (SLURM PMIx). shmem_put_bw needs EXACTLY 2 PEs (pt-to-pt),
 # which an N-rank step (N≥4) can't provide — deferred to its own 2-rank step (TODOs.md, §8.1).
+# Same rank-0-only capture as the collectives: all PEs run the perftest, rank 0 records it.
+if rank0; then nvcap="${PRECHECK_OUT}/nvshmem_alltoall_latency.out"; else nvcap=/dev/null; fi
 NVSHMEM_TESTS="device/coll/alltoall_latency" \
-    bash "${THIS_DIR}/run-nvshmem.sh" > "${PRECHECK_OUT}/nvshmem_alltoall_latency.out" 2>&1 || true
+    bash "${THIS_DIR}/run-nvshmem.sh" > "${nvcap}" 2>&1 || true
 # run-nvshmem.sh exits 0 with a warning when the SDK is absent (skipped row,
 # §8.1) unless NVSHMEM_REQUIRED=1, in which case the `|| true` above must not
 # mask it — re-check explicitly:
