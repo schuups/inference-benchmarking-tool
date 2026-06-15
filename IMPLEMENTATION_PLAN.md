@@ -6,9 +6,13 @@ milestones get checked off, re-scoped, or re-ordered as implementation reveals n
 — any structural change to a milestone goes through the working-agreement process
 (`CLAUDE.md` *How we work together*).
 
-**Process status**: phase 5 (*Planning and design*) and phase 6 (*Adversarial review of
-the plan*) are complete; review findings are incorporated below (see *Review log*). Next:
-phase 7 (*Implementation*), starting at M0.
+**Process status**: all component milestones **M0–M11 are implemented** (laptop halves plus
+the cluster-validated pre-check / engine / reports paths). Experiments **E1, E2a, E2b are
+✅ done** on `clariden` (walking skeleton + 1-node & 2-node §8 foundation references
+populated). Next on the critical path: the **real-scenario capacity runs** — Apertus-70B
+single-node (E3a, config drafted) as the lower-risk precursor to the **Kimi-K2.6 flagship
+(E3)**, whose Ray-in-image blocker is now resolved in-repo
+(`nvidia-gh200-vllm-0.23.0-net.v1`, pending build + JFrog push).
 
 ---
 
@@ -35,7 +39,7 @@ None are descoped.
 |---|---|
 | `SPECIFICATIONS.md`, scenario registry (`tools/scenarios/*.yaml` × 4, incl. `smoke-synthetic`) | Done |
 | `tools/pre-flight-checks.py` (§4) | Done |
-| `tools/system_prechecks_reference.yaml` (§8.3) | Skeleton — all `expected: TBD` (populated by E2) |
+| `tools/system_prechecks_reference.yaml` (§8.3) | `clariden` **1-node + 2-node rows populated** (E2a/E2b: NCCL all_reduce/all_gather/alltoall + PP-link sendrecv + NVSHMEM alltoall + capstor storage); `breithorn` rows still TBD (E2c) |
 | `examples/nccl-tests/` (standalone manual pre-check example) | Adapted into M4 (done); the canonical §8 scripts now live in `tools/benchmarker/prechecks/` |
 | `examples/slurm-deployment/` (Apertus-8B vLLM sbatch + EDF) | Done — seed for M6 templates |
 | `examples/k8s-deployment/` (deployment/service/ingress/PVC) | Done — seed for M6 templates |
@@ -44,13 +48,13 @@ None are descoped.
 | `tools/benchmarker/dataset_gen/` (registry loader, seeded sampling, all four §11.5 sources, manifest emitter, offline CLI) — validated against real LongBench / WildChat / gsm8k downloads | Done (M1, 2026-06-12) |
 | `tools/benchmarker/load_gen/` (arrival, client + §13.1 taxonomy, session scheduler with §12.2 phase accounting, `server_stats` scraper, readiness/model-load/primer) + `tools/testing/mock_openai_server.py` | Done (M2, 2026-06-12) |
 | `tools/common/results_db.py` (seven §14 tables, WAL + single-writer, smoke-mode suppression, NDJSON ingestion) + `tools/benchmarker/hw_sampler.py` (stdlib-only, engine-node placement) | Done (M3, 2026-06-12) |
-| `tools/benchmarker/prechecks/` (runner + parsers + §8.3/§8.4 grading) and `tools/planner/` + `tools/templates/` (EDF, engine + benchmarker sbatch, K8s engine manifest) | Laptop halves done (M4/M6, 2026-06-12); cluster validation at E1/E5 |
+| `tools/benchmarker/prechecks/` (runner + parsers + §8.3/§8.4 grading) and `tools/planner/` + `tools/templates/` (EDF, engine + benchmarker sbatch, K8s engine manifest) | M4 **cluster-validated at E2** (dedicated multi-rank pre-check step, prebuilt-binary discovery, richer mount-aware storage, model-load dissection); M6 laptop half done + **K8s engine/ingress path landed** (worktree-k8s merge, E5 prep); `sbatch --test-only` / `kubectl --dry-run` at E5 |
 | `tools/benchmarker/orchestrator.py` (`run_experiment` phase driver, `EngineLauncher` + `QualityEvaluator`/M11 seams) + `launchers.py` (Slurm/K8s) + `main.py` CLI + `tools/tests/test_orchestrator.py` (7 mock-integration tests) + planner `--deployment-index` wiring | Done (M7, 2026-06-13) — DoD met on the laptop half against the mock server; SlurmEngineLauncher/K8sEngineLauncher subprocess paths (sbatch/squeue/scancel, kubectl) exercised on-cluster at E1/E5 |
 | `tools/coordinator/` (`state` resumable run file, `merge` idempotent central-DB merge, `policy` §8.4 gate, `teardown` §7 plan, `backend` ClusterBackend + Fake/Kubectl, `coordinator` phase loop, `main` CLI) + `tools/tests/test_coordinator.py` (11 tests) | Done (M8, 2026-06-13) — deterministic logic + >100MB staged-download round-trip unit-tested vs a fake backend; SLURM FirecREST effects assistant-driven via MCP in-session (decision 5), K8s `kubectl` path headless (staging is E5); live FirecREST validation at E1 |
 | `tools/benchmarker/quality_eval/` (`runner` implementing M7's QualityEvaluator seam, `BuiltinEvalBackend` in-process grader, `LmEvalBackend` lm-eval-harness wrapper, `suites`/`base`) + `tools/tests/test_quality_eval.py` (7 tests); M7 `main.py` wires `QualityEvalRunner(LmEvalBackend())` | Done (M11, 2026-06-13) — Stage-A gate (floor pass/fail) + Stage-B comparison (suites × eval-concurrency → `quality_evals` rows) verified vs the mock's canned answers; gate-abort path exercised by `test_orchestrator`. lm-eval invocation/parse provisional → validated at E1; GPQA-Diamond gating documented (decision 8) |
 | `tools/reports/` (`analysis` §15.1 computations, `plots` matplotlib figures, `notebook` builder, `render` nbclient executor, `fixtures` known-answer DB) + `experiments/template_report.ipynb` + `reports/STYLE.md` + `tools/tests/test_reports.py` (12 tests) | Done (M9, 2026-06-13) — λ\*/supportable-users/capacity-vs-quality asserted against a crafted fixture; notebook executes headless (PNGs + λ\* captured); validated against the real E1 DB later |
 | `tools/cleaner.py` (§7.7 `identify` policy + `prune`, ClusterBackend seam: Kubectl/Fake, `scratch_candidates` for the MCP-driven SLURM path, `reminder_due`) + `tools/tests/test_cleaner.py` (5 tests) | Done (M10, 2026-06-13) — identification + skip policy (model-cache PVC §7.6, recent-N JFrog, active-job scratch, age threshold) and approval-gated pruning tested vs a fake backend; K8s headless; SLURM scratch assistant-driven; JFrog `jf` backend is a follow-up |
-| `tools/images/` (multi-image catalogue: Alps netstack `core` + `nvidia-vllm-0.22.1-net.v1` variant, `build.sh` SLURM build → digest-pinned EDF → `sanity.sbatch` acceptance gate) | Done (M5, 2026-06-14) — first Alps vLLM image green on clariden |
+| `tools/images/` (multi-image catalogue: Alps netstack `core/{nvidia,amd}/netstack/v1` + variants `nvidia-gh200-vllm-0.22.1-net.v1`, `nvidia-gh200-vllm-0.23.0-net.v1` (Ray baked), `amd-mi300a-vllm-0.23.0-net.v1`; `build.sh` SLURM build → digest-pinned EDF → `sanity.sbatch` acceptance gate) | Done (M5, 2026-06-14) — first Alps vLLM image green on clariden; 0.23.0+Ray + AMD MI300A variants added 2026-06-15 (build/push pending) |
 
 ## 3. Build strategy
 
@@ -150,19 +154,23 @@ Sizes are relative complexity (S < M < L), not time promises.
   runs dependency-free in a bare container image locally (all-`NULL` GPU rows on
   laptop); verified on a GH200 node during E1.
 
-### M4 — System performance pre-checks runner (M) — 🚧 laptop half done 2026-06-12 (runner + parsers + §8.3/§8.4 grading + gate policy, fixture-tested; in-container execution on clariden pending — needs M5/E1; NVSHMEM output fixtures provisional until captured from the real image)
+### M4 — System performance pre-checks runner (M) — ✅ done 2026-06-15 (cluster-validated at E2a single-node + E2b multi-node on clariden)
 
-- **Deliverables**: `tools/benchmarker/prechecks/run_system_prechecks` — adapts
-  `examples/nccl-tests/` (stack fingerprint, cached build, rank-0 toolchain install,
-  collectives, NVSHMEM) into the in-container gate of §8.2; adds the storage
-  sequential-read check; parses results into `system_prechecks` rows (§14.6); grades
-  against `tools/system_prechecks_reference.yaml` (§8.3–8.4) with warn/fail signalling
-  to the orchestrator (M7) and smoke-test mode on cache miss.
-- **DoD**: executes inside the vLLM EDF container session on one `clariden` node,
-  concatenated `run_system_prechecks && exec <engine>`; rows persisted; with TBD
-  references everything logs informational (gate unenforceable until E2).
+- **Deliverables**: `tools/benchmarker/prechecks/` — a **dedicated multi-rank pre-check
+  step** (§8.2, refactored 2026-06-15): an `srun --ntasks-per-node=<gpus_per_node>
+  --mpi=pmix` SPMD step (one rank per GPU, PMIx) that **gates** a separate one-task-per-node
+  engine step, replacing the old welded `run_system_prechecks && exec <engine>`. Discovers
+  the Alps image's **prebuilt** nccl-tests / OSU / NVSHMEM-perftest binaries (no MPI dev to
+  build → discover, don't build); runs NCCL collectives (all_reduce / all_gather / alltoall,
+  plus `sendrecv` when PP>1) at the real per-GPU topology, multi-PE NVSHMEM
+  `alltoall_latency`, and **mount-aware storage** (single-stream O_DIRECT floor +
+  parallel-aggregate + buffered/readahead, scope derived from the weights mount). Parses
+  into `system_prechecks` rows (§14.6); grades against `tools/system_prechecks_reference.yaml`
+  (§8.3–8.4) with warn/fail to the orchestrator (M7) and smoke-test mode on cache miss.
+- **DoD**: executes as the dedicated one-rank-per-GPU step on `clariden`; rows persisted;
+  references populated → §8.4 gate enforceable (**met at E2a single-node + E2b multi-node**).
 
-### M5 — Images and registry workflow (M, parallel track) — ✅ done 2026-06-14 (first Alps vLLM image `vllm:0.22.1-alps.net.v1` built + 2-node sanity green on clariden)
+### M5 — Images and registry workflow (M, parallel track) — ✅ done 2026-06-14 (first Alps vLLM image `vllm:0.22.1-alps.net.v1` built + 2-node sanity green on clariden); catalogue extended 2026-06-15 (nvidia-gh200 0.23.0 + Ray, AMD MI300A)
 
 - **Deliverables**: `tools/images/` as a multi-image catalogue (§9.1) — a shared,
   version-tagged Alps network stack under `core/<vendor>/netstack/<v>/` (Containerfile +
@@ -178,8 +186,13 @@ Sizes are relative complexity (S < M < L), not time promises.
   references it by canonical tag; benchmarker image runs M1 dataset generation on the
   cluster. Networking-library correctness (NCCL ↔ Slingshot/libfabric) is proven by M4
   passing inside this image — the two milestones gate each other.
+- **Catalogue (2026-06-15)**: `nvidia-gh200-vllm-0.23.0-net.v1` **bakes Ray into the image**
+  (`variant/hooks.d/10-ray.sh`), retiring the E2b interim scratch-`--target` Ray install and
+  unblocking the E3 multi-node path; `amd-mi300a-vllm-0.23.0-net.v1` + `core/amd/netstack/v1`
+  add the `beverin` (MI300A / ROCm) build. Both **pending build + JFrog push** before use; the
+  0.23.0 bump also triggers a §16.2 flag-compat check vs the configs pinned at 0.22.1.
 
-### M6 — Planner (M) — 🚧 laptop half done 2026-06-12 (templates + renderer + render-invariant tests; `sbatch --test-only` / `kubectl --dry-run=server` validation at E1/E5; multi-node Ray block is a skeleton validated at the E3 ladder; K8s ingress wiring lands with E5)
+### M6 — Planner (M) — 🚧 laptop half done 2026-06-12; extended 2026-06-15 (`engine.sbatch.j2` now renders the dedicated §8.2 pre-check step + the gated engine step; `render.py` wires `precheck_collectives` / `model_id` + the multi-node `disable_custom_all_reduce` / `enforce_eager` flags; **K8s engine + ingress path landed** via worktree-k8s — Ingress host (§6.2), cached-weights PVC + `model_cache_slug`, DNS-1035 `k8s_slug` name bounding, image-pull secret; `sbatch --test-only` / `kubectl --dry-run=server` validation at E5)
 
 - **Deliverables**: `tools/planner/` + templates `tools/templates/slurm/vllm.edf.j2`,
   `tools/templates/slurm/engine.sbatch.j2`, `tools/templates/benchmarker.sbatch.j2` (the
@@ -225,7 +238,7 @@ Sizes are relative complexity (S < M < L), not time promises.
   still tears down all labelled resources; PVC retention honored (§7.6); a >100 MB
   fixture DB round-trips intact through the staged-transfer download.
 
-### M9 — Reports generator (M) — ✅ done 2026-06-13 (analysis module computes every §15.1 panel — measurement-phase filtering, per-class latency-vs-λ, λ\* / SLO attainment, supportable-users via Little's law, quality + capacity-vs-quality deltas, hardware overlays — asserted against a known-answer fixture; matplotlib plots; the §15.1 template notebook `experiments/template_report.ipynb` executes headless via nbclient, writing report.ipynb + ttft/itl/hardware PNGs; `reports/STYLE.md` bootstrapped; real-DB validation at E1)
+### M9 — Reports generator (M) — ✅ done 2026-06-13 (analysis module computes every §15.1 panel — measurement-phase filtering, per-class latency-vs-λ, λ\* / SLO attainment, supportable-users via Little's law, quality + capacity-vs-quality deltas, hardware overlays — asserted against a known-answer fixture; matplotlib plots; the §15.1 template notebook `experiments/template_report.ipynb` executes headless via nbclient, writing report.ipynb + ttft/itl/hardware PNGs; `reports/STYLE.md` bootstrapped; real-DB validation at E1, and **exercised against the real E2a/E2b run DBs 2026-06-15** producing ttft/itl PNGs under `experiments/`)
 
 - **Deliverables**: `experiments/template_report.ipynb` with every §15.1 panel —
   scenario/mix manifest panel, pre-checks table, model-load breakdown, TTFT/ITL vs λ
@@ -271,10 +284,11 @@ Sizes are relative complexity (S < M < L), not time promises.
 | ID | Experiment | Needs | Definition of done |
 |---|---|---|---|
 | **E1** | **Walking skeleton**: Apertus-8B, 1× GH200 node (`clariden`), single-entry mix of `smoke-synthetic` (§9.2 smoke-run exemption — results are pipeline validation, never findings; **stock NGC vLLM image allowed**, operator decision 2026-06-12 — single-node E1 exercises no Slingshot/CXI path; §9.1 repo-built images mandatory from E2a onward), 3 λ levels | M0–M7 (manual drive acceptable), M9 for the notebook DoD; M8 to re-run automated | Full pipeline executes: pre-checks → engine → primer → §13.5 Stage-A gate → sweep (incl. `server_stats` + `hardware_stats` capture) → Stage-B eval → DB → notebook renders all panels. Teardown leaves zero orphans. **✅ done 2026-06-14** — assistant-driven via FirecREST MCP: 629 requests over λ∈{0.5,1,2}, 0 errors, persisted DB (not smoke) + report.ipynb/ttft/itl PNGs rendered against the real DB, engine torn down cleanly (zero orphans). Stock image → §8 pre-checks skipped (no MPI/NCCL dev to build nccl-tests; validated on the Alps image at E2); sweep never saturated so λ\*=2.0 is the swept ceiling, not a capacity limit; pipeline-validation only (never findings, §9.2). Bring-up fixes in commit 84e3c01. **Re-validated 2026-06-14 post-merge/refactor on the current code** (671 requests over λ∈{0.5,1,2}, 0 errors, persisted real DB + notebook, zero orphans) — exercised the moved `tools.common.results_db` end-to-end on-cluster; the re-run also surfaced + fixed a missing `skip_quality_gate`/`skip_quality_compare` in `e1-walking-skeleton.yaml`. |
-| **E2a** | **Single-node characterisation** (`clariden`): populate `tools/system_prechecks_reference.yaml` 1-node rows from repeated E1-class deployments | M4, M5; piggybacks on E1 | 1-node TBD placeholders replaced with measured medians + tolerances; §8.4 gate enforceable at single-node scope. |
-| **E2b** | **Multi-node characterisation** (`clariden`): reference rows at E3's exact rank topology (inter-node collectives + NVSHMEM over Slingshot), gathered during E3 bring-up smokes, *before* graded E3 measurement | E2a; E3's multi-node deployment templates | Inter-node reference rows populated; E3's foundation gate enforceable on the cross-node fabric it actually depends on. |
-| **E2c** | **`breithorn` characterisation**: reference rows on the K8s GH200 nodes | M6 K8s templates, M7 K8s path | `breithorn` rows populated; prerequisite for E5. |
-| **E3** | **The capacity run (primary goal)**: Kimi-K2.6 on `clariden`, `scenario_mix` 0.8 `agentic-coding` (longbench, `sequential` sessions) + 0.2 `chat-short-turns` (wildchat), `slos` declared, λ sweep. **Prerequisites**: (a) verify Kimi-K2.6 architecture support in the pinned vLLM — a forced version bump triggers §16.2 flag-compat work + image rebuild; (b) MoE bring-up ladder: Apertus-70B PP=2 smoke (dense, cross-node PP), then a small open MoE at EP>1 (exercises expert all-to-all + the §8 NVSHMEM plane) before Kimi-scale (≈1 TB weights → ≥3–4 GH200 nodes, TP4 × PP≥3, §6.1) | E1, E2a/E2b, M8, M9; Kimi image (M5) | Report shows λ\*, per-class SLO attainment, supportable-users estimate; results pass adversarial review (phase 16). |
+| **E2a** | **Single-node characterisation** (`clariden`): populate `tools/system_prechecks_reference.yaml` 1-node rows from repeated E1-class deployments | M4, M5; piggybacks on E1 | 1-node TBD placeholders replaced with measured medians + tolerances; §8.4 gate enforceable at single-node scope. **✅ done 2026-06-15** — Apertus-8B 4×GH200 TP4; intra-node NVLink references populated (NCCL all_reduce 317.7 / all_gather 283.5 / alltoall 306.2 GB/s; NVSHMEM alltoall 12.6 µs; capstor storage floor). Drove the §8 **dedicated multi-rank-step refactor** + prebuilt-binary discovery + richer storage + model-load dissection; M4 cluster-validated here. |
+| **E2b** | **Multi-node characterisation** (`clariden`): reference rows at E3's exact rank topology (inter-node collectives + NVSHMEM over Slingshot), gathered during E3 bring-up smokes, *before* graded E3 measurement | E2a; E3's multi-node deployment templates | Inter-node reference rows populated; E3's foundation gate enforceable on the cross-node fabric it actually depends on. **✅ done 2026-06-15** — Apertus-70B TP4×PP2 (8×GH200, 2 nodes); Slingshot references populated (NCCL all_reduce 131.1 / all_gather 86.5 / alltoall 38.3 / PP-link sendrecv 23.5 GB/s; NVSHMEM alltoall 47.9 µs). Surfaced the 70B **storage-bound load** (~0.185 GB/s) + the three multi-node engine fixes (Ray, `disable_custom_all_reduce`, `enforce_eager`) → motivated the M5 Ray-in-image rebuild. |
+| **E2c** | **`breithorn` characterisation**: reference rows on the K8s GH200 nodes | M6 K8s templates (landed via worktree-k8s), M7 K8s path | `breithorn` rows populated; prerequisite for E5. |
+| **E3a** | **Real-scenario capacity precursor** (`clariden`): Apertus-70B single-node TP4 (dense; **no Ray/PP** → sidesteps the E2b multi-node faults), operator mix 0.8 `chat-short-turns` (wildchat) + 0.2 `agentic-coding` (longbench, ~25k-char turn-1), full 256K context, λ swept to saturation, per-class SLOs. Exercises the **real-scenario capacity pipeline** (real-text datasets + λ\* / SLO-attainment / supportable-users) end-to-end before the Kimi-scale MoE run. Config `examples/benchmark-configs/apertus70b-mixed-single-node-clariden.yaml` **drafted, pending operator review**. | E1, E2a, M8, M9; `nvidia-gh200-vllm-0.22.1` image (built); real-text datasets (verified on-cluster 2026-06-15) | Report shows λ\*, per-class SLO attainment, and the supportable-users estimate for the Apertus mix; first **real capacity findings**; capacity pipeline proven for E3. |
+| **E3** | **The capacity run (primary goal)**: Kimi-K2.6 on `clariden`, `scenario_mix` 0.8 `agentic-coding` (longbench, `sequential` sessions) + 0.2 `chat-short-turns` (wildchat), `slos` declared, λ sweep. **Prerequisites**: (a) verify Kimi-K2.6 architecture support in the pinned vLLM — a forced version bump triggers §16.2 flag-compat work + image rebuild; (b) MoE bring-up ladder: Apertus-70B PP=2 smoke (dense, cross-node PP) **— done at E2b**, then a small open MoE at EP>1 (exercises expert all-to-all + the §8 NVSHMEM plane) before Kimi-scale (≈1 TB weights → ≥3–4 GH200 nodes, TP4 × PP≥3, §6.1); (c) **Ray-in-image** — resolved in-repo (`nvidia-gh200-vllm-0.23.0-net.v1`), **needs build + JFrog push** + the 0.23.0 §16.2 flag-compat check; (d) E3a (Apertus-70B single-node) validates the real-scenario capacity pipeline first | E1, E2a/E2b, E3a, M8, M9; Kimi image (M5) | Report shows λ\*, per-class SLO attainment, supportable-users estimate; results pass adversarial review (phase 16). |
 | **E4** | **Feature-effect sweeps** on the E3 workload: `enable_prefix_caching` on/off, `kv_offloading_size`, `kv_cache_dtype`, `session_affinity` vs `random` (multi-instance); speculative decoding on Apertus-70B chat/long-context (§9.2 pairing, §17.2 placements; `spec_accept_rate` captured via the M2 scraper) | E3 baseline | Marginal effect of each feature on λ\*/users quantified per §16.1, **with the §13.5 capacity-vs-quality pairing for quality-impacting knobs** (quantization / KV dtype) — the flagship *"N× more users at −M pts"* report; findings recorded in §17. |
 | **E5** | **Platform comparison**: E3 workload, SLURM (`clariden`) vs K8s (`breithorn`), same GH200 hardware, engine, config; the SLURM Benchmarker drives the K8s engine (M6/M7 K8s engine path) | E3; E2c | Per-platform overlay report isolating the platform contribution (§16.1); "is K8s slower than it could be?" answered with telemetry-backed evidence. |
 
@@ -283,10 +297,10 @@ Sizes are relative complexity (S < M < L), not time promises.
 ```
 M0 ─┬─ M1 (dataset gen) ───┐
     ├─ M2 (load gen) ──────┤
-    ├─ M3 (DB + sampler) ──┼─ M7 (orchestrator) ─→ E1 ─→ E2a ─→ E2b ─→ E3 ─→ E4
-    └─ M6 (planner) ───────┘        ↑                ↑               ↑    └─→ E5 ←─ E2c
-M5 (images) ── M4 (prechecks) ──────┘                │               │
-M8 (coordinator: after M3+M6+M7) ────────────────────┘ (automated re-run; required for E3)
+    ├─ M3 (DB + sampler) ──┼─ M7 (orchestrator) ─→ E1✅ ─→ E2a✅ ─→ E2b✅ ─→ E3a ─→ E3 ─→ E4
+    └─ M6 (planner) ───────┘                                          (Apertus) (Kimi)  └─→ E5 ←─ E2c
+M5 (images) ── M4 (prechecks)✅ ────┘
+M8 (coordinator: after M3+M6+M7) ──→ automated re-run; required for E3a/E3
 M9 (reports: fixture-testable after M3; required for E1 DoD)
 M10 (cleaner: any time after M0; required before E3 leaves debris at scale)
 M11 (quality eval: after M0, mock-testable with M2's server; Stage-A gate in E1, capacity-vs-quality required for E4)
@@ -390,6 +404,20 @@ deltas in the same report (the "N× users at −M pts" claim); `ignore_eos` para
 as `output_length_mode: forced | natural` (§11.6). Structural outcomes: new **M11
 Quality eval runner**; M0/M2/M7/M9 amended; E1 exercises the gate; E4's DoD now requires
 the capacity-vs-quality pairing; spec gained §13.5 + §14.9 (`quality_evals` table).
+
+**§8 pre-check refactor + E2 characterisation — 2026-06-15.** E2a/E2b ran on `clariden`,
+populating the 1-node + 2-node `tools/system_prechecks_reference.yaml` foundation references
+and cluster-validating M4. The §8 pre-check was restructured (plan-mode design + review) from
+the welded `run_system_prechecks && exec <engine>` into a **dedicated one-rank-per-GPU
+`srun --mpi=pmix` step** that gates a separate one-task-per-node engine step (SPEC §8.2
+rewritten) — this is what gives multi-node NCCL its real per-GPU topology and enables multi-PE
+NVSHMEM; storage grew to three mount-aware metrics and `model_load_weights_gib` was added
+(§10.2). E2b's 70B load proved **storage-bound** (~0.185 GB/s) and surfaced three multi-node
+engine fixes (Ray, `disable_custom_all_reduce`, `enforce_eager`), motivating the
+`nvidia-gh200-vllm-0.23.0-net.v1` **Ray-in-image** rebuild (M5). `worktree-images` (AMD MI300A
+image + 0.23.0/Ray) and `worktree-k8s` (K8s engine/ingress path for E5) merged to `main`.
+**New experiment E3a** inserted: an Apertus-70B single-node real-scenario capacity run as the
+lower-risk precursor that proves the capacity pipeline before the Kimi-K2.6 flagship (E3).
 
 ## 11. Process gates
 

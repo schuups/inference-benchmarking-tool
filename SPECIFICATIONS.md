@@ -90,31 +90,34 @@ component roster also lives in `CLAUDE.md`); this section gives the overall shap
 engineering forces that drive it.
 
 ```
-  LAPTOP — orchestration + results database (never allocated on a cluster)
-  ═══════════════════════════════════════════════════════════════════════════════
-     Pre-flight (§4) ──▶ Planner (§5) ──▶ Coordinator (§7) ──▶ Reports (§15)
-     creds & capacity    renders the      submit · monitor ·   reads central DB
-                         experiment dir   collect · teardown   ──▶ notebook + plots
-
-     Cleaner (§7.7) — operator-approved sweep of whatever teardown missed
-                             │
-                             │  FirecREST MCP — the Coordinator always reaches the
-                             ▼  Benchmarker over SLURM (decision 5)
-  BENCHMARKER — one allocation per experiment · ALWAYS SLURM · runs from a staged venv
-  ═══════════════════════════════════════════════════════════════════════════════
-     ① dataset generation (CPU, §11)   — prompt pool built first, so the GPUs the
-                                          engine will hold sit idle as briefly as possible
-     ② spawn the engine under test ─────────────────┐   via  sbatch (SLURM target)
-     ③ load generation + quality eval (§12, §13.5)   │    or  kubectl (K8s target)
-            │ writes                                 ▼
-     per-run SQLite DB (§14)             ENGINE DEPLOYMENT UNDER TEST — SLURM *or* K8s
-            │                            ═══════════════════════════════════════════
-            │ downloaded                 engine vLLM / SGLang / Dynamo × replicas
-            ▼  (staged, compressed)      + ingress / routing (§10, §16.2)
-     central results DB                  §8 pre-checks + hw sampler (§13.3) run in
-            │                            the SAME container session as the engine
-            ▼
-     report notebook (§15)
+  LAPTOP — orchestration + central results DB  (never allocated on a cluster)
+  ┌────────────┐   ┌────────────┐   ┌──────────────┐        ┌──────────┐   ┌──────────────┐
+  │ Pre-flight │──▶│  Planner   │──▶│ Coordinator  │        │ Reports  │◀──│   central    │
+  │     §4     │   │     §5     │   │      §7      │        │   §15    │   │  results DB  │
+  └────────────┘   └────────────┘   └──────┬───────┘        └──────────┘   └──────▲───────┘
+                                           │                                      │
+  ┌────────────┐                           │ submit · monitor ·                   │ per-run DB
+  │  Cleaner   │ separate,                 │ collect · teardown                   │ downloaded,
+  │    §7.7    │ approved                  │ (FirecREST / SLURM —                 │ staged + gz
+  └────────────┘                           │ decision 5: ALWAYS SLURM)            │
+ ══════════════════════════════════════════╪══════════════════════════════════════╪══════════
+                                           ▼                                      │
+  BENCHMARKER — one SLURM allocation per experiment · runs from a staged venv     │
+  ┌──────────────┐   ┌──────────────┐   ┌────────────────┐   ┌──────────────────┐ │
+  │  1. dataset  │──▶│ 2. spawn the │──▶│ 3. load gen +  │──▶│  per-run SQLite  │─┘
+  │  gen (CPU)   │   │    engine    │   │  quality eval  │   │     DB  §14      │
+  │     §11      │   │              │   │   §12, §13.5   │   └──────────────────┘
+  └──────────────┘   └──────┬───────┘   └───────┬────────┘
+                            │ spawn             │ drive load +
+                            │ sbatch / kubectl  │ quality-eval requests
+ ═══════════════════════════╪═══════════════════╪════════════════════════════════════════════
+                            ▼                   ▼
+  ENGINE DEPLOYMENT UNDER TEST — SLURM *or* K8s   (1 GPU -> multi-node · 1+ replicas)
+  ┌─────────────────────────────────────────────────────────────────────────────────────────┐
+  │  engine:  vLLM / SGLang / Dynamo   x   replicas    +    ingress / routing   (§10, §16.2)│
+  │  §8 collective + storage pre-checks  AND  hw sampler (§13.3)  run in the SAME container │
+  │  session as the engine  —  identical libfabric / CUDA / NCCL / mounts / NUMA            │
+  └─────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Constraints the architecture addresses
