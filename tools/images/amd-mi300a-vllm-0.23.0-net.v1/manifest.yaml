@@ -1,0 +1,98 @@
+# Image manifest (SPECIFICATIONS.md §9.1).
+# Authoritative per-image record: identity, base, baked-in component pins,
+# published tag, build provenance, and sanity status. build.sh reads the pins
+# below and passes them to `podman build` as --build-arg (manifest wins over the
+# Containerfile ARG defaults). Keep `status` + `sanity` in sync with the
+# catalogue table in ../README.md.
+
+# ---- identity ----
+slug: amd-mi300a-vllm-0.23.0-net.v1
+vendor: amd
+node_type: mi300a                  # GPU/platform target (gfx942, x86_64 host). Part of the
+                                   # identity + tag suffix; disambiguates the NVIDIA gh200/a100 builds.
+backend: vllm
+backend_version: "0.23.0"
+netstack: amd/v1                   # -> core/amd/netstack/v1 (RCCL / aws-ofi-rccl / rocSHMEM)
+description: >-
+  Official vLLM 0.23.0 ROCm image (x86_64 / Ubuntu 22.04, ROCm 7.2.3, for MI300A
+  gfx942) extended with the Alps Slingshot-11 network stack (netstack amd/v1).
+  Self-contained: no container-engine CXI / aws-ofi hook required at runtime.
+
+# ---- lifecycle status ----
+# pending-build -> building -> built -> pushed -> sanity-pending -> verified -> benchmarked
+#                                                              \-> failed
+#   verified    = netstack sanity green (components load + Slingshot reference
+#                 bandwidth); usable, but inference performance scaling not yet tested.
+#   benchmarked = additionally validated in inference performance-scaling experiments.
+status: built              # built + pushed on beverin 2026-06-15; intra-node + small-message
+                           # inter-node RCCL green. LARGE inter-node BLOCKED (aws-ofi-nccl RDMA
+                           # transport ineligible on MI300A/CXI -> SENDRECV unstable >=64MiB).
+                           # See sanity.notes + TODOs.md before promoting to 'verified'.
+
+# ---- source base + published tag ----
+# Pinned by digest for reproducibility; this is the vllm/vllm-openai-rocm:latest
+# tag as probed on beverin 2026-06-14 (vLLM 0.23.0 / ROCm 7.2.3).
+base_image: docker.io/vllm/vllm-openai-rocm@sha256:3813e31cc3ab56f71ba83a72da77a84f3c75030e54c9c316951a99317b818ce4
+image_tag: jfrog.svc.cscs.ch/ml/inference/vllm:0.23.0-alps.net.amd.v1-mi300a
+
+# ---- baked-in netstack component pins ("what it contains") ----
+# Mirror core/amd/netstack/v1 Containerfile ARG defaults; override per-image here.
+# RCCL is NOT rebuilt: the base ROCm ships librccl.so.1.0.70203 (NCCL-API 2.27.7)
+# and torch links it; aws-ofi-rccl is built against that RCCL for ABI match.
+netstack_pins:
+  xpmem_ref: 3bcab55479489fdd93847fa04c58ab16e9c0b3fd
+  cxi_shs: release/shs-13.0.0          # cassini-headers + cxi-driver + libcxi
+  libfabric_commit: 79fd4514977a8f15844fbe26df9f5930eb96311a
+  libfabric_version: "2.5.0"           # resolved from the commit (fi_info --version)
+  libfabric_patch: libfabric/prov_cxi_netns_support.79fd451.patch
+  ucx_version: "1.20.0"
+  ucc_version: "1.7.0"
+  ompi_ver: "5.0.10"
+  aws_ofi_nccl_commit: 17120adbfd9721f4d0861360b09f05a8d9c5fba4  # upstream aws/aws-ofi-nccl v1.19.2 --with-rocm (ROCm support landed after the v1.17.3 NVIDIA pins; net-plugin v6+). ROCm/aws-ofi-rccl abandoned at v4/v5.
+  aws_ofi_nccl_patch: ""
+  rccl_tests_ref: develop              # pin to a commit after first green build (provenance below)
+  rocshmem_ref: develop                # highest-risk; pin post-build
+  osu_version: "7.5.2"
+
+# ---- provenance (filled at build time by build.sh) ----
+provenance:
+  containerfile: core/amd/netstack/v1/Containerfile
+  netstack_git_sha: fa1f5485a2b9ce5a5c890d4a698da9244676a43d  # worktree-images HEAD at build
+  base_digest: sha256:3813e31cc3ab56f71ba83a72da77a84f3c75030e54c9c316951a99317b818ce4
+  base_probe:                # observed in the base on beverin 2026-06-14 (drives the pins above)
+    os: Ubuntu 22.04.5 LTS
+    arch: x86_64
+    python: "3.12.13"
+    rocm: "7.2.3"            # /opt/rocm -> /opt/rocm-7.2.3
+    torch: 2.10.0+git8514f05
+    torch_hip: "7.2.53211"
+    rccl: "2.27.7"           # librccl.so.1.0.70203 (NCCL-API); NOT rebuilt
+    vllm: "0.23.0"
+    gpu_target: gfx942       # MI300A/MI300X
+    entrypoint: ["vllm", "serve"]
+  built_by: stefschu
+  built_at: "2026-06-15T11:49:00+02:00"
+  image_id: sha256:9dda7f0e83936a1fc37be849de083439314d44dc3e1a476ee420a6a6fe47e75a
+  registry_digest: sha256:7a524d55945cf9eb5489985481782dd8297b821734ce35540f1c2f9450493825
+  # Reproducibility = netstack_git_sha + the pins above + base_digest + registry_digest.
+  # NOTE: rccl_tests_ref/rocshmem_ref still 'develop' (not pinned to a commit) — TODO.
+
+# ---- post-push sanity (filled by tests/, see tests/README) ----
+sanity:
+  status: partial            # intra-node + small inter-node green; LARGE inter-node BLOCKED
+  ran_at: "2026-06-15T13:00+02:00"
+  nodes: 2
+  notes: >-
+    AMD MI300A, self-contained model CONFIRMED: with the EDF cxi hook off (no aws-ofi
+    hook), fi_info -p cxi enumerates 4 NICs and librccl-net.so loads exporting
+    ncclNetPlugin v6-v11 (matches base RCCL 2.27.7). PASS: intra-node RCCL all_reduce
+    (xGMI) and SMALL inter-node all_reduce (<=~4 MiB) complete. BLOCKED: inter-node
+    all_reduce for >=64 MiB hangs or core-dumps. Root cause: aws-ofi-nccl v1.19.2 RDMA
+    transport reports "No eligible providers" on MI300A/CXI even when forced
+    (OFI_NCCL_PROTOCOL=RDMA + DISABLE_NATIVE_RDMA_CHECK + DISABLE_GDR_REQUIRED_CHECK),
+    so it falls back to SENDRECV, which is unstable for large GPU messages over CXI.
+    Tried, none fixed: GDR off, FI_CXI_RDZV_PROTO=default, NCCL_PROTO=Simple, force RDMA.
+    The RDMA transport IS eligible on GH200 (NVIDIA, 129 GB/s) — upstream aws-ofi-nccl /
+    MI300A-CXI enablement gap. MI300A Slingshot reference bandwidth (spec §8.3) remains
+    TBD pending inter-node. See TODOs.md.
+  todo_inter_node: true

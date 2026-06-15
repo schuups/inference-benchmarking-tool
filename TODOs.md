@@ -175,13 +175,31 @@ benchmark-YAML change per §9.2).
   libfabric, CXI, NVSHMEM, vLLM, etc. inside the image (e.g. a
   `/opt/alps/env/alps-versions.env` queryable at runtime and surfaced in the
   experiment provenance).
-- [ ] **ROCm / RCCL engine image for `beverin` (MI300A)** — the AMD equivalent of the
-  NVIDIA engine image: extend a ROCm vLLM base with the HPC network stack (RCCL +
-  rccl-tests instead of NCCL/nccl-tests, ROCm instead of CUDA), still over Slingshot 11
-  / CXI. The launch path (CXI hook disabled, `--network=disable_rdzv_get`, PMIx) is
-  CXI-level and identical to the NVIDIA image — only the build phases differ. Add the
-  ROCm image tree + the rccl-tests pre-check path (§8 already references
-  `ROCm/rccl-tests`). Fits the image-folder restructuring (NVIDIA vs AMD).
+- [~] **ROCm / RCCL engine image for `beverin` (MI300A)** — BUILT 2026-06-15:
+  `amd-mi300a-vllm-0.23.0-net.v1` (`core/amd/netstack/v1`), pushed to JFrog
+  (`vllm:0.23.0-alps.net.amd.v1-mi300a`, digest `sha256:7a524d55…`), status **`built`**.
+  Full netstack compiles: libfabric (ROCr HMEM + CXI), UCX/UCC/OMPI `--with-rocm`, RCCL
+  (base ROCm 2.27.7, not rebuilt), **rocSHMEM**, OSU, rccl-tests. OFI net plugin = upstream
+  `aws/aws-ofi-nccl` v1.19.2 `--with-rocm` (`librccl-net.so`, ncclNetPlugin v6–v11) — the AMD
+  fork `ROCm/aws-ofi-rccl` is abandoned at v4/v5 (too old for RCCL 2.27.7). Self-contained
+  model confirmed (4 CXI NICs with hook off). Intra-node + small-message inter-node RCCL green.
+  Notable build hurdles solved: libtool install-relink × overlay-FS (neutered in libtool
+  scripts); OMPI `--disable-mpi-fortran`; aws-ofi-nccl `CHECK_PKG_ROCM` false-negative
+  (worked around via `ac_cv_header_hip_hip_runtime_api_h=yes`). REMAINING — inter-node ≥64 MiB
+  blocked:
+  - [ ] **Inter-node RCCL over CXI hangs/crashes for ≥64 MiB.** aws-ofi-nccl v1.19.2's RDMA
+    transport reports "No eligible providers" on the MI300A/CXI "Default" platform *even when
+    forced* (`OFI_NCCL_PROTOCOL=RDMA`, `OFI_NCCL_DISABLE_NATIVE_RDMA_CHECK=1`,
+    `OFI_NCCL_DISABLE_GDR_REQUIRED_CHECK=1`) → falls back to SENDRECV, which is unstable for
+    large GPU messages over CXI. Tried, none fixed: GDR off, `FI_CXI_RDZV_PROTO=default`,
+    `NCCL_PROTO=Simple`. The same RDMA transport IS eligible on GH200 (129 GB/s) → upstream
+    aws-ofi-nccl / MI300A-CXI rail-topology enablement gap, not config. Next: escalate to
+    aws-ofi-nccl / AMD / CSCS-HPE; retry newer aws-ofi-nccl + ROCm; test host-staged path.
+  - [ ] **Pin `rccl_tests_ref` / `rocshmem_ref`** (manifest) to the 2026-06-15 commits
+    (currently `develop`) for reproducibility.
+  - [ ] **MI300A Slingshot reference bandwidth (spec §8.3)** stays TBD until inter-node works.
+  - [ ] **`build.sh` from a git worktree** needs a `.venv` symlink to the main checkout (it
+    resolves `$PY=<repo>/.venv/bin/python`) — document or auto-find the main-repo venv.
 
 ## Prompt / Dataset Generation
 

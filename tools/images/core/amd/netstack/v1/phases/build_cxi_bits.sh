@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+source "$(dirname "$0")/_helpers.sh"
+setup_env
+
+git clone --depth 1 --branch "${CASSINI_HEADERS_VERSION}" https://github.com/HewlettPackard/shs-cassini-headers.git /tmp/shs-cassini-headers
+cp -r /tmp/shs-cassini-headers/include/* /usr/include/
+cp -r /tmp/shs-cassini-headers/share/* /usr/share/
+rm -rf /tmp/shs-cassini-headers
+
+git clone --depth 1 --branch "${CXI_DRIVER_VERSION}" https://github.com/HewlettPackard/shs-cxi-driver.git /tmp/shs-cxi-driver
+cp -r /tmp/shs-cxi-driver/include/* /usr/include/
+rm -rf /tmp/shs-cxi-driver
+
+git clone --depth 1 --branch "${LIBCXI_VERSION}" https://github.com/HewlettPackard/shs-libcxi.git /tmp/shs-libcxi
+pushd /tmp/shs-libcxi
+./autogen.sh
+# libcxi's optional --with-cuda only enables a CUDA test path; drop it on AMD
+# (no CUDA toolkit). The NIC userspace library itself is GPU-agnostic.
+./configure --prefix=/usr
+make -j"$(nproc)"
+make install
+popd
+rm -rf /tmp/shs-libcxi
+ldconfig
