@@ -99,3 +99,34 @@ bytes="$(awk '{for(i=1;i<=NF;i++) if($i=="bytes") s+=$(i-1)} END{printf "%d", s+
 
 rank0_gbps="$(awk -F'gbps=' '/gbps=/{print $2}' "${PRECHECK_OUT}/storage_parallel.out" | head -1)"
 echo "[storage] parallel aggregate: ${rank0_gbps:-?} GB/s across ${P} streams"
+
+# ----------------------------------------------------------- 3) buffered (readahead)
+# Same streams, WITHOUT O_DIRECT: the kernel/Lustre readahead prefetches ahead and pipelines,
+# so this tracks vLLM's actual (buffered/mmap) weight load far better than the O_DIRECT floor —
+# compare against instances.model_load_weights_gib / model_load_weights_s (§10.2). INFORMATIONAL,
+# not a gate: it is state-dependent (a warm node — page cache from a prior job — inflates it).
+# CAVEAT: it reads ~the cap into this node's page cache, which can speed up the engine's
+# subsequent weight load (and so understate model_load_weights_s, esp. for small models). Set
+# STORAGE_BUFFERED_READ=0 when a clean cold model-load measurement matters.
+if [ "${STORAGE_BUFFERED_READ:-1}" = "1" ]; then
+    bufd="$(mktemp -d "${PRECHECK_OUT}/.buf.XXXXXX")"
+    echo "[storage] buffered: ${P} streams × ${per_mib} MiB, readahead (no O_DIRECT)"
+    b0="$(date +%s.%N)"
+    for (( i=0; i<P; i++ )); do
+        timeout "${STORAGE_PARALLEL_TIMEOUT:-90}" \
+            dd if="${SHARDS[$i]}" of=/dev/null bs=1M count="${per_mib}" 2>"${bufd}/${i}.err" || true &
+    done
+    wait
+    b1="$(date +%s.%N)"
+    bbytes="$(awk '{for(i=1;i<=NF;i++) if($i=="bytes") s+=$(i-1)} END{printf "%d", s+0}' "${bufd}"/*.err 2>/dev/null)"
+    {
+        echo "BUFFERED_READ streams=${P} bytes=${bbytes} t0=${b0} t1=${b1}"
+        awk -v b="${bbytes}" -v a="${b0}" -v z="${b1}" \
+            'BEGIN{d=z-a; if(d<=0) d=1e-6; printf "seconds=%.4f gbps=%.4f\n", d, b/d/1e9}'
+        echo "--- per-stream dd ---"
+        cat "${bufd}"/*.err 2>/dev/null
+    } > "${PRECHECK_OUT}/storage_buffered.out"
+    rm -rf "${bufd}"
+    buf_gbps="$(awk -F'gbps=' '/gbps=/{print $2}' "${PRECHECK_OUT}/storage_buffered.out" | head -1)"
+    echo "[storage] buffered aggregate: ${buf_gbps:-?} GB/s across ${P} streams (readahead; state-dependent)"
+fi

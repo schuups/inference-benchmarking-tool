@@ -448,7 +448,7 @@ Pre-checks cover the three planes whose performance directly bounds LLM serving:
 |---|---|---|
 | Collective communication | NCCL / RCCL `all_reduce`, `all_gather`, and `alltoall` (see `examples/nccl-tests/`), run at the engine's rank topology | Intra-node (NVLink / NVLink-C2C on GH200, Infinity Fabric on MI300A) and inter-node (Slingshot 11 on Alps) bandwidth in one pass. The three-collective set covers TP all-reduce, sequence-parallel / weight-gather, and MoE expert dispatch; the planner appends `sendrecv` for the inter-node PP point-to-point link when `pipeline_parallel_size > 1` (and `reduce_scatter` / `broadcast` can be added similarly). |
 | GPU-initiated one-sided RMA (vendor SHMEM) | SHMEM perftest binaries shipped with the engine image — **NVSHMEM** on NVIDIA targets, **ROCm SHMEM** on AMD targets (e.g. `device/coll/alltoall_latency`, `device/pt-to-pt/shmem_put_bw`) — run at the engine's rank topology | Put / get bandwidth and one-sided all-to-all latency. Used by MoE engines that bypass NCCL / RCCL for expert dispatch (DeepEP and equivalents). Skipped with a warning if the engine image lacks the relevant SHMEM library; `shmem_required: true` to enforce. |
-| Storage | Reads of the **deployed model's real weight shards** on whichever mount they live on — the scope (`capstor` / `iopsstor` on SLURM, Ceph PVC on K8s) is **derived at runtime from the actual weights path** (`MODEL_ID` → HF-cache dir), not assumed. Two metrics: **Sequential read** (single-stream O_DIRECT — the per-stream floor / stable gate) and **Parallel read** (bounded concurrent O_DIRECT streams across shards — aggregate GB/s). | Read throughput as seen by the engine. The **Parallel read mimics vLLM's concurrent shard load and is directly comparable to its effective weight-load bandwidth** (`instances.model_load_weights_gib / model_load_weights_s`, §10.2) — so a slow load attributes to storage vs engine overhead. On Lustre also validates that `safetensors_load_strategy=prefetch` is taking effect (§6.1). |
+| Storage | Reads of the **deployed model's real weight shards** on whichever mount they live on — the scope (`capstor` / `iopsstor` on SLURM, Ceph PVC on K8s) is **derived at runtime from the actual weights path** (`MODEL_ID` → HF-cache dir), not assumed. Three metrics: **Sequential read** (single-stream O_DIRECT — the per-stream cold floor / stable gate), **Parallel read** (bounded concurrent O_DIRECT streams — reproducible cold aggregate floor), and **Buffered read** (same streams *without* O_DIRECT, so kernel/Lustre readahead pipelines — the closest proxy to vLLM's real load). | Read throughput as seen by the engine. The **Buffered read tracks vLLM's actual buffered/mmap weight load** (readahead, which O_DIRECT disables) and is the metric to compare against its effective bandwidth (`instances.model_load_weights_gib / model_load_weights_s`, §10.2); it is **informational/state-dependent** (a warm node inflates it, and it warms ~its read size into the page cache — `STORAGE_BUFFERED_READ=0` to skip when a clean cold load matters). O_DIRECT Sequential/Parallel are the **reproducible floors that gate**. Also validates `safetensors_load_strategy=prefetch` on Lustre (§6.1). |
 
 GPU memory bandwidth (`bandwidthTest`) and host DRAM bandwidth (STREAM) are intentionally
 **not** in the pre-check suite — they are stable per-SKU characteristics that rarely
@@ -718,6 +718,21 @@ subset**.
 - Adding a new model to this set is a planner-template + benchmark-YAML change; no spec
   edit is required unless the model introduces a new capability dimension (e.g. native
   thinking mode toggle, new MoE topology) that the framework should sweep over.
+
+**Checkpoint storage locations.** Operator-held copies of each checkpoint, per storage system.
+A run loads from one of these by pointing `HF_HOME` (HF-cache layout) or a direct weights path
+at it; the §8.1 storage pre-check then derives its scope (capstor / iopsstor / Ceph PVC) from
+the actual path it reads, so the load is benchmarked and graded against the system it really
+runs on. Record the path where a copy exists (an HF-cache root `…/hf-cache`, or a direct
+`…/<model>/` dir of safetensors); use `—` where no copy is held. Capacity varies — a small
+draft may live on flash while the large target is HDD-only — so the same experiment can pull
+different models from different systems.
+
+| Model | capstor (Lustre, HDD) | iopsstor (Lustre, flash) | breithorn (Ceph PVC) |
+|---|---|---|---|
+| **Apertus-70B** | TBD | TBD | TBD |
+| **Apertus-8B**  | `/capstor/scratch/cscs/stefschu/ibt/hf-cache` (HF cache; used at E1/E2a) | TBD | TBD |
+| **Kimi-K2.6**   | TBD | TBD | TBD |
 - **Pipeline-validation smoke runs are exempt from these pairings.** The
   `smoke-synthetic` scenario (single-turn, synthetic source, `exploratory`) may be run
   against any model purely to validate the pipeline end-to-end (e.g. experiment E1 in

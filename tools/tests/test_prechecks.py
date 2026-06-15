@@ -34,6 +34,12 @@ STORAGE_PARALLEL_FIXTURE = (
     "2147483648 bytes (2.1 GB, 2.0 GiB) copied, 3.4 s, 0.63 GB/s\n"
 )
 
+STORAGE_BUFFERED_FIXTURE = (
+    "BUFFERED_READ streams=8 bytes=17179869184 t0=2000.0 t1=2006.8700\n"
+    "seconds=6.8700 gbps=2.5000\n"
+    "--- per-stream dd ---\n"
+)
+
 NCCL_FIXTURE = """\
 # nThread 1 nGpus 1 minBytes 8 maxBytes 134217728 step: 2(factor) warmup iters: 5 iters: 20
 #       size         count      type   redop    root     time   algbw   busbw #wrong     time   algbw   busbw #wrong
@@ -187,6 +193,7 @@ def _write_fixture_outputs(out_dir: Path):
     (out_dir / "nvshmem_alltoall_latency.out").write_text(NVSHMEM_LATENCY_FIXTURE)
     (out_dir / "storage_read.out").write_text(DD_FIXTURE)
     (out_dir / "storage_parallel.out").write_text(STORAGE_PARALLEL_FIXTURE)
+    (out_dir / "storage_buffered.out").write_text(STORAGE_BUFFERED_FIXTURE)
 
 
 def test_parse_storage_parallel():
@@ -208,6 +215,9 @@ def test_collect_measurements_maps_files_to_reference_rows(tmp_path):
     # parallel aggregate read recorded at the (storage) scope, comparable to vLLM load
     assert by_benchmark["Parallel read"]["measured"] == pytest.approx(4.97)
     assert by_benchmark["Parallel read"]["scope"] == "capstor weights mount (Lustre, HDD)"
+    # buffered (readahead) aggregate — informational, no reference row
+    assert by_benchmark["Buffered read"]["measured"] == pytest.approx(2.5)
+    assert by_benchmark["Buffered read"]["scope"] == "capstor weights mount (Lustre, HDD)"
     # nvshmem_put_bw.out absent -> skipped-with-warning, no row (§8.1)
     assert "NVSHMEM shmem_put_bw" not in by_benchmark
 
@@ -274,7 +284,7 @@ def test_grade_cli_end_to_end(tmp_path):
     assert proc.returncode == 0, proc.stderr
     payload = json.loads(results.read_text())
     assert payload["smoke_test_mode"] is True
-    assert len(payload["rows"]) == 6  # 3 NCCL + NVSHMEM alltoall + Sequential + Parallel read
+    assert len(payload["rows"]) == 7  # 3 NCCL + NVSHMEM alltoall + Sequential + Parallel + Buffered read
     assert "SMOKE-TEST MODE" in proc.stdout
 
 

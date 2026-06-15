@@ -270,6 +270,14 @@ def collect_measurements(out_dir: Path, cluster: str, scope: str, storage_scope:
             {"benchmark": "Parallel read", "scope": storage_scope, "size": "aggregate",
              "measured": parse_storage_parallel(storage_par.read_text())}
         )
+    # Buffered (readahead) aggregate — informational (no reference row): state-dependent, but the
+    # closest proxy to vLLM's actual buffered weight load (§8.1, §10.2).
+    storage_buf = out_dir / "storage_buffered.out"
+    if storage_buf.exists():
+        measurements.append(
+            {"benchmark": "Buffered read", "scope": storage_scope, "size": "aggregate",
+             "measured": parse_storage_parallel(storage_buf.read_text())}
+        )
     return measurements
 
 
