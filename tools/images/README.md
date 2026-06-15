@@ -27,6 +27,7 @@ Status legend: `pending-build` → `building` → `built` → `pushed` →
 | Image (slug) | Vendor | Node | Backend | Version | Netstack | Tag | Status | Sanity |
 |---|---|---|---|---|---|---|---|---|
 | [`nvidia-gh200-vllm-0.22.1-net.v1`](nvidia-gh200-vllm-0.22.1-net.v1/) | nvidia | gh200 | vllm | 0.22.1 | nvidia/v1 | `…/vllm:0.22.1-alps.net.v1-gh200` | **verified** | pass (2-node, 129 GB/s) |
+| [`amd-mi300a-vllm-0.23.0-net.v1`](amd-mi300a-vllm-0.23.0-net.v1/) | amd | mi300a | vllm | 0.23.0 | amd/v1 | `…/vllm:0.23.0-alps.net.amd.v1-mi300a` | **built** | partial: intra + small-inter ✓; large inter-node blocked (TODOs.md) |
 
 <!-- Keep this table in sync with each image's manifest.yaml (status + sanity). -->
 
@@ -46,10 +47,12 @@ tools/images/
 ```
 
 - **Netstack is shared and versioned.** All NVIDIA backends (vllm / sglang /
-  dynamo) reuse `core/nvidia/netstack/<v>`; AMD gets its own family
-  (`core/amd/netstack/<v>`, RCCL / ROCm-SHMEM) when added. Maturity is the `vN`
-  axis: `v1` is today's proven stack; a `v2` lands as a sibling, leaving `v1`
-  reproducible.
+  dynamo) reuse `core/nvidia/netstack/<v>`; AMD has its own family
+  `core/amd/netstack/<v>` (RCCL / aws-ofi-rccl / rocSHMEM; libfabric/CXI/XPMEM
+  are shared at the fabric level). Maturity is the `vN` axis: `v1` is today's
+  proven stack; a `v2` lands as a sibling, leaving `v1` reproducible. The
+  post-push gate is `sanity.sbatch` (NVIDIA, `partition=normal`) /
+  `sanity-amd.sbatch` (AMD, `partition=mi300`).
 - **Each image is a thin manifest** selecting a base image + a netstack version +
   pin overrides; the Containerfile lives once per netstack version.
 

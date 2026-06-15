@@ -63,6 +63,10 @@ ARGS = {
   "aws_ofi_nccl_commit": ["AWS_OFI_NCCL_COMMIT"], "aws_ofi_nccl_patch": ["AWS_OFI_NCCL_PATCH"],
   "nvshmem_ver": ["NVSHMEM_VER"], "nvshmem_patch": ["NVSHMEM_PATCH"],
   "nccl_tests_ver": ["NCCL_TESTS_VER"], "osu_version": ["OSU_VERSION"],
+  # AMD (core/amd/netstack) keys — only present in AMD manifests; NVIDIA keys above
+  # are simply absent there. RCCL is not rebuilt (base ROCm ships it).
+  "aws_ofi_rccl_commit": ["AWS_OFI_RCCL_COMMIT"], "aws_ofi_rccl_patch": ["AWS_OFI_RCCL_PATCH"],
+  "rccl_tests_ref": ["RCCL_TESTS_REF"], "rocshmem_ref": ["ROCSHMEM_REF"],
 }
 out = []
 for k, v in pins.items():

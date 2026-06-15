@@ -1,0 +1,194 @@
+# syntax=docker/dockerfile:1
+#
+# AMD Alps HPC network stack — netstack amd/v1 (SPECIFICATIONS.md §8.1 / §9.1).
+#
+# Extends a ROCm-bearing AMD base image (vllm/vllm-openai-rocm, …) with the Alps
+# Slingshot-11 / MI300A communication stack: CXI bits, libfabric (ROCr HMEM),
+# the base ROCm RCCL + aws-ofi-rccl plugin, rocSHMEM, UCX/UCC/OpenMPI 5, and the
+# rccl-tests / OSU sanity binaries — built so the image is SELF-CONTAINED (no
+# container-engine CXI / aws-ofi hook needed; see the image manifest and tests/).
+#
+# Mirror of core/nvidia/netstack/v1 with the GPU vendor swapped (CUDA->ROCm,
+# NCCL->RCCL, NVSHMEM->rocSHMEM, gdrcopy dropped). RCCL is NOT rebuilt: the base
+# ships it (NCCL-API 2.27.x) and torch links it, so aws-ofi-rccl is built against
+# that RCCL for ABI compatibility at runtime.
+#
+# ---------------------------------------------------------------------------
+# Build context (assembled by build.sh from core/ + the image dir):
+#     ./Containerfile        this file
+#     ./phases/              core/amd/netstack/v1/phases/
+#     ./patches/             core/amd/netstack/v1/patches/
+#     ./runtime/             core/amd/netstack/v1/runtime/   (env tuning + warning)
+#     ./common/              core/common/   (generic env/warning installers)
+#     ./variant/             <image>/variant/   (per-image late hooks)
+#
+# Per-phase layering: each component is its own COPY + RUN, so podman caches
+# every successful layer — a failed or edited phase re-runs only that step and
+# everything after it; earlier phases come straight from cache. ARGs are
+# declared immediately before the phase that consumes them, so bumping one pin
+# invalidates the minimum number of layers.
+#
+# Component pins are ARG defaults below and are mirrored in the image
+# manifest.yaml; build.sh may override them per image via --build-arg.
+# ---------------------------------------------------------------------------
+
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+
+# SHELL is unsupported by the OCI image format (would require --format=docker);
+# each phase script sets its own bash strict mode and is run via `bash`.
+
+# _helpers.sh is shared by every phase (it also clears the base HPC-X/MPI env
+# in-process); editing it invalidates all phase layers below, so it changes
+# rarely.
+COPY phases/_helpers.sh /opt/alps/phases/_helpers.sh
+
+COPY phases/apt_install_build_deps.sh /opt/alps/phases/
+RUN bash /opt/alps/phases/apt_install_build_deps.sh
+
+COPY phases/remove_efa.sh /opt/alps/phases/
+RUN bash /opt/alps/phases/remove_efa.sh
+
+COPY phases/neutralize_base_mpi.sh /opt/alps/phases/
+RUN bash /opt/alps/phases/neutralize_base_mpi.sh
+
+ARG REMOVE_HPCX_DIRS=""
+COPY phases/remove_hpcx_plugins.sh /opt/alps/phases/
+RUN bash /opt/alps/phases/remove_hpcx_plugins.sh
+
+ARG XPMEM_REF=3bcab55479489fdd93847fa04c58ab16e9c0b3fd
+COPY phases/build_xpmem.sh /opt/alps/phases/
+RUN bash /opt/alps/phases/build_xpmem.sh
+
+# NOTE: no gdrcopy phase on AMD (NVIDIA GPUDirect copy lib; MI300A is a
+# unified-memory APU). libfabric uses ROCr HMEM instead.
+
+ARG CASSINI_HEADERS_VERSION=release/shs-13.0.0
+ARG CXI_DRIVER_VERSION=release/shs-13.0.0
+ARG LIBCXI_VERSION=release/shs-13.0.0
+COPY phases/build_cxi_bits.sh /opt/alps/phases/
+RUN bash /opt/alps/phases/build_cxi_bits.sh
+
+# patches/ is consumed by libfabric (via apply_patch_if_set); copied here, just
+# before the first consumer.
+COPY patches/ /opt/alps/patches/
+
+ARG LIBFABRIC_COMMIT=79fd4514977a8f15844fbe26df9f5930eb96311a
+ARG LIBFABRIC_PATCH="libfabric/prov_cxi_netns_support.79fd451.patch"
+COPY phases/build_libfabric.sh /opt/alps/phases/
+RUN bash /opt/alps/phases/build_libfabric.sh
+
+ARG UCX_VERSION=1.20.0
+COPY phases/build_ucx.sh /opt/alps/phases/
+RUN bash /opt/alps/phases/build_ucx.sh
+
+ARG UCC_VERSION=1.7.0
+COPY phases/build_ucc.sh /opt/alps/phases/
+RUN bash /opt/alps/phases/build_ucc.sh
+
+ARG OMPI_VER=5.0.10
+COPY phases/build_ompi5.sh /opt/alps/phases/
+RUN bash /opt/alps/phases/build_ompi5.sh
+
+# aws-ofi-nccl (UPSTREAM aws/aws-ofi-nccl v1.19.2, --with-rocm) = the RCCL<->libfabric/CXI
+# net plugin (librccl-net.so). Upstream supports RCCL via --with-rocm (configure defines
+# __HIP_PLATFORM_AMD__; net-plugin ABI v6+). ROCm support landed AFTER v1.17.3 (the tag the
+# NVIDIA netstack pins), so this is a newer pin. The AMD fork ROCm/aws-ofi-rccl is abandoned
+# at v4/v5 (too old for ROCm 7.2's RCCL, v6-v10). Built against the base RCCL (NCCL-API 2.27.x).
+ARG AWS_OFI_NCCL_COMMIT=17120adbfd9721f4d0861360b09f05a8d9c5fba4
+ARG AWS_OFI_NCCL_PATCH=""
+COPY phases/build_aws_ofi_nccl.sh /opt/alps/phases/
+RUN bash /opt/alps/phases/build_aws_ofi_nccl.sh
+
+# rccl-tests sanity binaries (all_reduce_perf, …). REF pinned to a commit after
+# the first green build (see manifest provenance); 'develop' until then.
+ARG RCCL_TESTS_REF=develop
+COPY phases/build_rccl_tests.sh /opt/alps/phases/
+RUN bash /opt/alps/phases/build_rccl_tests.sh
+
+# rocSHMEM (highest-risk; see phase header). REF pinned post-first-build.
+ARG ROCSHMEM_REF=develop
+COPY phases/build_rocshmem.sh /opt/alps/phases/
+RUN bash /opt/alps/phases/build_rocshmem.sh
+
+ARG OSU_VERSION=7.5.2
+COPY phases/build_osu.sh /opt/alps/phases/
+RUN bash /opt/alps/phases/build_osu.sh
+
+COPY phases/clean_up.sh /opt/alps/phases/
+RUN bash /opt/alps/phases/clean_up.sh
+
+# ---------------------------------------------------------------------------
+# Self-contained runtime environment.
+#
+# These make the image correct under ANY launch — login shell, `bash -c` on
+# SLURM (§9.0), or a Kubernetes pod (§7.2) — with no --environment, login
+# shell, or LD_LIBRARY_PATH injection needed. Essential for the K8s target,
+# where there is nowhere to inject such adjustments.
+# ---------------------------------------------------------------------------
+
+# (a) OMPI/PMIx install prefix. Override any base OPAL_PREFIX (pointing at an
+#     HPC-X tree neutralize_base_mpi removed) so OpenMPI 5 finds its components
+#     + help text under /opt/hpcx/ompi.
+ENV OPAL_PREFIX=/opt/hpcx/ompi
+
+# (a2) Non-login `bash -c` (SLURM `srun ... bash -c`, K8s pod command) sources the
+#      file named by $BASH_ENV. Point it at /etc/bash.bashrc so the baked Alps env
+#      (NCCL_NET / FI_CXI_* / ...) + warning hooks below apply in non-login shells
+#      too — REQUIRED for the self-contained runtime (§7.2/§9.0).
+ENV BASH_ENV=/etc/bash.bashrc
+
+# (b) Make the /opt/hpcx libraries discoverable by the dynamic linker so the
+#     MPI-built §7 collectives (rccl-tests / OSU) resolve libmpi.so.40 etc.
+#     without LD_LIBRARY_PATH.
+RUN set -eux; \
+    touch /etc/bash.bashrc; \
+    printf '%s\n' /opt/hpcx/ompi/lib /opt/hpcx/ucx/lib \
+      > /etc/ld.so.conf.d/alps-hpcx.conf; \
+    ldconfig
+
+# (c) Runtime env (NCCL_NET / FI_PROVIDER / FI_CXI_* / OMPI_MCA_* / PMIX_MCA_psec)
+#     — the netstack tuning, so it lives under this netstack version (runtime/).
+#     /etc/profile.d covers login shells; install-alps-runtime-env.sh (generic,
+#     from common/) also wires it into BASH_ENV so non-login `bash -c` gets it.
+COPY runtime/alps-runtime.env /opt/alps/env/alps-runtime.env
+
+RUN set -eux; \
+    chmod 0644 /opt/alps/env/alps-runtime.env; \
+    printf '%s\n' \
+      'if [ -f /opt/alps/env/alps-versions.env ]; then . /opt/alps/env/alps-versions.env; fi' \
+      'if [ -f /opt/alps/env/alps-runtime.env ]; then . /opt/alps/env/alps-runtime.env; fi' \
+      > /etc/profile.d/99-alps-env.sh
+
+# Warning content lives with the netstack (it enforces this stack's
+# FI_CXI_RDZV_PROTO=alt_read choice); the installer is generic (common/).
+COPY runtime/alps-runtime-warning.txt /opt/alps/env/alps-runtime-warning.txt
+COPY runtime/alps-runtime-warning.sh /opt/alps/env/alps-runtime-warning.sh
+COPY runtime/alps-runtime-warning.py /opt/alps/env/alps-runtime-warning.py
+COPY common/install-alps-runtime-warnings.sh /opt/alps/env/install-alps-runtime-warnings.sh
+
+RUN set -eux; \
+    chmod +x /opt/alps/env/install-alps-runtime-warnings.sh; \
+    /opt/alps/env/install-alps-runtime-warnings.sh
+
+# Apply the runtime env in non-login shells too (BASH_ENV). Runs AFTER the
+# warning installer so its hook lands above the warning hook (env set first).
+COPY common/install-alps-runtime-env.sh /opt/alps/env/install-alps-runtime-env.sh
+RUN set -eux; \
+    chmod +x /opt/alps/env/install-alps-runtime-env.sh; \
+    /opt/alps/env/install-alps-runtime-env.sh
+
+# Per-image late hooks (optional). Each image stages its own variant/ into the
+# build context; hooks.d/*.sh run in lexical order. No-op when hooks.d is empty.
+COPY variant/ /opt/alps/image-variant/
+RUN set -eux; \
+    if [ -d /opt/alps/image-variant/hooks.d ]; then \
+      for f in /opt/alps/image-variant/hooks.d/*.sh; do \
+        [ -e "$f" ] || break; \
+        echo "Running image-variant hook: $f"; \
+        chmod +x "$f"; \
+        "$f"; \
+      done; \
+    else \
+      echo "No image-variant hooks"; \
+    fi
