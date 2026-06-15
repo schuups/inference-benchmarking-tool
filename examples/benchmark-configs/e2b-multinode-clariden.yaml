@@ -48,6 +48,11 @@ deployments:
       max_num_batched_tokens: 8192
       gpu_memory_utilization: 0.90
       enable_prefix_caching: true
+      # Multi-node GH200 workarounds, validated at E2b (2026-06-15): custom all-reduce faults
+      # (illegal memory access) and CUDA-graph capture hits CUBLAS_STATUS_EXECUTION_FAILED on the
+      # cross-node path → use NCCL all-reduce + eager. Root-cause investigation is a TODO.
+      disable_custom_all_reduce: true
+      enforce_eager: true
 
 dataset_config:
   scenario_mix:

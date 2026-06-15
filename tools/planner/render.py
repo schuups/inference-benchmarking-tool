@@ -52,6 +52,10 @@ def vllm_command(deployment: Deployment) -> str:
     parts.append(
         "--enable-prefix-caching" if bc.enable_prefix_caching else "--no-enable-prefix-caching"
     )
+    if bc.disable_custom_all_reduce:
+        parts.append("--disable-custom-all-reduce")
+    if bc.enforce_eager:
+        parts.append("--enforce-eager")
     if bc.safetensors_load_strategy is not None:
         parts.append(f"--safetensors-load-strategy {bc.safetensors_load_strategy}")
     if bc.kv_offloading_size is not None:

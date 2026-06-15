@@ -127,6 +127,18 @@
   (intra-node NVLink — the low-risk case to validate NVSHMEM on the hook-disabled image before E2b's
   inter-node Slingshot path). Host CXI / `aws_ofi_nccl` hooks stay **disabled** (image provides
   libfabric/cxi).
+- [ ] **Multi-node engine: durable fixes** (validated at E2b 2026-06-15, Apertus-70B TP4×PP2, 2 nodes —
+  the full pipeline now runs: 8-rank prechecks → Ray 2-node → 70B load → readiness → sweep → persist):
+  (a) **Ray not in the Alps image** (`import ray` fails). Interim is a diagnostic `pip install --target=
+  <capstor>/ibt/ray-diag ray` + the engine step exporting `PYTHONPATH`/`PATH` at it (injected per-run, NOT
+  committed to the template). **Durable = rebuild the image with ray** (E3's multi-node MoE needs it too) —
+  then drop the inject. (b) **Root-cause `--disable-custom-all-reduce` + `--enforce-eager`** — both are now
+  `BackendConfig` options (set in `e2b-multinode-clariden.yaml`) working around a custom-all-reduce illegal
+  memory access and a CUDA-graph-capture `CUBLAS_STATUS_EXECUTION_FAILED` on this image's cross-node path;
+  investigate why (cross-node NCCL itself is fine — §8 8-rank prechecks pass) and lift the workarounds if
+  fixable (enforce-eager costs CUDA-graph perf). (c) **70B weight load is storage-bound** (95 s for 16.45
+  GiB/worker ≈ single-stream capstor rate; 8 workers contend) — try `safetensors_load_strategy=prefetch`
+  and/or iopsstor, and compare against the §8.1 `Buffered read`.
 
 ## Candidate models
 

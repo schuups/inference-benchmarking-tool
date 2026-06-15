@@ -92,6 +92,11 @@ class BackendConfig(StrictModel):
     gpu_memory_utilization: float | None = Field(default=None, gt=0, le=1)
     kv_cache_dtype: str | None = None
     enable_prefix_caching: bool = True
+    # Multi-node GH200 workarounds (validated at E2b, §9.1): the custom all-reduce kernel hits an
+    # illegal memory access and CUDA-graph capture hits CUBLAS_STATUS_EXECUTION_FAILED on the
+    # cross-node TP4×PP2 path → fall back to NCCL all-reduce + eager. Root causes are a TODO.
+    disable_custom_all_reduce: bool = False
+    enforce_eager: bool = False
     safetensors_load_strategy: str | None = None
     kv_offloading_size: int | None = Field(default=None, gt=0)
     kv_offloading_backend: str | None = None

@@ -20,12 +20,15 @@
 # inside the engine's single-task session — uncharacterised pending that step (TODOs.md, §8.1).
 - { cluster: clariden, scope: "4× GH200, 1 node",  benchmark: NVSHMEM alltoall_latency,  size: 128 KiB, expected: TBD µs,         tolerance_pct: +20, source: TBD }
 - { cluster: clariden, scope: "4× GH200, 1 node",  benchmark: NVSHMEM shmem_put_bw,      size: 128 MiB, expected: TBD GB/s,       tolerance_pct: -10, source: TBD }
-- { cluster: clariden, scope: "8× GH200, 2 nodes", benchmark: NCCL all_reduce,           size: 128 MiB, expected: TBD GB/s busbw, tolerance_pct: -10, source: TBD }
-- { cluster: clariden, scope: "8× GH200, 2 nodes", benchmark: NCCL all_gather,           size: 128 MiB, expected: TBD GB/s busbw, tolerance_pct: -10, source: TBD }
-- { cluster: clariden, scope: "8× GH200, 2 nodes", benchmark: NCCL alltoall,             size: 128 MiB, expected: TBD GB/s busbw, tolerance_pct: -10, source: TBD }
+# Inter-node over Slingshot-11 (vs intra-node NVLink at the 1-node scope) — sensibly lower.
+# E2b 2026-06-15, mean of 2 runs (all_reduce 131.56/130.64, all_gather 86.51/86.44,
+# alltoall 39.16/37.45, sendrecv 23.73/23.35, NVSHMEM 49.60/46.29 µs).
+- { cluster: clariden, scope: "8× GH200, 2 nodes", benchmark: NCCL all_reduce,           size: 128 MiB, expected: 131.1 GB/s busbw, tolerance_pct: -10, source: "E2b 2026-06-15 (mean of 2 runs)" }
+- { cluster: clariden, scope: "8× GH200, 2 nodes", benchmark: NCCL all_gather,           size: 128 MiB, expected: 86.5 GB/s busbw,  tolerance_pct: -10, source: "E2b 2026-06-15 (mean of 2 runs)" }
+- { cluster: clariden, scope: "8× GH200, 2 nodes", benchmark: NCCL alltoall,             size: 128 MiB, expected: 38.3 GB/s busbw,  tolerance_pct: -10, source: "E2b 2026-06-15 (mean of 2 runs)" }
 # sendrecv = the inter-node point-to-point link the PP boundary uses (TP4×PP2); populated by E2b.
-- { cluster: clariden, scope: "8× GH200, 2 nodes", benchmark: NCCL sendrecv,            size: 128 MiB, expected: TBD GB/s busbw, tolerance_pct: -10, source: TBD }
-- { cluster: clariden, scope: "8× GH200, 2 nodes", benchmark: NVSHMEM alltoall_latency,  size: 128 KiB, expected: TBD µs,         tolerance_pct: +20, source: TBD }
+- { cluster: clariden, scope: "8× GH200, 2 nodes", benchmark: NCCL sendrecv,            size: 128 MiB, expected: 23.5 GB/s busbw,  tolerance_pct: -10, source: "E2b 2026-06-15 (mean of 2 runs); ≈ one Slingshot-11 NIC" }
+- { cluster: clariden, scope: "8× GH200, 2 nodes", benchmark: NVSHMEM alltoall_latency,  size: 128 KiB, expected: 47.9 µs,         tolerance_pct: +20, source: "E2b 2026-06-15 (mean of 2 runs)" }
 - { cluster: clariden, scope: "8× GH200, 2 nodes", benchmark: NVSHMEM shmem_put_bw,      size: 128 MiB, expected: TBD GB/s,       tolerance_pct: -10, source: TBD }
 # Single-stream O_DIRECT read of a real Apertus-8B safetensors blob (4 GiB). Measured 62.9 MB/s
 # at E2a, but capstor was under general slowness then (operator-confirmed), so this is NOT a

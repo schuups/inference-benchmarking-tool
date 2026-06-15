@@ -148,9 +148,16 @@ def test_reference_loads_real_yaml():
     )
     assert rows[0]["expected"] == pytest.approx(317.7)
     assert rows[0]["status"] == "fail"  # 100 < 0.5 × 317.7
-    # still-TBD scopes (e.g. the 2-node ladder) remain informational
+    # the 2-node ladder is now characterised at E2b -> enforceable too
+    rows_2n = build_rows(
+        [{"benchmark": "NCCL all_reduce", "scope": "8× GH200, 2 nodes", "size": "128 MiB", "measured": 50.0}],
+        refs,
+    )
+    assert rows_2n[0]["expected"] == pytest.approx(131.1)
+    assert rows_2n[0]["status"] == "fail"  # 50 < 0.5 × 131.1
+    # still-TBD entries (e.g. NVSHMEM shmem_put_bw) remain informational
     rows_tbd = build_rows(
-        [{"benchmark": "NCCL all_reduce", "scope": "8× GH200, 2 nodes", "size": "128 MiB", "measured": 100.0}],
+        [{"benchmark": "NVSHMEM shmem_put_bw", "scope": "8× GH200, 2 nodes", "size": "128 MiB", "measured": 5.0}],
         refs,
     )
     assert rows_tbd[0]["expected"] is None and rows_tbd[0]["status"] == "pass"
