@@ -1,0 +1,102 @@
+# Apertus-70B single-node capacity run — clariden (IMPLEMENTATION_PLAN.md E-track).
+#
+# Purpose: the first REAL-scenario capacity run (not smoke) — per-class SLO attainment,
+# λ* knee, and the §15.1 supportable-users estimate — under the operator's Apertus-70B
+# mix: 80% short-turn chat + 20% agentic-coding (≈25k-char context). Single-node TP4 so
+# there is NO Ray / cross-node engine path (the E2b multi-node workarounds —
+# disable_custom_all_reduce / enforce_eager — were cross-node-only and are NOT needed here).
+#
+# Topology: TP4 × PP1 = 4 GPUs → one GH200 node (intra-node NVLink-C2C all-reduce). The
+# §8 pre-checks run as the dedicated one-rank-per-GPU step and grade against the populated
+# 1-node clariden reference (NCCL all_reduce 317.7 GB/s etc.; capstor storage floor).
+#
+# Workload (SPEC §9.2, corrected 2026-06-15): Apertus-70B is chat-dominated. The 20%
+# agentic share is drawn at ≈25k-char turn-1 context — overridden below to ~6250 tokens
+# (25 000 chars ÷ ~4 chars/token; the scenario default is 15000 tok ≈ 60k chars, too long).
+# Full 256K (262 144) context window per the model's real capability (operator choice).
+#
+# PREREQUISITE: Apertus-70B weights staged in the capstor hf-cache
+# (/capstor/scratch/cscs/stefschu/ibt/hf-cache, SPEC §9.2 checkpoint matrix). Real-text
+# sources (WildChat + LongBench) verified fetchable on-cluster (job 2538750, 2026-06-15).
+#
+# Validate: .venv/bin/python -m tools.common.config examples/benchmark-configs/apertus70b-mixed-single-node-clariden.yaml
+
+name: apertus70b-mixed-single-node-clariden
+description: >
+  Supportable-user capacity for Apertus-70B on a single GH200 node (TP4), under the
+  operator's mix — 80% chat-short-turns + 20% agentic-coding (≈25k-char) — at the full
+  256K context. Real-text sources, λ swept toward saturation, per-class SLOs (§13.4) for
+  the λ* / supportable-users analysis (§15.1). Capacity/pipeline; quality is a separate run.
+
+deployments:
+  - target: clariden
+    backend: vllm
+    backend_version: "0.22.1"
+    # Self-contained, hook-disabled Alps netstack image (§9.1). Model-agnostic — 70B runs
+    # on the same image as 8B; only the weights differ.
+    image: jfrog.svc.cscs.ch/ml/inference/vllm:0.22.1-alps.net.v1-gh200
+    model: swiss-ai/Apertus-70B-Instruct-2509
+    backend_config:
+      tensor_parallel_size: 4          # §6.1: == gpus_per_node (4); intra-node NVLink, no Ray
+      pipeline_parallel_size: 1        # single node — no cross-node PP, no Ray bring-up
+      max_model_len: 262144            # 256K — full model capability (operator choice)
+      # Chunked-prefill budget. Deliberately NOT equal to max_model_len here (cf. §16.2 long-
+      # context convention): the traffic is short-dominated (80% chat, 20% agentic @ ~6.25k tok),
+      # so 16384 admits any agentic turn-1 prompt whole, chunks only the rare full-context
+      # request, and keeps prefill/decode interleave healthy for the chat majority.
+      max_num_batched_tokens: 16384
+      gpu_memory_utilization: 0.90
+      enable_prefix_caching: true      # agentic turn-1 context reuse (append_delta) + chat
+      safetensors_load_strategy: prefetch   # Lustre (§6.1) — the 70B load was storage-bound at E2b
+
+dataset_config:
+  scenario_mix:
+    - scenario: chat-short-turns
+      weight: 0.8
+    - scenario: agentic-coding
+      weight: 0.2
+      # Override turn-1 context to ≈25k chars ≈ 6250 tokens (scenario default is 15000 tok
+      # ≈ 60k chars). Session structure (turns, think-time, follow-ups) stays as the scenario
+      # defines. min/max scaled proportionally from the scenario's 4000/64000.
+      input_length:
+        distribution: lognormal
+        params: { mean: 6250, sigma: 0.5, min: 4000, max: 16000 }
+  num_prompts: 8000                    # session pool > Σ λ·(warmup+measurement) across the sweep
+  seed: 1234
+  output_length_mode: forced           # §11.6 — sweep traffic stays reproducible
+
+rate_levels: [0.1, 0.2, 0.4, 0.8, 1.6]   # session starts/s (§12.3). First-pass ladder toward
+                                          # saturation; refine around the knee after run 1.
+
+arrival_process:
+  kind: poisson
+
+routing_strategy: random               # single deployment, single replica
+
+phases:
+  warmup_s: 300                        # covers session-population ramp-up (§12.2)
+  measurement_s: 600
+  drain_timeout_s: 600                 # agentic sessions can be long (≤24 turns × think-time)
+  request_timeout_s: 300
+  server_ready_timeout_s: 2400         # 70B load on (degraded) capstor + engine init, single-node
+
+slos:                                  # per-class (§13.4); λ* = highest λ meeting all of them
+  - { scenario: chat-short-turns, metric: ttft_ms,        percentile: p95, threshold: 800 }
+  - { scenario: chat-short-turns, metric: tpot_ms,        percentile: p95, threshold: 80 }
+  - { scenario: agentic-coding,   metric: session_e2e_ms, percentile: p90, threshold: 600000 }
+  - { scenario: all,              metric: error_rate_pct,                  threshold: 1.0 }
+
+quality_eval:                          # capacity run — no graded quality (lm-eval not in the venv;
+  skip_quality_gate: true              # quality is a separate graded run, §13.5)
+  skip_quality_compare: true
+
+system_prechecks:
+  skip_system_prechecks: false         # §8 foundation gate (only gate this run — quality skipped)
+  system_prechecks_on_warn: continue
+  system_prechecks_on_fail: continue   # capstor storage is known-degraded/variable — capture &
+                                       # review in the report rather than abort a long real run on
+                                       # a transient storage dip; NCCL collapse still shows in results
+  collective_tests_version: "2.18.2"   # matches the Alps image's NCCL/nccl-tests ecosystem
+  shmem_required: false                # single-node dense model — no expert-parallel NVSHMEM dep
+
+server_time_limit: "04:00:00"          # dataset-gen (real-text) + 70B load + 5-level sweep + margin
