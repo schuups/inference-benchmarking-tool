@@ -297,6 +297,24 @@ async def test_primer_steady_state_no_warning(mock):
 
 
 @pytest.mark.asyncio
+async def test_primer_clamps_to_max_model_len():
+    # A small-window engine rejects the default 20k-token primer (http_400); clamping
+    # the primer/probe lengths to max_model_len keeps it inside the window (§10.3 fix).
+    config = MockConfig(ttft_ms=5, tpot_ms=1, max_model_len=256)
+    runner = await run_server(config, BASE_PORT + 11)
+    try:
+        base = f"http://127.0.0.1:{BASE_PORT + 11}"
+        async with aiohttp.ClientSession() as http:
+            unclamped = await run_primer(http, base, model="mock/model")  # default 20k tokens
+            assert unclamped.warning and "primer request failed" in unclamped.warning
+            clamped = await run_primer(http, base, model="mock/model", max_model_len=256)
+            assert clamped.warning is None
+            assert clamped.probe1_ttft_ms and clamped.probe2_ttft_ms
+    finally:
+        await runner.cleanup()
+
+
+@pytest.mark.asyncio
 async def test_primer_missed_target_warns():
     # primer (request 1) and probe 1 (request 2) still pay the cold cost; probe 2 is steady-state
     config = MockConfig(ttft_ms=10, tpot_ms=1, slow_first_n=2, slow_ttft_ms=400)

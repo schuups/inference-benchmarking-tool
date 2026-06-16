@@ -193,6 +193,37 @@ async def test_full_run_persists_all_tables_dataset_before_engine(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_reuses_prestaged_dataset_pool(tmp_path, monkeypatch):
+    # §11.4: identical dataset_config+seed across a sweep's cells -> identical pool, so
+    # the Coordinator generates it once and stages pool+manifest into each run_dir.
+    # The orchestrator must REUSE the staged pool and NOT regenerate.
+    import shutil
+    from tools.benchmarker.dataset_gen.generator import (
+        MANIFEST_FILENAME, POOL_FILENAME, generate as real_generate,
+    )
+
+    cfg = _cfg()
+    src = tmp_path / "src" / "dataset"
+    real_generate(cfg, WordTokenizer(), src, SCENARIOS_DIR)  # produce a pool to stage
+
+    run_dir = tmp_path / "run"
+    (run_dir / "dataset").mkdir(parents=True)
+    for name in (POOL_FILENAME, MANIFEST_FILENAME):
+        shutil.copy(src / name, run_dir / "dataset" / name)
+
+    def _boom(*a, **k):
+        raise AssertionError("generate() called despite a pre-staged pool")
+
+    monkeypatch.setattr("tools.benchmarker.orchestrator.generate", _boom)
+    launcher = MockLauncher(8931, precheck=_passing_precheck(), emit_hw=True, engine_log=ENGINE_LOG)
+    summary = await _run(
+        launcher, run_dir, "20260613-000000_mock-model_vllm_clariden_b0", quality=StubQuality(),
+    )
+    assert launcher.pool_existed_at_submit is True
+    assert summary.persisted and summary.requests > 0
+
+
+@pytest.mark.asyncio
 async def test_smoke_mode_no_persistence_and_two_warnings(tmp_path, caplog):
     run_dir = tmp_path / "run"
     launcher = MockLauncher(8931, precheck=_passing_precheck(smoke=True), engine_log=ENGINE_LOG)

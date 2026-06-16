@@ -56,10 +56,19 @@ async def run_primer(
     prompt_tokens: int = 20_000,
     timeout_s: float = 300.0,
     probe_tokens: int = 2_000,
+    max_model_len: int | None = None,
 ) -> PrimerResult:
     """§10.3: one large priming request, then two probes. The primer is judged
     self-calibratingly: if probe 1's TTFT is far above probe 2's, the first
-    measurement-like request still paid a compile cost -> warn the operator."""
+    measurement-like request still paid a compile cost -> warn the operator.
+
+    The primer/probe lengths are clamped to fit ``max_model_len`` (minus a small
+    chat-template/role headroom) when known, so a deployment with a window smaller
+    than the 20k-token default doesn't reject the primer with http_400 (§10.3)."""
+    if max_model_len is not None:
+        cap = max(1, max_model_len - 64)  # headroom for chat-template + role tokens
+        prompt_tokens = min(prompt_tokens, cap)
+        probe_tokens = min(probe_tokens, cap)
     start = time.perf_counter()
     primer = await execute_request(
         http, url,

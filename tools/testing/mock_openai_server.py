@@ -35,6 +35,8 @@ class MockConfig:
     abort_mid_stream_after: int | None = None  # tokens emitted before truncating
     slow_first_n: int = 0            # cold-start simulation: first N requests use slow_ttft_ms
     slow_ttft_ms: float = 0.0
+    max_model_len: int | None = None  # reject (http 400) prompts whose whitespace-token
+                                      # estimate exceeds this — mirrors vLLM's context cap
     seed: int = 0
 
 
@@ -76,6 +78,16 @@ class MockServer:
             return web.Response(status=self.config.error_status, text="injected failure")
         payload = await request.json()
         prompt = " ".join(m.get("content", "") for m in payload.get("messages", []))
+        if self.config.max_model_len is not None:
+            approx_tokens = len(prompt.split())
+            if approx_tokens > self.config.max_model_len:
+                return web.json_response(
+                    status=400,
+                    data={"error": {"message": (
+                        f"This model's maximum context length is {self.config.max_model_len} "
+                        f"tokens. However, you requested {approx_tokens} tokens."
+                    )}},
+                )
         max_tokens = int(payload.get("max_tokens", 16))
         ignore_eos = bool(payload.get("ignore_eos", False))
         tokens = self._answer_for(prompt, max_tokens)

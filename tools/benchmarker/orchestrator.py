@@ -45,7 +45,7 @@ import aiohttp
 from tools.common.config import BenchmarkConfig, Deployment
 
 from tools.common.results_db import ResultsDB
-from .dataset_gen.generator import POOL_FILENAME, generate
+from .dataset_gen.generator import MANIFEST_FILENAME, POOL_FILENAME, generate
 from .dataset_gen.tokenizers import Tokenizer
 from .load_gen.pool import load_pool
 from .load_gen.readiness import parse_model_load, run_primer
@@ -364,12 +364,23 @@ async def run_experiment(
 
     # ---- phase 1: dataset generation. The pool MUST exist before the engine is
     # spawned (§1 — no GPU idling during prompt prep), asserted by M7's tests.
+    # Reuse a PRE-STAGED pool when present: identical dataset_config + seed across
+    # the cells of a sweep produces an identical pool, so the Coordinator can
+    # generate it once and stage pool+manifest into each run_dir/dataset/ instead
+    # of regenerating a large real-text pool per cell (§11.4). Reuse only triggers
+    # when BOTH files are present (a complete staged dataset); else generate.
     dataset_dir = run_dir / "dataset"
-    log.info("[%s] generating dataset pool → %s", run_id, dataset_dir)
-    manifest = generate(cfg, tokenizer, dataset_dir, registry_dir)
     pool_path = dataset_dir / POOL_FILENAME
-    if not pool_path.exists():
-        raise RunAborted(f"dataset pool {pool_path} missing after generation")
+    manifest_path = dataset_dir / MANIFEST_FILENAME
+    if pool_path.exists() and manifest_path.exists():
+        log.info("[%s] reusing pre-staged dataset pool → %s", run_id, dataset_dir)
+        with open(manifest_path) as f:
+            manifest = json.load(f)
+    else:
+        log.info("[%s] generating dataset pool → %s", run_id, dataset_dir)
+        manifest = generate(cfg, tokenizer, dataset_dir, registry_dir)
+        if not pool_path.exists():
+            raise RunAborted(f"dataset pool {pool_path} missing after generation")
     pool = load_pool(pool_path)
     weights = {m["scenario"]: m["weight"] for m in manifest["mix"]}  # session-start weights (§12.3)
 
@@ -444,7 +455,13 @@ async def run_experiment(
 
             # ---- phase 5: inductor pre-compilation primer (§10.3)
             primers = await asyncio.gather(
-                *[run_primer(http, inst.base_url, model=deployment.model) for inst in instances]
+                *[
+                    run_primer(
+                        http, inst.base_url, model=deployment.model,
+                        max_model_len=deployment.backend_config.max_model_len,
+                    )
+                    for inst in instances
+                ]
             )
             for inst, pr in zip(instances, primers):
                 if pr.warning:

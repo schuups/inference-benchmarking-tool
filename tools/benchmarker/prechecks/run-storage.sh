@@ -59,7 +59,10 @@ case "${real0}" in
     *)           STORAGE_SCOPE="${PRECHECK_STORAGE_SCOPE:-}" ;;
 esac
 printf '%s' "${STORAGE_SCOPE}" > "${PRECHECK_OUT}/storage_scope.txt"
-echo "[storage] weights on ${real0%%/*}/ → scope '${STORAGE_SCOPE}' (${#SHARDS[@]} shards under ${SHARD_ROOT})"
+# Top-level mount for the log line: "/capstor/scratch/.../x.safetensors" -> "/capstor".
+# (NOT ${real0%%/*}, which strips from the FIRST slash and yields "" for absolute paths.)
+_rel="${real0#/}"; _mount="/${_rel%%/*}"
+echo "[storage] weights on ${_mount} → scope '${STORAGE_SCOPE}' (${#SHARDS[@]} shards under ${SHARD_ROOT})"
 
 # ----------------------------------------------------------- 1) sequential (single stream)
 single="${STORAGE_BENCH_FILE:-${SHARDS[0]}}"
