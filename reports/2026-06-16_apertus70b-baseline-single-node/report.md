@@ -1,41 +1,98 @@
 # Apertus-70B (256k context) - single-node baseline (SLURM vs K8s)
 
-**Curated synthesis (§15.3)** of the first full-settings capacity+quality run of the KV-cache grid's
-**baseline cell** (KV-offloading *off*, KV-dtype *default*). This is the reference against which the
-offloading and fp8 cells will be compared. Single GH200 node, TP4, vLLM 0.23.0.
+**Purpose.** Establish the **baseline operating point** for Apertus-70B served on a single GH200 node —
+KV-offloading *off*, KV-cache dtype *default* (bf16) — at the model's full 256K context. This is the
+**reference against which the KV-offloading and fp8 cells of the grid will be compared** (capacity and
+quality deltas, §15.1), and the first run of a **SLURM-vs-K8s platform comparison** of the identical
+deployment. It also validates the end-to-end pipeline (pre-checks → load → sweep → graded quality) on
+the production-grade Alps image.
 
-> **Platform comparison — in progress.** This report compares the same baseline across both
-> deployment platforms: **SLURM (clariden)** and **Kubernetes (breithorn)**. The SLURM results below
-> are complete; the **K8s run is in flight** and the report will be enriched with its results and a
-> side-by-side SLURM-vs-K8s comparison once it lands.
+**Setup.**
 
-## Headline
+| | |
+|---|---|
+| Model | `swiss-ai/Apertus-70B-Instruct-2509` (70B dense), full **256K** context (`max_model_len=262144`) |
+| Engine | vLLM **0.23.0**, TP4 × PP1 on **one GH200 node** (4× GH200, intra-node NVLink-C2C) |
+| Image | `jfrog.svc.cscs.ch/ml/inference/vllm:0.23.0-alps.net.v1-gh200` — official vLLM 0.23 + Alps Slingshot-11 netstack + baked Ray/NIXL/LMCache; self-contained (host CXI hook off) |
+| Storage | weights from the **capstor** Lustre HF-cache (`/capstor/scratch/.../ibt/hf-cache`); dataset pool on capstor. (K8s variant: weights from a `ceph-corbo-cephfs` PVC.) |
+| Platforms | **SLURM** (clariden) — results below · **Kubernetes** (breithorn) — in flight |
 
-- **Supportable load: λ\* = 0.5 session-starts/s** — the only swept level meeting **all** per-class
-  SLOs. The capacity knee sits between λ=0.5 and λ=1.0.
-- **Saturation onset = request-queue onset**, confirmed: the latency knee aligns vertically with the
-  vLLM request queue (`num_requests_waiting`) rising above 0. This is the signal the sweep's adaptive
-  early-stop keys on (§12.2), and it fired correctly here (skipped λ=4/8/16).
-- **Quality intact**: gsm8k 0.72 (gate 0.732 / Stage-B 0.7187) — the baseline quality reference.
+> **Platform comparison — in progress.** The SLURM (clariden) results below are complete; the **K8s
+> (breithorn) run is in flight** and this report will be enriched with its results and a side-by-side
+> SLURM-vs-K8s comparison once it lands. *(256K note: this checkpoint is natively 64K; the 256K window
+> is forced to validate the pipeline ahead of the native-256K next Apertus — see Disclosures.)*
 
-![ttft vs λ — latency / error / queue](images/baseline-ttft.png)
+## 1. Pre-checks (§8 foundation gate)
+
+The §8 gate runs **before** the engine is admitted, so the sweep can never measure a degraded
+foundation. All checks passed on the populated 1-node clariden reference:
+
+| check | measured | reference | verdict |
+|---|---|---|---|
+| NCCL all-reduce @128 MiB | 309.5 GB/s | 317.7 | ✅ pass |
+| NCCL all-gather @128 MiB | 278.9 GB/s | 283.5 | ✅ pass |
+| NCCL all-to-all @128 MiB | 307.8 GB/s | 306.2 | ✅ pass |
+| NVSHMEM all-to-all latency @128 KiB | 12.68 µs | — | ✅ pass |
+| capstor sequential read (single-stream O_DIRECT) | 0.197 GB/s | floor 0.063 | ✅ pass |
+| capstor parallel read (8-stream O_DIRECT) | 1.01 GB/s | — | ✅ pass |
+| capstor buffered read (readahead) | 14.32 GB/s | — | ✅ pass |
+
+Intra-node NVLink collectives are at reference; storage is healthy (well above the degraded-capstor
+floor). Foundation sound → the capacity numbers below reflect the engine, not a broken substrate.
+
+## 2. Model-loading time breakdown (§10.2) — time-to-ready 314 s
+
+| component | time | note |
+|---|---|---|
+| weights load | 108 s | 32.9 GiB → **0.30 GB/s effective** |
+| engine init (profile + KV alloc + warmup) | 37 s | |
+| CUDA-graph capture | 14 s | full graphs, custom all-reduce **on** (no E2b workarounds on 0.23) |
+| inductor compile | 12 s | |
+
+The effective weight-load bandwidth (0.30 GB/s) is **well below** the §8 parallel-read floor on the same
+mount (1.01 GB/s), so the load is **deserialization / single-stream-limited, not mount-bandwidth-bound**
+— a target for the cold-start optimisation track, not a storage problem.
+
+## 3. Loading scenario (the benchmark workload)
+
+A realistic **mixed** workload, weighted by session starts (§12.3):
+
+- **80% `chat-short-turns`** — short interactive turns (turn-1 ≈ 500 tokens).
+- **20% `agentic-coding`** — long coding sessions (turn-1 ≈ 10 000 tokens).
+
+Both are **multi-turn** with true conversational growth (`append_delta`: turn *N*'s prompt = the full
+prior transcript, including the model's own outputs, + the new turn), so a session's context **grows
+turn-over-turn** toward the 256K window — and *not every session fills it* (turn counts and lengths are
+drawn from per-scenario distributions). Prompts are **real text**: chat from **WildChat-1M**, agentic
+from **LongBench**. The pool is **100 000 turn records** (seed 1234, forced output length for sweep
+reproducibility), generated once and shared across cells.
+
+Load is offered as a **Poisson** arrival of session starts at rate **λ**, swept
+`[0.5, 1, 2, 4, 8, 16]` sessions/s with **warmup 300 s / measurement 600 s / drain 600 s** per level.
+The sweep uses the **sustained-queue adaptive early-stop** (§12.2): once the request queue is
+persistently non-empty for two consecutive levels, the remaining higher λ are skipped as redundant
+deep-overload.
+
+## 4. Capacity — per-class SLO attainment
+
+![ttft vs λ — latency / error / queue (shared λ axis)](images/baseline-ttft.png)
 
 *(TPOT companion: `images/baseline-tpot.png`.)*
 
-## Capacity — per-class SLO attainment
+- **Supportable load: λ\* = 0.5 session-starts/s** — the only swept level meeting **all** per-class SLOs.
 
 | λ (sessions/s) | chat TTFT p95 (SLO 800 ms) | chat TPOT p95 (SLO 80 ms) | agentic session-e2e p90 (SLO 600 s) | error % (SLO 1%) | verdict |
 |---|---|---|---|---|---|
 | **0.5** | **461 ms** ✅ | **32 ms** ✅ | **208 s** ✅ | **0.0%** ✅ | ✅ **meets all SLOs (λ\*)** |
 | 1.0 | 198 000 ms ❌ | 131 ms ❌ | 639 s ❌ | 7.7% ❌ | ❌ saturated |
 | 2.0 | 238 000 ms ❌ | 276 ms ❌ | 826 s ❌ | 72% ❌ | ❌ deep overload |
-| 4 / 8 / 16 | — | — | — | — | **skipped** (adaptive early-stop, §12.2) |
+| 4 / 8 / 16 | — | — | — | — | **skipped** (adaptive early-stop) |
 
-The transition is abrupt: at λ=1.0 the engine is already catastrophically saturated (TTFT p95 jumps
-from 0.46 s to ~198 s). λ* is therefore **bracketed but coarse** — only one sub-knee point (0.5) was
-measured. A refinement pass (λ = 0.6 / 0.7 / 0.8) is needed to report a precise λ\*.
+The transition is abrupt: at λ=1.0 the engine is already catastrophically saturated (TTFT p95 jumps from
+0.46 s to ~198 s). λ\* is **bracketed but coarse** — only one sub-knee point (0.5) was measured; a
+refinement pass (λ = 0.6 / 0.7 / 0.8) is needed for a precise λ\*.
 
-## Saturation onset = queue onset
+## 5. Saturation onset = queue onset
 
 | λ | mean queue (`requests_waiting`) | max queue | all SLOs met? |
 |---|---|---|---|
@@ -43,25 +100,11 @@ measured. A refinement pass (λ = 0.6 / 0.7 / 0.8) is needed to report a precise
 | 1.0 | 164 | 468 | ❌ no |
 | 2.0 | 379 | 1150 | ❌ no |
 
-The queue is empty at λ=0.5 (engine keeps up) and jumps the instant the SLOs break — TTFT climbs
-because requests wait. The early-stop used this directly: λ=1.0 saturated (queue non-empty 84% of
-measurement scrapes), λ=2.0 confirmed (88%) → the remaining higher λ were skipped as redundant
-deep-overload.
+The queue is empty at λ=0.5 (engine keeps up) and jumps the instant the SLOs break — TTFT climbs because
+requests wait. The early-stop used this directly: λ=1.0 saturated (queue non-empty 84% of measurement
+scrapes), λ=2.0 confirmed (88%) → higher λ skipped.
 
-## Model-loading breakdown (§10.2) — time-to-ready 314 s
-
-| component | time | note |
-|---|---|---|
-| weights load | 108 s | 32.9 GiB → **0.30 GB/s effective** |
-| engine init (profile + KV alloc + warmup) | 37 s | |
-| CUDA-graph capture | 14 s | full graphs, custom all-reduce on (no E2b workarounds) |
-| inductor compile | 12 s | |
-
-The effective weight-load bandwidth (0.30 GB/s) is **well below** the §8.1 parallel-read floor
-measured on the same mount (1.01 GB/s), so the load is **deserialization / single-stream-limited, not
-mount-bandwidth-bound** — a target for the cold-start optimisation track, not a storage problem.
-
-## Quality (§13.5) — gsm8k
+## 6. Quality (§13.5) — gsm8k
 
 | stage | sample | score | floor | status |
 |---|---|---|---|---|
@@ -72,20 +115,19 @@ This is the baseline quality the fp8 / KV-offload cells will be measured against
 
 ## Disclosures & limitations (not hidden, per §15.3)
 
-- **Forced 256K on a natively-64K checkpoint.** Apertus-70B-Instruct-2509's `config.json` caps at
-  64K (`max_position_embeddings=65536`); this run set `max_model_len=262144` +
-  `VLLM_ALLOW_LONG_MAX_MODEL_LEN=1` to **validate the 256K serving pipeline ahead of the native-256K
-  next Apertus**. Outputs on requests that exceed 64K (the long agentic-session tail) are degraded/garbage
-  beyond the trained window. **Capacity timing and the queue/knee are unaffected** (forced output length,
-  `ignore_eos`); **quality is unaffected** (gsm8k prompts are short, well inside 64K).
+- **Forced 256K on a natively-64K checkpoint.** `config.json` caps at 64K (`max_position_embeddings=65536`);
+  this run set `max_model_len=262144` + `VLLM_ALLOW_LONG_MAX_MODEL_LEN=1` to **validate the 256K serving
+  pipeline ahead of the native-256K next Apertus**. Outputs on requests exceeding 64K (the long
+  agentic-session tail) are degraded beyond the trained window. **Capacity timing and the queue/knee are
+  unaffected** (forced output length, `ignore_eos`); **quality is unaffected** (gsm8k prompts are short).
 - **Latency at λ ≥ 1 is partly a client artifact.** At saturation the single-process load generator hit
-  ~649 ms event-loop lag, so absolute latencies at the saturated levels are inflated. λ\* (=0.5) is below
-  this regime; the knee/queue determination is engine-side and unaffected. Tracked: shard the load generator.
+  ~649 ms event-loop lag, inflating absolute latencies at the saturated levels. λ\* (=0.5) is below this
+  regime; the knee/queue determination is engine-side and unaffected. Tracked: shard the load generator.
 - **`agentic-coding` is approximate** (§11.7): multi-turn sessions with bursty fan-out, not a tool-calling
-  state machine. λ\* → supportable-users mapping needs the per-class sessions/user/hour defaults (§15.1, TBD).
+  state machine. λ\* → supportable-users mapping needs per-class sessions/user/hour defaults (§15.1, TBD).
 - **KV-cache-% panel empty for this run** — it predates the 0.23 metric-rename scraper fix
   (`gpu_cache_usage_perc` → `kv_cache_usage_perc`); subsequent runs capture it.
-- The λ=4/8/16 rows are **skipped (not failed)** by the early-stop; treat their absence as "not measured."
+- λ=4/8/16 rows are **skipped (not failed)** by the early-stop; treat their absence as "not measured".
 
 ## Provenance
 
