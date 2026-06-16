@@ -146,8 +146,15 @@ def test_k8s_render(tmp_path, canonical_dict, globals_cfg):
     engine_yaml = (run_dir / "engine.yaml").read_text()
 
     docs = list(yaml.safe_load_all(engine_yaml))
-    assert [d["kind"] for d in docs] == ["Deployment", "Service", "Ingress"]
-    deployment = docs[0]
+    by_kind = {d["kind"]: d for d in docs}
+    assert [d["kind"] for d in docs] == [
+        "ConfigMap", "PersistentVolumeClaim", "Deployment", "Service", "Ingress"]
+    # Per-run results PVC (/results): manifest-scoped + labeled so apply creates / delete reclaims.
+    results_pvc = by_kind["PersistentVolumeClaim"]
+    assert results_pvc["metadata"]["name"].startswith("ibt-results-")
+    assert results_pvc["spec"]["storageClassName"] == "ceph-corbo-cephfs"
+    assert results_pvc["metadata"]["labels"]["inference-benchmarking/run-id"]
+    deployment = by_kind["Deployment"]
     labels = deployment["metadata"]["labels"]
     assert labels["app.kubernetes.io/managed-by"] == "inference-benchmarking"  # §7.1
     pod_spec = deployment["spec"]["template"]["spec"]
@@ -157,10 +164,25 @@ def test_k8s_render(tmp_path, canonical_dict, globals_cfg):
     assert container["resources"]["limits"]["nvidia.com/gpu"] == 4
     assert "run_system_prechecks.sh" in container["args"][0]  # §8.2 in-pod gate
     assert "hw_sampler.py" in container["args"][0]
+    # /tools delivery (decision 9): the §8 pre-check + sampler scripts reach the pod via an
+    # inlined ConfigMap mounted read-only at /tools — the K8s analog of SLURM's staged-tools
+    # mount, so the live (uncommitted) working tree ships with one `kubectl apply`.
+    cm = by_kind["ConfigMap"]
+    assert cm["metadata"]["name"].startswith("ibt-tools-")
+    for needed in ("run_system_prechecks.sh", "collective_probe.py", "system_prechecks_reference.yaml"):
+        assert needed in cm["data"], needed
+    tools_vol = next(v for v in pod_spec["volumes"] if v["name"] == "tools")
+    assert tools_vol["configMap"]["name"] == cm["metadata"]["name"]
+    item_paths = {i["key"]: i["path"] for i in tools_vol["configMap"]["items"]}
+    assert item_paths["run_system_prechecks.sh"] == "benchmarker/prechecks/run_system_prechecks.sh"
+    assert item_paths["system_prechecks_reference.yaml"] == "system_prechecks_reference.yaml"
+    tools_mount = next(m for m in container["volumeMounts"] if m["name"] == "tools")
+    assert tools_mount["mountPath"] == "/tools" and tools_mount["readOnly"] is True
     # Model-cache PVC: org-inclusive name (binds the cluster's pre-populated PVC) and
     # mounted READ-ONLY so a run never mutates a shared cache (§7.6).
     cache_vol = next(v for v in pod_spec["volumes"]
-                     if v["persistentVolumeClaim"]["claimName"].startswith("model-cache-"))
+                     if "persistentVolumeClaim" in v
+                     and v["persistentVolumeClaim"]["claimName"].startswith("model-cache-"))
     assert cache_vol["persistentVolumeClaim"]["claimName"] == "model-cache-moonshotai-kimi-k2.6"
     cache_mount = next(m for m in container["volumeMounts"] if m["name"] == "model-cache")
     assert cache_mount["readOnly"] is True
@@ -171,14 +193,14 @@ def test_k8s_render(tmp_path, canonical_dict, globals_cfg):
 
     # Ingress is the SLURM-Benchmarker-reachable endpoint (§6.2): nginx + letsencrypt,
     # host ibt-engine-<slug>.<ingress_domain>, backed by the engine Service.
-    ingress = docs[2]
+    ingress = by_kind["Ingress"]
     assert ingress["spec"]["ingressClassName"] == "nginx"
     assert ingress["metadata"]["annotations"]["cert-manager.io/cluster-issuer"] == "letsencrypt"
     host = ingress["spec"]["rules"][0]["host"]
     assert host.startswith("ibt-engine-") and host.endswith(".breithorn.svc.cscs.ch")
     assert ingress["spec"]["tls"][0]["hosts"] == [host]
     backend = ingress["spec"]["rules"][0]["http"]["paths"][0]["backend"]["service"]
-    assert backend["name"] == docs[1]["metadata"]["name"]  # → the engine Service
+    assert backend["name"] == by_kind["Service"]["metadata"]["name"]  # → the engine Service
     assert backend["port"]["number"] == 8000
 
     # The Benchmarker is ALWAYS SLURM (§2) — never a K8s pod. For a K8s engine target the
@@ -197,16 +219,18 @@ def test_k8s_names_within_63_chars(tmp_path, canonical_dict, globals_cfg):
     _, run_dirs = _render(tmp_path, canonical_dict, globals_cfg)
     docs = list(yaml.safe_load_all((run_dirs[0] / "engine.yaml").read_text()))
     for d in docs:
-        assert len(d["metadata"]["name"]) <= 63, d["kind"]
-    dep = docs[0]
+        assert len(d["metadata"]["name"]) <= 63, d["kind"]  # incl. the ibt-tools-<slug> ConfigMap
+    dep = next(d for d in docs if d["kind"] == "Deployment")
     assert len(dep["spec"]["selector"]["matchLabels"]["app"]) <= 63
-    # claimNames referenced by the pod (results PVC) must also fit 63.
-    for v in dep["spec"]["template"]["spec"]["volumes"]:
+    # claimNames referenced by the pod (results PVC) must also fit 63 — PVC volumes only
+    # (the new `tools` volume is a ConfigMap, not a PVC).
+    pvc_vols = [v for v in dep["spec"]["template"]["spec"]["volumes"] if "persistentVolumeClaim" in v]
+    for v in pvc_vols:
         assert len(v["persistentVolumeClaim"]["claimName"]) <= 63
     # the model-cache PVC still binds the real, org-inclusive name (unbounded — it
     # must match whatever pre-exists on the cluster).
     assert any(v["persistentVolumeClaim"]["claimName"] == "model-cache-swiss-ai-apertus-70b-instruct-2509"
-               for v in dep["spec"]["template"]["spec"]["volumes"])
+               for v in pvc_vols)
 
 
 def test_stock_image_keeps_cxi_hook(tmp_path, canonical_dict, globals_cfg):

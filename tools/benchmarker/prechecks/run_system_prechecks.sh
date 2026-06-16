@@ -45,6 +45,16 @@ fi
 
 mkdir -p "${PRECHECK_OUT}"
 
+# Launcher fork (§8.2 / decision 9). K8s has no srun/PMIx, so PRECHECK_LAUNCHER=torch runs the
+# torch.distributed collective probe (one rank per GPU via torchrun / Ray) instead of the MPI
+# nccl-tests SLURM uses. Both emit collective_<c>.out rows grade.py reads identically; the
+# storage + grading steps below are launcher-agnostic. NVSHMEM is the MPI path only for now
+# (Ray-NVSHMEM bootstrap deferred, TODOs) — fine here: K8s single-node dense has no MoE.
+if [ "${PRECHECK_LAUNCHER:-mpi}" = "torch" ]; then
+    rank0 && echo "[prechecks] launcher=torch — torch.distributed collective probe (K8s, §8 / decision 9)"
+    bash "${THIS_DIR}/run-collectives-torch.sh" 2>&1 | tee "${PRECHECK_OUT}/collective_probe.log" \
+        || echo "[prechecks] torch collective probe errored — grade.py marks missing rows fail (§8.4)"
+else
 # ------------------------------------------------------- collective binaries
 # Prefer prebuilt nccl-tests baked into the image (the Alps net image ships them in
 # /usr/local/bin); only build — and risk smoke-test mode on a cold cache — when no
@@ -95,6 +105,7 @@ if [ "${NVSHMEM_REQUIRED:-0}" = "1" ]; then
         exit 4
     }
 fi
+fi  # end launcher fork (torch | mpi)
 
 # ------------------------------------------------------------- storage read (rank 0)
 # run-storage.sh reads the deployed model's real shards off their actual mount: a single-stream

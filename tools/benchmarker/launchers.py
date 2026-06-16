@@ -180,8 +180,9 @@ class K8sEngineLauncher:
         return (r.stdout.strip() or "0") != "0"
 
     async def teardown(self) -> None:
-        # Deletes Deployment + Service + Ingress (manifest-scoped); the model-cache
-        # PVC lives outside the manifest and is retained (§7.6).
+        # Deletes Deployment + Service + Ingress + the /tools ConfigMap (all manifest-scoped,
+        # so `delete -f` reclaims them); the model-cache PVC lives outside the manifest and
+        # is retained (§7.6).
         code, _, err = await _run("kubectl", "delete", "-f", str(self._manifest), "--ignore-not-found")
         if code == 0:
             log.info("deleted k8s engine objects for %s", self._slug)

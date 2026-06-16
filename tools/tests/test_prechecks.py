@@ -299,3 +299,36 @@ def test_runner_script_syntax():
     for script in Path("tools/benchmarker/prechecks").glob("*.sh"):
         proc = subprocess.run(["bash", "-n", str(script)], capture_output=True, text=True)
         assert proc.returncode == 0, f"{script}: {proc.stderr}"
+
+
+# --- K8s torch.distributed collective probe (decision 9): the probe emits nccl-tests-shaped
+#     rows so grade.py is reused unchanged. Verify that contract + the busbw factors here;
+#     the GPU measurement itself is validated on-cluster (no torch off-GPU). ---
+
+def test_probe_line_roundtrips_through_grader():
+    from tools.benchmarker.prechecks.collective_probe import format_nccl_line
+
+    size = 128 * 1024**2
+    line = format_nccl_line(size, time_us=12345.6, algbw_gbs=200.0, busbw_gbs=317.70)
+    # grade.parse_nccl_output keys on the size column and returns the busbw (field 7).
+    assert parse_nccl_output(line, size) == pytest.approx(317.70)
+    assert parse_nccl_output(line, size * 2) is None  # wrong target size → no match
+
+    # End-to-end: a probe row grades against the populated clariden 1-node reference.
+    refs = load_reference("clariden", REFERENCE_PATH)
+    hdr = "# size count type redop root time algbw busbw wrong"
+    text = hdr + "\n" + format_nccl_line(size, 1000.0, 200.0, 300.0) + "\n"
+    measurements = [{"benchmark": "NCCL all_reduce", "scope": "4× GH200, 1 node",
+                     "size": "128 MiB", "measured": parse_nccl_output(text, size)}]
+    rows = build_rows(measurements, refs)
+    assert rows[0]["measured"] == pytest.approx(300.0)
+    assert rows[0]["status"] in {"pass", "warn", "fail"}  # graded against the real reference
+
+
+def test_probe_busbw_factors_match_nccl_tests():
+    from tools.benchmarker.prechecks.collective_probe import busbw_factor
+
+    assert busbw_factor("all_reduce", 4) == pytest.approx(2 * 3 / 4)  # 2(n-1)/n
+    assert busbw_factor("all_gather", 4) == pytest.approx(3 / 4)      # (n-1)/n
+    assert busbw_factor("alltoall", 4) == pytest.approx(3 / 4)
+    assert busbw_factor("all_reduce", 1) == 0.0  # single rank: no inter-GPU transfer

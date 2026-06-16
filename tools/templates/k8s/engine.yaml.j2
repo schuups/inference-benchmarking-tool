@@ -6,6 +6,43 @@
 # ingress wiring take ~2-3 min after apply — the orchestrator readiness wait
 # tolerates that window (_await_ready).
 # run_id: {{ run_id }}
+#
+# §8 pre-check + hw-sampler scripts reach the pod at /tools via this inlined ConfigMap — the
+# K8s analog of SLURM's staged-tools mount (decision 9). Rendered from the live working tree,
+# so uncommitted code is delivered with one `kubectl apply`; keys are basenames, the volume's
+# `items` (below) map each to its path under /tools. ~128 KiB, well under the 1 MiB CM limit.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ibt-tools-{{ k8s_slug }}
+  namespace: {{ namespace }}
+  labels:
+    app.kubernetes.io/managed-by: inference-benchmarking
+    inference-benchmarking/run-id: "{{ run_id }}"
+data:
+{%- for f in tools_files %}
+  {{ f.key }}: {{ f.content | tojson }}
+{%- endfor %}
+---
+# Per-run results scratch (/results): §8 pre-check JSON, hw-sampler NDJSON, and the per-run
+# SQLite DB. Manifest-scoped, so `kubectl apply` creates it and `kubectl delete -f` reclaims
+# it — the Coordinator downloads /results BEFORE teardown (§7.3). Distinct from the retained,
+# pre-populated model-cache PVC (§7.6).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ibt-results-{{ k8s_slug }}
+  namespace: {{ namespace }}
+  labels:
+    app.kubernetes.io/managed-by: inference-benchmarking
+    inference-benchmarking/run-id: "{{ run_id }}"
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: {{ results_storage_class }}
+  resources:
+    requests:
+      storage: 20Gi
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -45,6 +82,15 @@ spec:
             { python3 /tools/benchmarker/hw_sampler.py --out /results/hw-$(hostname).ndjson
             --interval {{ hardware_sampling_interval_s }} & exec {{ engine_command }}; }
         env:
+        # K8s NCCL override (decision 9): the self-contained Alps image bakes SLURM/Slingshot
+        # networking (NCCL_NET="AWS Libfabric", FI_PROVIDER=cxi, NCCL_SOCKET_IFNAME=hsn) — none of
+        # which exist in a breithorn pod, so NCCL can't bootstrap ("no socket interface found"),
+        # failing BOTH the §8 probe and vLLM's TP. Force the socket transport over the pod's eth0;
+        # intra-node GPU↔GPU still rides NVLink P2P (NCCL_P2P_LEVEL=NVL stays). Multi-node K8s would
+        # need a real RDMA net here instead (future — decision 9 / Ray path).
+        - { name: NCCL_NET, value: "Socket" }
+        - { name: NCCL_SOCKET_IFNAME, value: "eth0" }
+        - { name: NCCL_IB_DISABLE, value: "1" }
         - { name: PRECHECK_CLUSTER, value: "{{ cluster }}" }
         - { name: PRECHECK_SCOPE, value: "{{ precheck_scope }}" }
         - { name: PRECHECK_STORAGE_SCOPE, value: "{{ precheck_storage_scope }}" }
@@ -55,11 +101,13 @@ spec:
         - { name: NCCL_TESTS_VERSION, value: "{{ prechecks.collective_tests_version or '2.17.1' }}" }
         - { name: NCCL_TESTS_CACHE, value: "/results/collective-tests-cache" }
         - { name: NVSHMEM_REQUIRED, value: "{{ '1' if prechecks.shmem_required else '0' }}" }
-        # Parity with the SLURM engine template: a single pod holds all GPUs, and
-        # there is no multi-node MPI launch (so the collective check spans the whole
-        # pod, not just 1 GPU). See tools/templates/engine.sbatch.j2.
+        # §8 launcher (IMPLEMENTATION_PLAN decision 9): K8s has no srun/PMIx, so the
+        # foundation check runs the torch.distributed collective probe — one rank per GPU
+        # via torchrun (single-node / this 1-pod case; Ray placement for multi-node, future)
+        # — instead of MPI nccl-tests. Same all_reduce/all_gather/alltoall busbw, same
+        # grade.py rows. PRECHECK_GPUS = ranks (one per GPU in the pod).
+        - { name: PRECHECK_LAUNCHER, value: "torch" }
         - { name: PRECHECK_GPUS, value: "{{ total_gpus }}" }
-        - { name: NCCL_TESTS_MPI, value: "0" }
         - { name: MSG_END, value: "128M" }
         # Resolve weights from the pre-populated HF cache on the model-cache PVC
         # (mounted read-only below) — no HF egress, no HF_TOKEN, no writes.
@@ -82,7 +130,16 @@ spec:
         # a run must never mutate it (§7.6). Weights are pre-populated out-of-band.
         - { name: model-cache, mountPath: /model-cache, readOnly: true }
         - { name: results, mountPath: /results }
+        # §8 pre-check + sampler scripts (read-only); SLURM mounts these from capstor (decision 9).
+        - { name: tools, mountPath: /tools, readOnly: true }
       volumes:
+      - name: tools
+        configMap:
+          name: ibt-tools-{{ k8s_slug }}
+          items:
+{%- for f in tools_files %}
+          - { key: "{{ f.key }}", path: "{{ f.path }}" }
+{%- endfor %}
       - name: model-cache
         persistentVolumeClaim:
           # Org-inclusive slug to match the cluster's PVC naming (model_cache_slug,

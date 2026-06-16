@@ -30,6 +30,26 @@ from tools.common.runid import (
 )
 
 TEMPLATES_DIR = Path(__file__).resolve().parents[1] / "templates"
+TOOLS_DIR = Path(__file__).resolve().parents[1]
+
+# Storage class for the per-run K8s results PVC (/results: pre-check JSON, hw-sampler NDJSON,
+# the per-run SQLite DB). breithorn's CephFS class; TODO lift into global.yaml ClusterInfo when
+# a second K8s target appears (matches the cluster's `kubectl get storageclass`).
+K8S_RESULTS_STORAGE_CLASS = "ceph-corbo-cephfs"
+
+
+def k8s_tools_files() -> list[dict]:
+    """The §8 pre-check + hw-sampler subset the K8s engine pod needs at /tools, for the
+    inlined-ConfigMap delivery (decision 9 follow-on). SLURM mounts the live tools/ from
+    capstor; K8s has no such mount, so the pod gets this self-contained subset (no
+    tools.common imports) baked into the rendered manifest — the live working tree reaches
+    the pod with one `kubectl apply`. Keys are basenames (unique); `path` is the location
+    under /tools that the ConfigMap volume's `items` map each key to."""
+    prechecks = TOOLS_DIR / "benchmarker" / "prechecks"
+    rels = sorted(p.relative_to(TOOLS_DIR) for p in prechecks.glob("*.sh"))
+    rels += sorted(p.relative_to(TOOLS_DIR) for p in prechecks.glob("*.py") if p.name != "__init__.py")
+    rels += [Path("benchmarker/hw_sampler.py"), Path("system_prechecks_reference.yaml")]
+    return [{"key": r.name, "path": str(r), "content": (TOOLS_DIR / r).read_text()} for r in rels]
 
 
 def vllm_command(deployment: Deployment) -> str:
@@ -122,6 +142,7 @@ def render_experiment(
     exp_dir = out_root / f"{now:%Y-%m-%d}_{cfg.name}"
     exp_dir.mkdir(parents=True, exist_ok=True)
     shutil.copy(cfg_path, exp_dir / "benchmark_config.yaml")
+    tools_files = k8s_tools_files()  # /tools ConfigMap payload (K8s engine pods, decision 9)
 
     for deployment_index, deployment in enumerate(cfg.deployments):
         cluster = glob.clusters[deployment.target]
@@ -176,6 +197,8 @@ def render_experiment(
             "startup_failure_threshold": max(
                 6, int((cfg.phases.server_ready_timeout_s) / 10)
             ),
+            "tools_files": tools_files,  # K8s: /tools ConfigMap payload (decision 9)
+            "results_storage_class": K8S_RESULTS_STORAGE_CLASS,  # K8s: per-run /results PVC
         }
         # The Benchmarker is ALWAYS a SLURM allocation (§2, §5); only the engine
         # deployment under test is SLURM-or-K8s.
