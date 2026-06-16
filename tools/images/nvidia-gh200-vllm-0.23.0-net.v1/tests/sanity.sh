@@ -21,4 +21,14 @@ if [[ "${ngpu}" -ge 1 ]]; then
     | grep -iE "NET/OFI|AWS Libfabric|Using network|NET/Plugin|Loaded net plugin|busbw|out-of-place|Avg bus|# Out of bounds" \
     | head -60
 fi
+# Baked serving extras (this image): Ray + NIXL + LMCache. Build-time hooks
+# already gate the install; here we confirm runtime import on an actual GPU node
+# — in particular that LMCache selects its native c_ops backend (build-time it
+# falls back to the CPU stub since podman build sees no GPU).
+echo "--- baked serving extras (ray / nixl / lmcache) on GPU node ---"
+python3 - <<'PY' 2>&1 | grep -iE "ray [0-9]|nixl_agent import OK|lmcache [0-9]|Using backend|Skipping backend|Error|Traceback" | head -40
+import ray; print("ray", ray.__version__)
+from nixl._api import nixl_agent; print("nixl_agent import OK")
+import lmcache; print("lmcache", lmcache.__version__)
+PY
 echo "SANITY_DONE"

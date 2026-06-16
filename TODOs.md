@@ -82,11 +82,19 @@
 - [ ] **NIXL disaggregated prefill/decode** — vLLM v1 startup logs show *"NIXL is
   available"*; configuration via `--kv-transfer-config` (BackendConfig field
   `kv_transfer_config`, JSON string) not yet implemented or run. When wired up,
-  re-add the field to §16.2 as the configuration surface.
+  re-add the field to §16.2 as the configuration surface. NIXL is now **baked into**
+  `nvidia-gh200-vllm-0.23.0-net.v1` (nixl 1.2.0, variant/hooks.d/20-nixl.sh; cu13
+  backend + nixl_agent import verified at runtime 2026-06-16). **Still to do: validate
+  inter-node KV transfer over Slingshot** (UCX transport) in an actual P/D disagg run —
+  the image's 2-node sanity only covers NCCL/OSU/NVSHMEM, not the NIXL data path.
 - [ ] **LMCache KV-offloading backend** — evaluate `--kv-offloading-backend=lmcache` as
   an alternative to the v1 default `native` (§16.2 `kv_offloading_backend`). Goal: quantify
   bandwidth + concurrency trade-offs vs `native` on Grace DRAM. When wired up, re-add
-  `"lmcache"` to the §16.2 `kv_offloading_backend` notes.
+  `"lmcache"` to the §16.2 `kv_offloading_backend` notes. LMCache is now **baked into**
+  `nvidia-gh200-vllm-0.23.0-net.v1` (lmcache 0.4.6, variant/hooks.d/30-lmcache.sh; native
+  c_ops backend loads at runtime on GH200, verified 2026-06-16). Pinned to 0.4.6 = newest
+  aarch64-installable via the JFrog PyPI mirror (0.4.7 ships x86-only wheels); revisit when
+  a newer aarch64 build appears.
 - [ ] **DeepSeek `thinking_mode` as BackendConfig knob** — DeepSeek-V4-Pro exposes
   three reasoning-effort modes (Non-think / Think High / Think Max) via the
   `thinking_mode` runtime parameter. Wire it as a sweepable BackendConfig field
@@ -144,7 +152,10 @@
   (a) **Ray not in the Alps image** (`import ray` fails). Interim is a diagnostic `pip install --target=
   <capstor>/ibt/ray-diag ray` + the engine step exporting `PYTHONPATH`/`PATH` at it (injected per-run, NOT
   committed to the template). **Durable = rebuild the image with ray** (E3's multi-node MoE needs it too) —
-  then drop the inject. (b) **Root-cause `--disable-custom-all-reduce` + `--enforce-eager`** — both are now
+  then drop the inject. ✅ DONE 2026-06-16 for `nvidia-gh200-vllm-0.23.0-net.v1` (ray 2.55.1 baked via
+variant/hooks.d/10-ray.sh; the image also now ships NIXL + LMCache — see the NIXL/LMCache items above).
+**Follow-up: drop the per-run ray inject from the engine step when running on the 0.23.0 image** (still
+needed on the 0.22.1 image, which has no ray). (b) **Root-cause `--disable-custom-all-reduce` + `--enforce-eager`** — both are now
   `BackendConfig` options (set in `e2b-multinode-clariden.yaml`) working around a custom-all-reduce illegal
   memory access and a CUDA-graph-capture `CUBLAS_STATUS_EXECUTION_FAILED` on this image's cross-node path;
   investigate why (cross-node NCCL itself is fine — §8 8-rank prechecks pass) and lift the workarounds if

@@ -16,10 +16,13 @@ backend_version: "0.23.0"
 netstack: nvidia/v1                 # -> core/nvidia/netstack/v1
 description: >-
   Official vLLM 0.23.0 image (aarch64 / Ubuntu 24.04, for GH200) extended with the
-  Alps Slingshot-11 network stack (netstack v1) AND Ray (ray[default], baked in via
-  variant/hooks.d/10-ray.sh) for spawning multi-node vLLM. vLLM comes from the BASE
-  IMAGE (not pip); only Ray is pip-installed. Self-contained: no container-engine
-  CXI / aws-ofi-nccl hook required at runtime.
+  Alps Slingshot-11 network stack (netstack v1) AND a serving-extras layer baked in
+  via variant/hooks.d/: Ray (ray[default], 10-ray.sh) for spawning multi-node vLLM;
+  NIXL (20-nixl.sh) and LMCache (30-lmcache.sh) for KV-cache offloading/sharing and
+  prefill/decode (P/D) disaggregation (vLLM's NixlConnector + LMCacheConnectorV1).
+  vLLM comes from the BASE IMAGE (not pip); Ray/NIXL/LMCache are pip-installed on top
+  and do not perturb the base torch/vLLM. Self-contained: no container-engine CXI /
+  aws-ofi-nccl hook required at runtime.
 
 # ---- lifecycle status ----
 # pending-build -> building -> built -> pushed -> sanity-pending -> verified -> benchmarked
@@ -27,9 +30,10 @@ description: >-
 #   verified    = netstack sanity green (components load + Slingshot reference
 #                 bandwidth); usable, but inference performance scaling not yet tested.
 #   benchmarked = additionally validated in inference performance-scaling experiments.
-status: verified         # vLLM 0.23.0 (+ Ray) GH200 image; built+pushed+sanity-green on
-                         # clariden 2026-06-15 (2-node 151.7 GB/s; ray 2.55.1 + vllm 0.23.0
-                         # confirmed in pushed image).
+status: verified         # vLLM 0.23.0 (+ Ray/NIXL/LMCache) GH200 image; rebuilt+re-pushed
+                         # (same tag, new digest) + sanity-green on clariden 2026-06-16
+                         # (2-node 151.4 GB/s; ray 2.55.1 + nixl 1.2.0 + lmcache 0.4.6 with
+                         # the c_ops backend confirmed in the pushed image at runtime).
 
 # ---- source base + published tag ----
 base_image: docker.io/vllm/vllm-openai:v0.23.0-aarch64-ubuntu2404
@@ -62,10 +66,10 @@ netstack_pins:
 # ---- provenance (filled at build time by build.sh) ----
 provenance:
   containerfile: core/nvidia/netstack/v1/Containerfile
-  netstack_git_sha: 603772acd787485e5225cdeeeec19a3e80305eb5  # repo HEAD at build; note: the
-                             # shared core/nvidia/netstack/v1/phases/apt_install_build_deps.sh was
-                             # modified in this same change (dropped the ports.ubuntu.com -> JFrog
-                             # ubuntu-ports rewrite; that mirror lagged: libudev1 8.16 vs udev 8.15).
+  netstack_git_sha: b4200ffd1152e9f309cf567ce139bd0253c04a82  # core/nvidia/netstack/v1 subtree
+                             # at build (unchanged since this commit; the apt ports fix it carries
+                             # is already committed there). This rebuild changed only the image-dir
+                             # variant hooks (NIXL + LMCache) + tests/sanity.sh.
   base_digest: sha256:330d9a65d5d86b9467297114269562a248a9ab721154edc02990d412c81ecc1a
   base_probe:                # observed in the v0.23.0 base on clariden 2026-06-15
     os: Ubuntu 24.04.3 LTS
@@ -75,25 +79,32 @@ provenance:
     torch: 2.11.0+cu130
     torch_nccl: "2.28.9"     # -> netstack_pins.nccl_ver (identical toolchain to the 0.22.1 base)
     vllm: "0.23.0"
-    ray: "added via variant/hooks.d/10-ray.sh (ray[default]; absent in base)"
+    # Serving extras are pip-installed by the variant hooks (absent in the base),
+    # pinned for reproducibility; resolved from the JFrog PyPI mirror on aarch64:
+    ray: "2.55.1   — variant/hooks.d/10-ray.sh (ray[default])"
+    nixl: "1.2.0   — variant/hooks.d/20-nixl.sh (meta: cu12+cu13 backends, runtime-selected)"
+    lmcache: "0.4.6 — variant/hooks.d/30-lmcache.sh (c_ops backend at runtime; x86-only on PyPI, this is newest aarch64-installable via the mirror)"
     entrypoint: ["vllm", "serve"]
   built_by: stefschu
-  built_at: "2026-06-15T20:06:58+02:00"
-  image_id: sha256:92e994628807dc6c09b466e50f6c0c13f56106b3c2e8b6f8058e41079c27753b
-  registry_digest: sha256:01510dc2b80db09171a848fec6d4238e2df45d43024ba127e4af4ab75897b25e
+  built_at: "2026-06-16T08:45:16+02:00"
+  image_id: sha256:8e860e7e8d641315ab514984b173e3c665cc42a3d990a6e186b9b9c84bc092e1
+  registry_digest: sha256:98a68895ba499529bbf29e110640caf21439d35b0f8cc286908350c2611c332e
   # No durable build_log: build/staging under /capstor/.../ibt is EPHEMERAL (can be
   # reclaimed anytime). Reproducibility = netstack_git_sha + the pins above +
   # base_digest + registry_digest.
 
 # ---- post-push sanity (filled by tests/, see tests/README) ----
 sanity:
-  status: pass               # job 2539970, 2-node, clariden 2026-06-15
-  ran_at: "2026-06-15T20:30:00+02:00"
+  status: pass               # job 2542544, 2-node, clariden 2026-06-16
+  ran_at: "2026-06-16T09:08:00+02:00"
   nodes: 2
   notes: >-
-    2-node netstack sanity GREEN: peak inter-node all_reduce busbw 151.7 GB/s
-    (clears the ~122 GB/s Slingshot reference @128 MiB; job 2539970). Ray confirmed
-    in the pushed image: vllm=0.23.0 ray=2.55.1. Same netstack (nvidia/v1) and
-    IDENTICAL toolchain as the verified 0.22.1 GH200 image (torch 2.11.0+cu130,
-    NCCL 2.28.9, CUDA 13) — only vLLM (0.23.0) and the baked-in Ray differ.
-  todo_inter_node: false
+    2-node netstack sanity GREEN: peak inter-node all_reduce busbw 151.4 GB/s
+    (clears the ~122 GB/s Slingshot reference @128 MiB; job 2542544). Serving extras
+    confirmed at RUNTIME on a GPU node from the re-pushed digest (98a68895): ray
+    2.55.1, nixl_agent import OK, lmcache 0.4.6 selecting its native c_ops backend.
+    Same netstack (nvidia/v1) and IDENTICAL toolchain as the verified 0.22.1 GH200
+    image (torch 2.11.0+cu130, NCCL 2.28.9, CUDA 13).
+  todo_inter_node: false     # netstack inter-node verified; NIXL/LMCache inter-node KV
+                             # transfer over Slingshot is exercised later, in P/D
+                             # disaggregation experiments (see TODOs.md), not this gate.
