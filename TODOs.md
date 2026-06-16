@@ -56,6 +56,19 @@
     E2) and drop the skip once the run is on the netstack image.
 - [ ] Run NCCL benchmarks (using the same Docker images) before inference benchmarks
 - [ ] Support testing endpoints provided via URL (not only SLURM and Kubernetes deployments)
+- [ ] **Full-stack load testing (resilience of the whole deployed stack)** — a distinct mode
+  from the engine-capacity work above: later, expand load testing to an *already-deployed*
+  production stack to learn whether it holds or breaks under load. **We do NOT deploy the engines
+  here** — we only load-test what's already running (builds on the URL-endpoint item above). The
+  key difference: the unit under test is the **entire serving path — ingress → routing/load
+  balancing → auth → rate limits → auto-scaling → accounting/quotas → the engine(s)** — not just a
+  single vLLM instance behind a bare ingress. Goal: find where the full stack degrades or fails
+  (e.g. ingress saturation, router fairness, auth/rate-limit throttling behaviour, auto-scaling
+  lag and in-flight loss during scale events, quota enforcement under burst). Needs: a way to
+  point the load generator at the production ingress URL with real auth, metrics scraped at each
+  layer (not just the engine), and SLOs/observations defined per layer. Relates to the
+  hardware-elasticity / auto-scaling item below (auto-scaling is one facet of full-stack
+  resilience).
 - [ ] **Single-node KV-cache grid — knee refinement (same experiment)** — the first pass uses
   λ=[0.5,1,2,4,8,16] to bracket the knee (`apertus70b-kvgrid-single-node-{slurm,k8s}.yaml`). After
   pass 1, add λ levels around the located λ* (per cell / platform) and re-run to resolve the knee —
