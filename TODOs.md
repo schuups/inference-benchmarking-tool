@@ -94,6 +94,13 @@
   its vLLM log isn't read (`model_load_total_s` is only the ingress-readiness wait); parse `kubectl logs`;
   (c) **hardware_stats**=0 — the in-pod sampler writes the pod `/results` PVC, never fetched. Decide a
   cross-cluster mechanism (fetch the pod `/results` before teardown, or stream to the benchmarker).
+- [ ] **Wire DCGM fine-grained GPU telemetry** (surfaced at the E3a baseline, 2026-06-16 — even on SLURM,
+  `hardware_stats` only carries coarse `nvidia-smi` counters: GPU util / power / memory / temperature). The
+  DCGM signals — **SM-active %, tensor-core active %, HBM bandwidth, NVLink RX/TX, PCIe RX/TX** — are `NULL`
+  because DCGM isn't exporter-wired in the engine image. Without them, a ~100%-util plateau can't be
+  decomposed into SM-active vs memory-stall, and the §15.3 "untapped headroom" overlay (HBM-BW / NVLink) is
+  blank. Wire `dcgm-exporter` (or the DCGM Python bindings) in the sampler and backfill `tools/images`; gate
+  on availability per cluster.
 
 ### Cold-start optimisation experiment groups
 

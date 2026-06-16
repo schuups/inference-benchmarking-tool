@@ -173,6 +173,52 @@ def throughput_figure(entries, title: str = "Token throughput vs λ — SLURM vs
     return fig
 
 
+def hardware_compare_figure(entries, signals):
+    """Side-by-side hardware-telemetry comparison (§13.3/§15.1): ONE COLUMN per run
+    (`entries` = list of (report, colour, label), e.g. SLURM left, K8s right), one ROW per signal
+    (`signals` = list of (column, ylabel, ylim_or_None)), y-axis shared per row, λ x-axis shared.
+
+    A run with no telemetry for a signal (e.g. the cross-cluster K8s gap) draws an empty panel
+    annotated "no telemetry collected" rather than being silently dropped — the absence is a
+    disclosed instrumentation gap, not a measured zero."""
+    import matplotlib.ticker as mticker
+
+    n = len(entries)
+    nrows = len(signals)
+    fig, axes = plt.subplots(
+        nrows, n, figsize=(4.3 * n, 2.4 * nrows + 0.6), sharex=True, sharey="row",
+        squeeze=False,
+    )
+    lambdas: set[float] = set()
+    for col, (report, color, label) in enumerate(entries):
+        for row, (signal, _ylabel, _ylim) in enumerate(signals):
+            ax = axes[row][col]
+            hv = analysis.hardware_vs_lambda(report.hardware_stats, signal)
+            if hv.empty:
+                ax.text(0.5, 0.5, "no telemetry collected", ha="center", va="center",
+                        transform=ax.transAxes, fontsize=9, color="0.5", style="italic")
+            else:
+                ax.plot(hv["rate_lambda"], hv[signal], marker="o", ms=4, color=color)
+                lambdas |= {float(x) for x in hv["rate_lambda"]}
+            if row == 0:
+                ax.set_title(label)
+            if _ylim:
+                ax.set_ylim(*_ylim)
+    for row, (_signal, ylabel, _ylim) in enumerate(signals):
+        axes[row][0].set_ylabel(ylabel)
+    if lambdas:
+        ticks = sorted(lambdas)
+        for col in range(n):
+            axes[-1][col].set_xscale("log")
+            axes[-1][col].set_xlabel("λ (session starts/s)")
+            axes[-1][col].xaxis.set_major_locator(mticker.FixedLocator(ticks))
+            axes[-1][col].xaxis.set_minor_locator(mticker.NullLocator())
+            axes[-1][col].xaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _pos: f"{x:g}"))
+    fig.suptitle("Hardware telemetry vs λ — SLURM vs K8s")
+    fig.tight_layout()
+    return fig
+
+
 def hardware_figure(report: analysis.ReportData, signals: list[str]):
     """Telemetry signals vs λ — untapped-headroom overlay (§13.3/§15.1). None if no data."""
     fig, ax = plt.subplots(figsize=(7, 3.5))

@@ -48,6 +48,11 @@ pre-check, or any signal a stakeholder needs to see.
 - **Axes**: latency-y **log**; error-rate-y **linear, fixed 0–100 %**; queue-y **symlog** (logarithmic but
   the linear window near 0 keeps the "queue = 0" point visible).
 - **Throughput figure**: input tokens/s and output tokens/s vs λ (two panels).
+- **Hardware-telemetry figure**: one row per signal vs λ (at minimum **GPU utilization %** and **GPU power
+  W**; add memory/temperature as relevant). In comparisons, one column per variant (`hardware_compare_figure`).
+  A variant with no telemetry draws an **annotated empty panel** ("no telemetry collected"), never a dropped
+  or zero-valued panel — the plot mirror of the ❓ rule (absence ≠ a measured zero). Disclose in the narrative
+  which counters are coarse (`nvidia-smi`) vs unwired (DCGM SM-active / HBM BW / NVLink / PCIe → `NULL`).
 
 ## Comparison reports (multi-platform / multi-config)
 

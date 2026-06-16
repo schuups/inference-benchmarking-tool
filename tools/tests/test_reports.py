@@ -108,6 +108,30 @@ def test_hardware_vs_lambda(fixture_db):
     assert sm == {1.0: 35.0, 2.0: 60.0, 3.0: 85.0}  # headroom overlay data present
 
 
+def test_hardware_compare_figure_empty_panel(fixture_db):
+    # §15.1 side-by-side telemetry: a run with no telemetry (the cross-cluster K8s gap) must draw
+    # an annotated empty panel, not be dropped — absence is a disclosed gap, not a measured zero.
+    import dataclasses
+
+    import pandas as pd
+
+    from tools.reports import plots
+
+    path, exp = fixture_db
+    report = analysis.load_run(path, exp["run_a"])
+    empty = dataclasses.replace(report, hardware_stats=pd.DataFrame())
+    fig = plots.hardware_compare_figure(
+        [(report, plots.MODEL_COLOR, "SLURM"), (empty, plots.K8S_COLOR, "K8s")],
+        [("gpu_sm_active_pct", "SM active (%)", (0, 105))],
+    )
+    assert len(fig.axes) == 2  # 1 signal row × 2 platform columns
+    texts = [t.get_text() for t in fig.axes[1].texts]  # K8s column (empty)
+    assert "no telemetry collected" in texts
+    assert not fig.axes[0].texts or "no telemetry collected" not in [
+        t.get_text() for t in fig.axes[0].texts
+    ]  # SLURM column has data, no annotation
+
+
 def test_queue_depth_vs_lambda():
     # §12.2 / §15.1 queue panel: per-λ mean (sustained) + max (peak) requests_waiting.
     import pandas as pd

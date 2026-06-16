@@ -1,5 +1,20 @@
 # Apertus-70B (256k context) - single-node baseline (SLURM vs K8s)
 
+## Contents
+
+1. [Pre-checks (§8 foundation gate)](#1-pre-checks-8-foundation-gate)
+2. [Model-loading time breakdown (§10.2)](#2-model-loading-time-breakdown-102)
+3. [Loading scenario (the benchmark workload)](#3-loading-scenario-the-benchmark-workload)
+4. [Capacity & throughput](#4-capacity--throughput)
+5. [Hardware saturation (telemetry)](#5-hardware-saturation-telemetry)
+6. [Saturation onset = queue onset](#6-saturation-onset--queue-onset)
+7. [Quality (§13.5) — gsm8k](#7-quality-135--gsm8k)
+8. [Conclusions](#8-conclusions)
+   - [Supportable users at λ\* = 0.5 session-starts/s](#supportable-users-at-λ--05-session-startss-single-gh200-node)
+   - [Platform parity](#platform-parity)
+- [Disclosures & limitations](#disclosures--limitations-not-hidden-per-153)
+- [Provenance](#provenance)
+
 **Purpose.** Establish the **baseline operating point** for Apertus-70B served on a single GH200 node,
 run at a **256K context window to approximate the upcoming Apertus-70B 1.5** (which will natively
 support 256K). This checkpoint is natively 64K, so the 256K window is **forced**
@@ -15,7 +30,7 @@ the first run of a **SLURM-vs-K8s platform comparison** of the identical deploym
 | Engine | vLLM **0.23.0**, TP4 × PP1 on **one GH200 node** (4× GH200, intra-node NVLink-C2C) |
 | Image | `jfrog.svc.cscs.ch/ml/inference/vllm:0.23.0-alps.net.v1-gh200` — official base image vLLM 0.23 + [Alps Slingshot-11 netstack](../../tools/images/core/nvidia/netstack/v1) + baked Ray/NIXL/LMCache; self-contained (host CXI hook off) |
 | Storage | weights from the **capstor** Lustre HF-cache (`/capstor/scratch/.../ibt/hf-cache`); dataset pool on capstor. (K8s variant: weights from a `ceph-corbo-cephfs` PVC.) |
-| Platforms | **SLURM** (clariden) + **Kubernetes** (breithorn) — both complete; compared in §7 |
+| Platforms | **SLURM** (clariden) + **Kubernetes** (breithorn) — both complete; compared in §8 |
 
 ## 1. Pre-checks (§8 foundation gate)
 
@@ -23,7 +38,7 @@ The §8 gate runs **before** the engine is admitted, so neither platform's sweep
 foundation. **Both platforms passed and were admitted.** SLURM (one srun step per rank) persists the
 measured values to the run DB; **K8s ran the same gate in-pod (decision-9 `torch.distributed` probe) and
 was admitted, but the values are not persisted cross-cluster** — so only pass/admit is known for K8s (an
-instrumentation gap to close, §7).
+instrumentation gap to close, §8).
 
 | check | SLURM (clariden) | K8s (breithorn) | reference |
 |---|---|---|---|
@@ -55,7 +70,7 @@ both → the capacity numbers below reflect the engine, not a broken substrate.
 not captured**: the engine is deployed externally (kubectl) and finishes loading *before* the benchmarker
 attaches over the ingress, so the breakdown isn't read cross-cluster — the recorded `model_load_total_s`
 (110 s) is only the benchmarker's *ingress-readiness wait*, not the model load (follow-up: parse
-`kubectl logs`, §7). On SLURM, the effective weight-load bandwidth (0.30 GB/s) is **well below** the §8
+`kubectl logs`, §8). On SLURM, the effective weight-load bandwidth (0.30 GB/s) is **well below** the §8
 parallel-read floor on the same mount (1.01 GB/s) → the load is **deserialization / single-stream-limited,
 not mount-bandwidth-bound** (a cold-start optimisation target, not a storage problem).
 
@@ -120,7 +135,38 @@ ceiling. It is **not monotonic in λ**: past the knee, multi-turn sessions throt
 wait on slow responses) and deep overload thrashes (preemption), so delivered tokens/s flatten and dip
 rather than climb. (Input ≫ output: the agentic share carries large prompts vs short forced outputs.)
 
-## 5. Saturation onset = queue onset
+## 5. Hardware saturation (telemetry)
+
+GPU telemetry sampled during the sweep (§13.3), **SLURM (left) vs K8s (right)** — utilization and power
+per λ; the K8s panels are empty (no telemetry collected, see below):
+
+![hardware telemetry vs λ — SLURM (left) vs K8s (right)](images/baseline-hardware.png)
+
+| signal (SLURM, per λ) | λ=0.5 | λ=1.0 | λ=2.0 |
+|---|---|---|---|
+| GPU utilization (mean %) | **99.2** | 99.8 | 99.9 |
+| GPU power (mean W/GPU) | **515.0** | 511.7 | 511.7 |
+| GPU memory (mean %) | 91.7 | 91.7 | 91.7 |
+| GPU temperature (mean °C) | 47.2 | 48.2 | 48.6 |
+
+**The GH200 is compute-bound from the lightest load.** GPU utilization sits at **~99–100% already at
+λ\*=0.5** — the level where every SLO still passes — and stays there as load climbs. So the SLO knee past
+λ\* is **not** a "spare-compute-then-cliff": the compute is pinned throughout, and what changes above λ\* is
+**queueing** (§6), not utilization. This is consistent with the flat token throughput at the engine ceiling
+(§4). Power is steady at **~512 W/GPU** (peak 563.9 W) with temperatures ~47–49 °C — **no thermal
+throttling**, and well within the GH200 envelope. GPU memory reads a constant **91.7%** because the KV cache
+is **pre-allocated** at startup (`gpu_memory_utilization=0.90`), so it is "full" by construction rather than
+a load-dependent signal.
+
+**Telemetry limits (disclosed, not findings):** the image ships only coarse `nvidia-smi` counters
+(utilization / power / memory / temperature). The fine-grained **DCGM** signals — SM-active %, tensor-core
+active %, HBM bandwidth, NVLink and PCIe — are **not wired** in this image (`NULL` in `hardware_stats`), so
+GPU utilization **cannot be decomposed** into SM-active vs memory-stall time (a profiling follow-up, §8).
+**K8s collected no telemetry at all**: the in-pod sampler writes the pod's `/results` PVC, which the
+clariden benchmarker never reads cross-cluster (same gap as §1/§2; K8s `hardware_stats`=0 rows) — hence the
+empty right-hand panels.
+
+## 6. Saturation onset = queue onset
 
 Mean / max request queue (`requests_waiting`), per platform as **SLURM / K8s**:
 
@@ -134,7 +180,7 @@ On both platforms the queue is empty at λ=0.5 (engine keeps up) and jumps the i
 TTFT climbs because requests wait. The early-stop used this directly: λ=1.0 saturated (queue non-empty
 84% of measurement scrapes on both), λ=2.0 confirmed (SLURM 88% / K8s 87%) → higher λ skipped.
 
-## 6. Quality (§13.5) — gsm8k
+## 7. Quality (§13.5) — gsm8k
 
 | stage | sample | SLURM | K8s | floor |
 |---|---|---|---|---|
@@ -145,7 +191,7 @@ Quality is **identical across platforms** — Stage-B 0.7187 on both (determinis
 difference (0.732 vs 0.738) is sampling noise. This is the baseline quality the fp8 / KV-offload cells
 will be measured against (capacity-vs-quality, §15.1).
 
-## 7. Conclusions
+## 8. Conclusions
 
 ### Supportable users at λ\* = 0.5 session-starts/s (single GH200 node)
 
@@ -159,12 +205,22 @@ will be measured against (capacity-vs-quality, §15.1).
   and those per-class rates are not yet validated (§15.1, TODO) — so treat the population as *illustrative*
   and the **concurrent ≈ 42** as the firm number.
 
+**Burst caveat — these figures assume steady arrivals.** λ\*=0.5 and the ≈42 concurrent users are an
+**average-rate** ceiling under the swept **Poisson** arrival process. The GPU is already compute-bound at
+λ\* (utilization ~99–100%, §5), so there is **no spare compute to absorb a burst**: if many sessions start
+**at the same instant** — even while the long-run average stays at or below λ\* — the request queue can spike
+non-empty and **transiently breach the TTFT/TPOT SLOs** until it drains. The supportable-user numbers are
+therefore a **sustained-load** capacity, not a guarantee against coincident bursts; protecting the SLO under
+bursty arrivals needs admission control / rate-limiting at the ingress, or headroom (a lower target λ or more
+replicas). Burst-arrival behaviour was not directly swept here (Poisson only) — a burst-aware arrival profile
+is a follow-up (§10.3, TODO).
+
 Caveats: λ\* is **coarse** (one sub-knee point — a refinement pass would sharpen it and likely *raise* the
 estimate), and these are **single-node** figures (replicas scale ≈ linearly, modulo ingress/routing).
 
 ### Platform parity
 
-Across every section above (capacity §4, queue §5, quality §6), **SLURM and K8s land at the same operating
+Across every section above (capacity §4, hardware §5, queue §6, quality §7), **SLURM and K8s land at the same operating
 point**: λ\*=0.5 on both, the same λ=1.0 saturation knee (queue-84%), and **identical Stage-B quality**
 (0.7187, deterministic gsm8k). K8s adds only a **modest fixed serving overhead at λ\*** (TTFT p50 +~14 ms,
 chat p95 569 vs 461 ms — both well within SLO) from the ingress + cross-cluster load-gen hop; at saturation
@@ -177,8 +233,10 @@ externally so the benchmarker can't read in-pod state):
 - **Pre-check values** not persisted (§1) — only pass/admit known.
 - **Model-loading breakdown** not captured (§2) — `model_load_total_s`=110 s is just the ingress wait;
   follow-up: parse `kubectl logs`.
-- **Hardware telemetry** empty — the in-pod sampler writes the pod's `/results` PVC, which the clariden
-  benchmarker doesn't read (K8s `hardware_stats`=0 rows; SLURM has the full §13.3 sampling).
+- **Hardware telemetry** empty (§5) — the in-pod sampler writes the pod's `/results` PVC, which the clariden
+  benchmarker doesn't read (K8s `hardware_stats`=0 rows; SLURM has the full §13.3 sampling). Even on SLURM,
+  only coarse `nvidia-smi` counters are captured; the DCGM signals (SM-active, HBM BW, NVLink, PCIe) are not
+  wired in this image.
 
 ## Disclosures & limitations (not hidden, per §15.3)
 
