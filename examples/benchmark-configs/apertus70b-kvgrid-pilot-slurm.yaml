@@ -1,0 +1,111 @@
+# Apertus-70B KV-grid PILOT — clariden (SLURM). 2 cells, cheap, de-risks the full grid.
+#
+# Purpose (operator 2026-06-16): before generating the ~180k-record shared pool and running the
+# full 8-cell single-node grid, validate the machinery at small scale on real hardware:
+#   - cell 1 = baseline (offload off, dtype default)
+#   - cell 2 = HEAVIEST combo (native offload 400 GiB / 100 GiB-per-GPU on Grace DRAM + KV fp8)
+#     → confirms the Grace-DRAM offload actually fits alongside the OS/dataset-gen, fp8 KV is
+#     accepted on SM90, and both flags render+serve on the 0.23 image.
+# Also exercises: §8 prechecks (incl. the storage-mount-log fix), the primer clamp at 256K,
+# the gsm8k Stage-A quality path against a 70B endpoint, and — by staging cell 1's pool into
+# cell 2's run_dir — the pre-staged dataset POOL REUSE the campaign depends on (§11.4).
+#
+# Small + short: num_prompts 4000, λ=[0.5, 2], warmup 60 / measurement 120 → ~15 min/cell.
+# Identical engine config to the full grid (TP4, 256K, no workaround flags) so bring-up is
+# validated exactly as it will run. Stage-B compare skipped (already proven on 8B, both platforms).
+#
+# Validate: .venv/bin/python -m tools.common.config examples/benchmark-configs/apertus70b-kvgrid-pilot-slurm.yaml
+
+name: apertus70b-kvgrid-pilot-slurm
+description: >
+  2-cell SLURM pilot for the Apertus-70B single-node KV grid: baseline vs native-offload+fp8.
+  De-risks Grace-DRAM offload fit, fp8 acceptance, §8 prechecks, primer clamp, quality gate,
+  and dataset pool reuse before the full ~180k-record 8-cell campaign.
+
+deployments:
+  # ---- cell 1: offload OFF, dtype default (baseline) ----
+  - target: clariden
+    backend: vllm
+    backend_version: "0.23.0"
+    image: jfrog.svc.cscs.ch/ml/inference/vllm:0.23.0-alps.net.v1-gh200
+    model: swiss-ai/Apertus-70B-Instruct-2509
+    backend_config:
+      tensor_parallel_size: 4
+      pipeline_parallel_size: 1
+      max_model_len: 262144
+      max_num_batched_tokens: 16384
+      gpu_memory_utilization: 0.90
+      enable_prefix_caching: true
+      safetensors_load_strategy: prefetch
+  # ---- cell 2: native offload (400 GiB Grace DRAM) + fp8 (the heaviest combo) ----
+  - target: clariden
+    backend: vllm
+    backend_version: "0.23.0"
+    image: jfrog.svc.cscs.ch/ml/inference/vllm:0.23.0-alps.net.v1-gh200
+    model: swiss-ai/Apertus-70B-Instruct-2509
+    backend_config:
+      tensor_parallel_size: 4
+      pipeline_parallel_size: 1
+      max_model_len: 262144
+      max_num_batched_tokens: 16384
+      gpu_memory_utilization: 0.90
+      enable_prefix_caching: true
+      safetensors_load_strategy: prefetch
+      kv_offloading_size: 400
+      kv_offloading_backend: native
+      kv_cache_dtype: fp8
+
+dataset_config:                        # same mix as the grid; small pool (pilot)
+  scenario_mix:
+    - scenario: chat-short-turns
+      weight: 0.8
+      input_length:
+        distribution: lognormal
+        params: { mean: 500, sigma: 0.5, min: 50, max: 2000 }
+    - scenario: agentic-coding
+      weight: 0.2
+      input_length:
+        distribution: lognormal
+        params: { mean: 10000, sigma: 0.5, min: 4000, max: 16000 }
+  # Σλ·(warmup+measurement)·E[turns≈6] = 2.5 × 180 × 6 ≈ 2700; 4000 leaves margin.
+  num_prompts: 4000
+  seed: 1234
+  output_length_mode: forced
+
+rate_levels: [0.5, 2]
+
+arrival_process:
+  kind: poisson
+
+routing_strategy: random
+
+phases:
+  warmup_s: 60
+  measurement_s: 120
+  drain_timeout_s: 120
+  request_timeout_s: 300
+  server_ready_timeout_s: 2400
+
+slos:
+  - { scenario: chat-short-turns, metric: ttft_ms,        percentile: p95, threshold: 800 }
+  - { scenario: chat-short-turns, metric: tpot_ms,        percentile: p95, threshold: 80 }
+  - { scenario: agentic-coding,   metric: session_e2e_ms, percentile: p90, threshold: 600000 }
+  - { scenario: all,              metric: error_rate_pct,                  threshold: 1.0 }
+
+quality_eval:                          # validate the lm-eval path against a 70B endpoint
+  gate:
+    suite: gsm8k
+    sample_size: 50                    # small — pilot validates the path, not the score
+    floor: 0.20
+    on_fail: continue                  # pilot — surface the row, don't abort on a low score
+  skip_quality_gate: false
+  skip_quality_compare: true           # Stage-B already proven on 8B (both platforms)
+
+system_prechecks:
+  skip_system_prechecks: false
+  system_prechecks_on_warn: continue
+  system_prechecks_on_fail: abort
+  collective_tests_version: "2.18.2"
+  shmem_required: false
+
+server_time_limit: "01:30:00"
