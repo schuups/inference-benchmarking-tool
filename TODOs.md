@@ -38,10 +38,10 @@
 ## Experiment Execution
 
 - [ ] **E1-surfaced follow-ups (2026-06-14)** — found driving the first clariden run:
-  - **Primer must cap its prompt to `max_model_len`** (§10.3, `load_gen/readiness.py`): the
-    primer sends a fixed 20K-token prompt; with `max_model_len=16384` the engine returned
-    http_400 and the primer warned (non-fatal, but it didn't warm the inductor compile).
-    Clamp `prompt_tokens` to the served context (read from the engine, or pass it in).
+  - [x] **Primer caps its prompt to `max_model_len`** ✅ DONE 2026-06-16 (§10.3,
+    `load_gen/readiness.py`): `run_primer(max_model_len=…)` clamps the primer + probe lengths
+    (minus a small chat-template headroom), threaded from `backend_config.max_model_len` by the
+    orchestrator. Mock server gained an http_400 over-length path + a regression test.
   - **M7 re-run into a dirty run dir crashes** (`orchestrator._persist_experiment`): a
     pre-existing `run_<id>.db` makes the plain `INSERT` into `experiments` hit a UNIQUE
     constraint. Normal flow uses a fresh run_id per run, but make it robust — clear/replace
@@ -56,6 +56,11 @@
     E2) and drop the skip once the run is on the netstack image.
 - [ ] Run NCCL benchmarks (using the same Docker images) before inference benchmarks
 - [ ] Support testing endpoints provided via URL (not only SLURM and Kubernetes deployments)
+- [ ] **Single-node KV-cache grid — knee refinement (same experiment)** — the first pass uses
+  λ=[0.5,1,2,4,8,16] to bracket the knee (`apertus70b-kvgrid-single-node-{slurm,k8s}.yaml`). After
+  pass 1, add λ levels around the located λ* (per cell / platform) and re-run to resolve the knee —
+  reuse the same staged dataset pool (extend `num_prompts` only if the refined levels push total
+  session starts past the pool size). Then the 2-node grid, then the LMCache 3rd axis (above).
 
 ### Cold-start optimisation experiment groups
 
@@ -74,8 +79,10 @@
 
 ### Backend feature experiments
 
-- [ ] **Test `--kv-offloading-size 400`** for GH200 KV extension via Grace DRAM
-  (§16.2, §17.1). Implementation complete; not yet run.
+- [~] **Test `--kv-offloading-size 400`** for GH200 KV extension via Grace DRAM
+  (§16.2, §17.1). Implementation complete; **wired into the single-node KV-cache grid**
+  (`apertus70b-kvgrid-single-node-{slurm,k8s}.yaml`, cells 3–4, `native` backend) — runs as
+  part of that campaign.
 - [ ] **Session affinity experiment** (§12.4, §14.3 `session_idx`) — compare random vs
   `session_affinity` routing for multi-instance deployments to quantify prefix-cache
   benefit in production. Now first-class: §14.3 carries `session_idx` and `turn_idx`.
@@ -87,14 +94,17 @@
   backend + nixl_agent import verified at runtime 2026-06-16). **Still to do: validate
   inter-node KV transfer over Slingshot** (UCX transport) in an actual P/D disagg run —
   the image's 2-node sanity only covers NCCL/OSU/NVSHMEM, not the NIXL data path.
-- [ ] **LMCache KV-offloading backend** — evaluate `--kv-offloading-backend=lmcache` as
-  an alternative to the v1 default `native` (§16.2 `kv_offloading_backend`). Goal: quantify
-  bandwidth + concurrency trade-offs vs `native` on Grace DRAM. When wired up, re-add
-  `"lmcache"` to the §16.2 `kv_offloading_backend` notes. LMCache is now **baked into**
-  `nvidia-gh200-vllm-0.23.0-net.v1` (lmcache 0.4.6, variant/hooks.d/30-lmcache.sh; native
-  c_ops backend loads at runtime on GH200, verified 2026-06-16). Pinned to 0.4.6 = newest
-  aarch64-installable via the JFrog PyPI mirror (0.4.7 ships x86-only wheels); revisit when
-  a newer aarch64 build appears.
+- [ ] **LMCache as a 3rd KV-offload axis** — the planned fast-follow to the single-node
+  KV grid (disabled / native → + lmcache). **Mechanism correction (2026-06-16):** LMCache is
+  NOT a `--kv-offloading-backend` value — in vLLM 0.23 it's a KV *connector*
+  (`LMCacheConnectorV1` / `kv_connector_module_path`), activated via `--kv-transfer-config`
+  + `LMCACHE_*` env. So enabling it needs a small tool addition: a `BackendConfig` connector
+  field (renders `--kv-transfer-config`) + LMCache env injection in the engine templates +
+  a validation smoke. Goal: quantify offload+reuse bandwidth/concurrency vs `native` Grace-DRAM
+  spill. LMCache is already **baked into** `nvidia-gh200-vllm-0.23.0-net.v1` (lmcache 0.4.6,
+  variant/hooks.d/30-lmcache.sh; native c_ops backend loads on GH200, verified 2026-06-16;
+  pinned 0.4.6 = newest aarch64-installable via the JFrog mirror, 0.4.7 is x86-only) — only the
+  tool plumbing is missing. Shares the connector surface with the NIXL item above.
 - [ ] **DeepSeek `thinking_mode` as BackendConfig knob** — DeepSeek-V4-Pro exposes
   three reasoning-effort modes (Non-think / Think High / Think Max) via the
   `thinking_mode` runtime parameter. Wire it as a sweepable BackendConfig field
@@ -155,11 +165,12 @@
   then drop the inject. ✅ DONE 2026-06-16 for `nvidia-gh200-vllm-0.23.0-net.v1` (ray 2.55.1 baked via
 variant/hooks.d/10-ray.sh; the image also now ships NIXL + LMCache — see the NIXL/LMCache items above).
 **Follow-up: drop the per-run ray inject from the engine step when running on the 0.23.0 image** (still
-needed on the 0.22.1 image, which has no ray). (b) **Root-cause `--disable-custom-all-reduce` + `--enforce-eager`** — both are now
-  `BackendConfig` options (set in `e2b-multinode-clariden.yaml`) working around a custom-all-reduce illegal
-  memory access and a CUDA-graph-capture `CUBLAS_STATUS_EXECUTION_FAILED` on this image's cross-node path;
-  investigate why (cross-node NCCL itself is fine — §8 8-rank prechecks pass) and lift the workarounds if
-  fixable (enforce-eager costs CUDA-graph perf). (c) **70B weight load is storage-bound** (95 s for 16.45
+needed on the 0.22.1 image, which has no ray). (b) [x] **`--disable-custom-all-reduce` + `--enforce-eager` workarounds — RESOLVED on 0.23**
+  ✅ 2026-06-16 (clariden job 2542392): the E2b faults (custom-all-reduce illegal memory access +
+  CUDA-graph `CUBLAS_STATUS_EXECUTION_FAILED`) were a **0.22.1** problem. The own 0.23 image brings up
+  Apertus-70B TP4×PP2 (2-node, Ray) with custom all-reduce + CUDA graphs **ON**, zero faults
+  (`Graph capturing finished`, `custom_all_reduce Registering … addresses`). New multi-node configs on
+  0.23 carry NEITHER flag (both `BackendConfig` options still exist for the legacy 0.22.1 path). (c) **70B weight load is storage-bound** (95 s for 16.45
   GiB/worker ≈ single-stream capstor rate; 8 workers contend) — try `safetensors_load_strategy=prefetch`
   and/or iopsstor, and compare against the §8.1 `Buffered read`.
 
