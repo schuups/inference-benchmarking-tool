@@ -24,7 +24,10 @@ def set_style() -> None:
     )
 
 
-MODEL_COLOR = "#1f77b4"  # Apertus-70B → blue (STYLE.md); a 2nd platform overlays in a 2nd colour.
+# Coordinated, colour-blind-safe platform palette (Okabe-Ito) chosen to read well side by side and
+# against the red SLO line (#cc0000): SLURM strong blue, K8s teal — both cool, distinct, far from red.
+MODEL_COLOR = "#0072B2"   # SLURM / default (Okabe-Ito blue)
+K8S_COLOR = "#009E73"     # K8s (Okabe-Ito teal)
 
 
 def latency_figure(
