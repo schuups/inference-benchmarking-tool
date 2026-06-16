@@ -108,6 +108,28 @@ scrapes), λ=2.0 confirmed (88%) → higher λ skipped.
 
 This is the baseline quality the fp8 / KV-offload cells will be measured against (capacity-vs-quality, §15.1).
 
+## 7. Platform comparison — SLURM vs K8s (preliminary)
+
+The **identical** baseline (same model, image, BackendConfig, 256K window, and the shared 100k pool) is
+being run on **Kubernetes (breithorn)** — engine deployed as a namespaced `ml` manifest, load-generated
+from a clariden SLURM benchmarker over the breithorn ingress. **This is preliminary: the K8s run is
+still in progress** (λ=2.0 + early-stop + Stage-B pending). The full latency/queue **overlay** (K8s in a
+second colour on §4/§5) and the side-by-side capacity (λ\*) / loading tables will be added on completion.
+
+What matches so far:
+
+| | SLURM (clariden) | K8s (breithorn) |
+|---|---|---|
+| §8 pre-checks | all pass | passed — engine admitted (decision-9 torch.distributed probe in-pod) |
+| 256K bring-up | clean | clean — weights from a CephFS PVC; `Using max model len 262144` |
+| gsm8k Stage-A gate | 0.732 | **0.738** |
+| knee / saturation onset | λ=1.0 saturated (queue 84%) | λ=1.0 saturated (queue 84%) |
+
+**Early signal — platform parity.** The quality gate and the saturation knee are essentially identical
+across the two platforms, as expected for the same engine/model/config: K8s adds ingress + cert +
+cross-cluster load-gen on top, but lands at the same operating point. Final λ\* and the latency/loading
+deltas follow once the K8s sweep + Stage-B finish.
+
 ## Disclosures & limitations (not hidden, per §15.3)
 
 - **Forced 256K on a natively-64K checkpoint.** `config.json` caps at 64K (`max_position_embeddings=65536`);
