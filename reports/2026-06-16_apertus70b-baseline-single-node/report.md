@@ -137,8 +137,8 @@ rather than climb. (Input ≫ output: the agentic share carries large prompts vs
 
 ## 5. Hardware saturation (telemetry)
 
-GPU telemetry sampled during the sweep (§13.3), **SLURM (left) vs K8s (right)** — utilization and power
-per λ; the K8s panels are empty (no telemetry collected, see below):
+GPU telemetry sampled during the sweep (§13.3), **SLURM (left) vs K8s (right)** — GPU utilization, power
+and memory, plus host RAM, per λ; the K8s panels are empty (no telemetry collected, see below):
 
 ![hardware telemetry vs λ — SLURM (left) vs K8s (right)](images/baseline-hardware.png)
 
@@ -147,6 +147,7 @@ per λ; the K8s panels are empty (no telemetry collected, see below):
 | GPU utilization (mean %) | **99.2** | 99.8 | 99.9 |
 | GPU power (mean W/GPU) | **515.0** | 511.7 | 511.7 |
 | GPU memory (mean %) | 91.7 | 91.7 | 91.7 |
+| host RAM (mean %) | 58.9 | 58.4 | 57.1 |
 | GPU temperature (mean °C) | 47.2 | 48.2 | 48.6 |
 
 **The GH200 is never idle, even at the lightest load.** GPU utilization sits at **~99–100% already at
@@ -161,6 +162,8 @@ engine ceiling (§4), and the SLO knee past λ\* is **queueing** (§6), not a dr
 steady at **~512 W/GPU** (peak 563.9 W) with temperatures ~47–49 °C — **no thermal throttling**, well within
 the GH200 envelope. GPU memory reads a constant **91.7%** because the KV cache is **pre-allocated** at
 startup (`gpu_memory_utilization=0.90`), so it is "full" by construction rather than a load-dependent signal.
+**Host RAM** holds steady at **~57–59%** with no upward trend under load — no host-memory pressure at the
+baseline; this is the headroom the KV-offload cells of the grid will spend when they spill KV to Grace DRAM.
 
 **Telemetry limits (disclosed, not findings):** the image ships only coarse `nvidia-smi` counters
 (utilization / power / memory / temperature). The fine-grained **DCGM** signals — SM-active %, tensor-core
