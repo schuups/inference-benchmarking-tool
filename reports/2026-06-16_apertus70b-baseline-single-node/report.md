@@ -1,4 +1,4 @@
-# Apertus-70B — single-node baseline (256K window): SLURM vs K8s
+# Apertus-70B (256k context) - single-node baseline (SLURM vs K8s)
 
 **Curated synthesis (§15.3)** of the first full-settings capacity+quality run of the KV-cache grid's
 **baseline cell** (KV-offloading *off*, KV-dtype *default*). This is the reference against which the
