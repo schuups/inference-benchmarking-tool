@@ -92,10 +92,18 @@
 
 ### Backend feature experiments
 
-- [~] **Test `--kv-offloading-size 400`** for GH200 KV extension via Grace DRAM
-  (§16.2, §17.1). Implementation complete; **wired into the single-node KV-cache grid**
-  (`apertus70b-kvgrid-single-node-{slurm,k8s}.yaml`, cells 3–4, `native` backend) — runs as
-  part of that campaign.
+- [~] **Right-size `--kv-offloading-size` at the 256K window** for GH200 KV extension via Grace
+  DRAM (§16.2, §17.1). Implementation complete; wired into the single-node KV-cache grid
+  (`apertus70b-kvgrid-single-node-{slurm,k8s}.yaml`, cells 3–4, `native`). **PILOT FINDING
+  2026-06-16 (job 2542951/engine 2542954):** `kv_offloading_size: 400` (100 GiB/GPU) **OOM-kills
+  the GH200 node's host memory** at `max_model_len=262144` + fp8 — 70B weights load fine, then
+  `CPUOffloadingSpec` allocates a per-worker cross-layer KV tensor of shape (80007,2,80,2,16,128)
+  ≈ 50 GB × 4 workers in pinned host memory and the node OOMs (`oom_kill … Out Of Memory`). The
+  SPEC's standardized 400 GiB does NOT fit alongside a 256K window on this node. **Before running
+  the offload cells: characterise the node's available host/Grace DRAM and pick a `kv_offloading_size`
+  that fits** (the offloaded-KV footprint scales with the window, so 256K needs a much smaller budget
+  than a 64K run would) — and consider whether the offload axis should use a window-proportional
+  default. Baseline (no offload) is unaffected.
 - [ ] **Session affinity experiment** (§12.4, §14.3 `session_idx`) — compare random vs
   `session_affinity` routing for multi-instance deployments to quantify prefix-cache
   benefit in production. Now first-class: §14.3 carries `session_idx` and `turn_idx`.
