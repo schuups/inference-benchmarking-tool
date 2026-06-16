@@ -167,6 +167,30 @@ def queue_depth_vs_lambda(ss: pd.DataFrame) -> pd.DataFrame:
     )
 
 
+# --------------------------------------------------------------- token throughput
+
+
+def throughput_vs_lambda(req: pd.DataFrame, measurement_s: float) -> pd.DataFrame:
+    """Input- and output-token throughput per λ (tokens/s): the level's measurement-window
+    `input_tokens` / `output_tokens` summed and divided by `measurement_s`. Rises with λ and then
+    plateaus at the engine's ceiling once past the knee. `req` = the measurement-phase requests."""
+    cols = ["rate_lambda", "input_tok_s", "output_tok_s", "n"]
+    if req is None or req.empty or measurement_s <= 0:
+        return pd.DataFrame(columns=cols)
+    rows = []
+    for lam, grp in req.groupby("rate_lambda"):
+        rows.append({
+            "rate_lambda": float(lam),
+            "input_tok_s": float(grp["input_tokens"].sum()) / measurement_s,
+            "output_tok_s": float(grp["output_tokens"].sum()) / measurement_s,
+            "n": int(len(grp)),
+        })
+    return (
+        pd.DataFrame(rows).sort_values("rate_lambda").reset_index(drop=True)
+        if rows else pd.DataFrame(columns=cols)
+    )
+
+
 # --------------------------------------------------------------- session metrics
 
 

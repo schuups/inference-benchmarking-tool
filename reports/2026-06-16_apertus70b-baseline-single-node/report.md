@@ -19,34 +19,45 @@ the first run of a **SLURM-vs-K8s platform comparison** of the identical deploym
 
 ## 1. Pre-checks (§8 foundation gate)
 
-The §8 gate runs **before** the engine is admitted, so the sweep can never measure a degraded
-foundation. All checks passed on the populated 1-node clariden reference:
+The §8 gate runs **before** the engine is admitted, so neither platform's sweep can measure a degraded
+foundation. **Both platforms passed and were admitted.** SLURM (one srun step per rank) persists the
+measured values to the run DB; **K8s ran the same gate in-pod (decision-9 `torch.distributed` probe) and
+was admitted, but the values are not persisted cross-cluster** — so only pass/admit is known for K8s (an
+instrumentation gap to close, §7).
 
-| check | measured | reference | verdict |
+| check | SLURM (clariden) | K8s (breithorn) | reference |
 |---|---|---|---|
-| NCCL all-reduce @128 MiB | 309.5 GB/s | 317.7 | ✅ pass |
-| NCCL all-gather @128 MiB | 278.9 GB/s | 283.5 | ✅ pass |
-| NCCL all-to-all @128 MiB | 307.8 GB/s | 306.2 | ✅ pass |
-| NVSHMEM all-to-all latency @128 KiB *(not relevant for this model)* | 12.68 µs | — | ✅ pass |
-| capstor sequential read (single-stream O_DIRECT) | 0.197 GB/s | floor 0.063 | ✅ pass |
-| capstor parallel read (8-stream O_DIRECT) | 1.01 GB/s | — | ✅ pass |
-| capstor buffered read (readahead) | 14.32 GB/s | — | ✅ pass |
+| NCCL all-reduce @128 MiB | 309.5 GB/s ✅ | ❓ not captured | 317.7 |
+| NCCL all-gather @128 MiB | 278.9 GB/s ✅ | ❓ not captured | 283.5 |
+| NCCL all-to-all @128 MiB | 307.8 GB/s ✅ | ❓ not captured | 306.2 |
+| NVSHMEM all-to-all latency @128 KiB *(not relevant for this model)* | 12.68 µs ✅ | ❓ not captured | — |
+| sequential read (single-stream O_DIRECT) | 0.197 GB/s ✅ (capstor) | ❓ not captured (CephFS PVC) | floor 0.063 |
+| parallel read (8-stream O_DIRECT) | 1.01 GB/s ✅ (capstor) | ❓ not captured (CephFS PVC) | — |
+| buffered read (readahead) | 14.32 GB/s ✅ (capstor) | ❓ not captured (CephFS PVC) | — |
 
-Intra-node NVLink collectives are at reference; storage is healthy (well above the degraded-capstor
-floor). Foundation sound → the capacity numbers below reflect the engine, not a broken substrate.
+*(K8s passed the gate and was admitted — only the numeric values weren't persisted cross-cluster; ❓ = "not collected", not "failed".)*
 
-## 2. Model-loading time breakdown (§10.2) — time-to-ready 314 s
+SLURM: intra-node NVLink collectives at reference; capstor storage healthy (well above the degraded
+floor). K8s storage rides a different mount (the `ceph-corbo-cephfs` weights PVC). Foundation sound on
+both → the capacity numbers below reflect the engine, not a broken substrate.
 
-| component | time | note |
+## 2. Model-loading time breakdown (§10.2)
+
+| component | SLURM (clariden) | K8s (breithorn) |
 |---|---|---|
-| weights load | 108 s | 32.9 GiB → **0.30 GB/s effective** |
-| engine init (profile + KV alloc + warmup) | 37 s | |
-| CUDA-graph capture | 14 s | full graphs, custom all-reduce **on** (no E2b workarounds on 0.23) |
-| inductor compile | 12 s | |
+| **time-to-ready** | **314 s** | *not captured* (see below) |
+| weights load | 108 s — 32.9 GiB → **0.30 GB/s effective** | — |
+| engine init (profile + KV alloc + warmup) | 37 s | — |
+| CUDA-graph capture | 14 s — full graphs, custom all-reduce **on** (no E2b workarounds on 0.23) | — |
+| inductor compile | 12 s | — |
 
-The effective weight-load bandwidth (0.30 GB/s) is **well below** the §8 parallel-read floor on the same
-mount (1.01 GB/s), so the load is **deserialization / single-stream-limited, not mount-bandwidth-bound**
-— a target for the cold-start optimisation track, not a storage problem.
+**SLURM** has the full breakdown because the benchmarker spawns the engine and parses its log. **K8s is
+not captured**: the engine is deployed externally (kubectl) and finishes loading *before* the benchmarker
+attaches over the ingress, so the breakdown isn't read cross-cluster — the recorded `model_load_total_s`
+(110 s) is only the benchmarker's *ingress-readiness wait*, not the model load (follow-up: parse
+`kubectl logs`, §7). On SLURM, the effective weight-load bandwidth (0.30 GB/s) is **well below** the §8
+parallel-read floor on the same mount (1.01 GB/s) → the load is **deserialization / single-stream-limited,
+not mount-bandwidth-bound** (a cold-start optimisation target, not a storage problem).
 
 ## 3. Loading scenario (the benchmark workload)
 
@@ -68,78 +79,89 @@ The sweep uses the **sustained-queue adaptive early-stop** (§12.2): once the re
 persistently non-empty for two consecutive levels, the remaining higher λ are skipped as redundant
 deep-overload.
 
-## 4. Capacity — per-class SLO attainment
+**The exact same load was offered to both deployment targets.** SLURM and K8s used the **same
+byte-identical 100k pool** (generated once on capstor, reused), the **same** arrival process, λ ladder,
+phase timings, and seeds — so any SLURM-vs-K8s difference in the results is the **serving stack**, not the
+workload.
 
-![ttft vs λ — latency / error / queue (shared λ axis), SLURM (blue) vs K8s (orange)](images/baseline-ttft.png)
+## 4. Capacity & throughput
 
-*(TPOT companion: `images/baseline-tpot.png`. The figure overlays both platforms — SLURM blue, K8s
-orange — which are nearly coincident; per-platform numbers below are SLURM, the side-by-side is §7.)*
+**TTFT** (time-to-first-token) — **SLURM (left) vs K8s (right)**, panels latency / error / queue, y-axes
+shared per row:
 
-- **Supportable load: λ\* = 0.5 session-starts/s** — the only swept level meeting **all** per-class SLOs.
+![ttft vs λ — SLURM (left) vs K8s (right)](images/baseline-ttft.png)
 
-| λ (sessions/s) | chat TTFT p95 (SLO 800 ms) | chat TPOT p95 (SLO 80 ms) | agentic session-e2e p90 (SLO 600 s) | error % (SLO 1%) | verdict |
+**TPOT** (time-per-output-token) — same side-by-side layout:
+
+![tpot vs λ — SLURM (left) vs K8s (right)](images/baseline-tpot.png)
+
+- **Supportable load: λ\* = 0.5 session-starts/s on BOTH platforms** — the only swept level meeting **all**
+  per-class SLOs. Values shown per platform as **SLURM / K8s**:
+
+| λ (sessions/s) | chat TTFT p95 (SLO 800 ms) | chat TPOT p95 (SLO 80 ms) | agentic e2e p90 (SLO 600 s) | error % (SLO 1%) | verdict (both) |
 |---|---|---|---|---|---|
-| **0.5** | **461 ms** ✅ | **32 ms** ✅ | **208 s** ✅ | **0.0%** ✅ | ✅ **meets all SLOs (λ\*)** |
-| 1.0 | 198 000 ms ❌ | 131 ms ❌ | 639 s ❌ | 7.7% ❌ | ❌ saturated |
-| 2.0 | 238 000 ms ❌ | 276 ms ❌ | 826 s ❌ | 72% ❌ | ❌ deep overload |
-| 4 / 8 / 16 | — | — | — | — | **skipped** (adaptive early-stop) |
+| **0.5** | **461 / 569 ms** ✅ | **32 / 33 ms** ✅ | **208 / 215 s** ✅ | **0 / 0 %** ✅ | ✅ **λ\*** |
+| 1.0 | 197 782 / 202 154 ms ❌ | 131 / 138 ms ❌ | 639 / 696 s ❌ | 8 / 8 % ❌ | ❌ saturated |
+| 2.0 | 238 519 / 236 238 ms ❌ | 276 / 281 ms ❌ | 826 / 837 s ❌ | 72 / 75 % ❌ | ❌ deep overload |
+| 4 / 8 / 16 | — | — | — | — | **skipped** (early-stop, both) |
 
-The transition is abrupt: at λ=1.0 the engine is already catastrophically saturated (TTFT p95 jumps from
-0.46 s to ~198 s). λ\* is **bracketed but coarse** — only one sub-knee point (0.5) was measured; a
+Both platforms behave identically: at λ=0.5 all SLOs pass (K8s marginally higher — e.g. chat TTFT p95
+569 vs 461 ms, still well under 800), and at λ=1.0 both are already catastrophically saturated (TTFT p95
+~0.5 s → ~200 s). λ\* is **bracketed but coarse** — only one sub-knee point (0.5) was measured; a
 refinement pass (λ = 0.6 / 0.7 / 0.8) is needed for a precise λ\*.
+
+**Token throughput** vs λ (input tokens/s top, output tokens/s bottom; SLURM blue, K8s orange):
+
+![throughput vs λ — input / output tokens/s, SLURM vs K8s](images/baseline-throughput.png)
+
+Token throughput sits at the **engine's ceiling** across the measured range (~10–11k input / ~1.3–1.8k
+output tokens/s), with **SLURM and K8s nearly identical** — the engine, not the platform, sets the
+ceiling. It is **not monotonic in λ**: past the knee, multi-turn sessions throttle (sequential follow-ups
+wait on slow responses) and deep overload thrashes (preemption), so delivered tokens/s flatten and dip
+rather than climb. (Input ≫ output: the agentic share carries large prompts vs short forced outputs.)
 
 ## 5. Saturation onset = queue onset
 
-| λ | mean queue (`requests_waiting`) | max queue | all SLOs met? |
-|---|---|---|---|
-| 0.5 | **0.0** | 0 | ✅ yes |
-| 1.0 | 164 | 468 | ❌ no |
-| 2.0 | 379 | 1150 | ❌ no |
+Mean / max request queue (`requests_waiting`), per platform as **SLURM / K8s**:
 
-The queue is empty at λ=0.5 (engine keeps up) and jumps the instant the SLOs break — TTFT climbs because
-requests wait. The early-stop used this directly: λ=1.0 saturated (queue non-empty 84% of measurement
-scrapes), λ=2.0 confirmed (88%) → higher λ skipped.
+| λ | mean queue — SLURM / K8s | max queue — SLURM / K8s | all SLOs met? (both) |
+|---|---|---|---|
+| 0.5 | **0.0 / 0.0** | 0 / 1 | ✅ yes |
+| 1.0 | 164 / 170 | 468 / 453 | ❌ no |
+| 2.0 | 379 / 385 | 1150 / 1135 | ❌ no |
+
+On both platforms the queue is empty at λ=0.5 (engine keeps up) and jumps the instant the SLOs break —
+TTFT climbs because requests wait. The early-stop used this directly: λ=1.0 saturated (queue non-empty
+84% of measurement scrapes on both), λ=2.0 confirmed (SLURM 88% / K8s 87%) → higher λ skipped.
 
 ## 6. Quality (§13.5) — gsm8k
 
-| stage | sample | score | floor | status |
+| stage | sample | SLURM | K8s | floor |
 |---|---|---|---|---|
-| Stage-A gate | 500 | **0.732** | 0.20 | pass |
-| Stage-B compare | 1319 (full) | **0.7187** | — | reference |
+| Stage-A gate | 500 | **0.732** (pass) | **0.738** (pass) | 0.20 |
+| Stage-B compare | 1319 (full) | **0.7187** | **0.7187** | — |
 
-This is the baseline quality the fp8 / KV-offload cells will be measured against (capacity-vs-quality, §15.1).
+Quality is **identical across platforms** — Stage-B 0.7187 on both (deterministic gsm8k); the gate
+difference (0.732 vs 0.738) is sampling noise. This is the baseline quality the fp8 / KV-offload cells
+will be measured against (capacity-vs-quality, §15.1).
 
-## 7. Platform comparison — SLURM vs K8s
+## 7. Platform comparison — conclusion
 
-The **identical** baseline (same model, image, BackendConfig, 256K window, shared 100k pool) was run on
-both platforms. The K8s engine was deployed as a namespaced `ml` manifest and load-generated from a
-clariden SLURM benchmarker over the breithorn ingress (then torn down). The §4/§5 figures overlay both
-(SLURM blue, K8s orange) — the curves are nearly coincident.
+Across every section above (capacity §4, queue §5, quality §6), **SLURM and K8s land at the same operating
+point**: λ\*=0.5 on both, the same λ=1.0 saturation knee (queue-84%), and **identical Stage-B quality**
+(0.7187, deterministic gsm8k). K8s adds only a **modest fixed serving overhead at λ\*** (TTFT p50 +~14 ms,
+chat p95 569 vs 461 ms — both well within SLO) from the ingress + cross-cluster load-gen hop; at saturation
+the two are indistinguishable. **No capacity or quality penalty** from the K8s path for this single-node
+baseline. (The K8s engine was deployed as a namespaced `ml` manifest, load-generated from a clariden SLURM
+benchmarker over the breithorn ingress, then torn down.)
 
-**Capacity & quality — essentially identical:**
-
-| | SLURM (clariden) | K8s (breithorn) |
-|---|---|---|
-| **λ\*** (meets all SLOs) | **0.5** | **0.5** |
-| TTFT p50 / p95 @ λ=0.5 | 96 / 712 ms | 110 / 750 ms |
-| queue mean @ λ=1.0 (saturated) | 164 | 170 |
-| early-stop | [0.5,1,2] → skip 4/8/16 | [0.5,1,2] → skip 4/8/16 |
-| gsm8k gate / Stage-B | 0.732 / 0.7187 | 0.738 / **0.7187** |
-| requests / sessions truncated | 15 245 / 1134 | 15 277 / 1141 |
-
-**Read:** both platforms land at the **same operating point** — λ\*=0.5, same knee, **identical Stage-B
-quality** (0.7187, deterministic gsm8k). K8s adds only a **small fixed serving overhead at the operating
-point** (~14 ms p50 / ~38 ms p95 higher TTFT at λ=0.5) from the ingress + cross-cluster load-gen hop; at
-saturation the curves are indistinguishable. **No capacity or quality penalty** from the K8s path for
-this single-node baseline.
-
-**Path differences (not findings — K8s instrumentation gaps to close):**
-- **Model-loading breakdown — SLURM only.** The K8s engine is deployed externally (kubectl), so the
-  benchmarker can't read the pod's vLLM log to parse weights/capture/compile; the K8s
-  `model_load_total_s` (110 s) is just the benchmarker's *ingress-readiness wait*, not the model load.
-  Follow-up: parse `kubectl logs` for the K8s breakdown.
-- **Hardware telemetry — K8s empty.** The in-pod sampler writes to the pod's `/results` PVC, which the
-  clariden benchmarker doesn't read, so K8s `hardware_stats` has 0 rows (SLURM has the full §13.3 sampling).
+**K8s instrumentation gaps to close** (path differences, *not* findings — the K8s engine is deployed
+externally so the benchmarker can't read in-pod state):
+- **Pre-check values** not persisted (§1) — only pass/admit known.
+- **Model-loading breakdown** not captured (§2) — `model_load_total_s`=110 s is just the ingress wait;
+  follow-up: parse `kubectl logs`.
+- **Hardware telemetry** empty — the in-pod sampler writes the pod's `/results` PVC, which the clariden
+  benchmarker doesn't read (K8s `hardware_stats`=0 rows; SLURM has the full §13.3 sampling).
 
 ## Disclosures & limitations (not hidden, per §15.3)
 
@@ -167,5 +189,5 @@ this single-node baseline.
   **no** KV-offloading, **no** `kv_cache_dtype` (baseline); `env: VLLM_ALLOW_LONG_MAX_MODEL_LEN=1`
 - **workload**: 80% `chat-short-turns` + 20% `agentic-coding`; 100k-prompt real-text pool (WildChat + LongBench)
 - **sweep**: λ=[0.5,1,2,4,8,16], warmup 300 s / measurement 600 s / drain 600 s, queue early-stop (stop after 2 saturated)
-- **totals**: 15 245 requests, 3 λ levels run, 1134 sessions truncated at drain, quality_flagged=False
+- **totals**: SLURM 15 245 req / 1134 truncated · K8s 15 277 req / 1141 truncated; 3 λ levels each (early-stop), quality_flagged=False (both)
 - **curated**: 2026-06-16. Source per-run DB + raw logs under `experiments/`.
