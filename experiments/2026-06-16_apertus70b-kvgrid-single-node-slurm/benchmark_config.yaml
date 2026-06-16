@@ -1,0 +1,170 @@
+# Apertus-70B single-node KV-cache grid — clariden (SLURM). 4 cells.
+#
+# Goal (operator 2026-06-16): measure the capacity + quality effect of two KV-cache axes on a
+# single GH200 node, under the realistic mixed workload, toward the supportable-users estimate
+# (§15.1) and the capacity-vs-quality panel (§15.1 / §13.5):
+#   axis 1 — KV offloading: {disabled, native (Grace-DRAM spill, 400 GiB total / 100 GiB/GPU)}
+#   axis 2 — KV-cache dtype: {default (bf16), fp8}
+# 2 × 2 = 4 deployments (run_ids), one engine bring-up each, driven sequentially. The breithorn
+# (K8s) counterpart is the sibling file apertus70b-kvgrid-single-node-k8s.yaml (identical axes +
+# IDENTICAL dataset_config, so the shared real-text pool is generated ONCE and reused — §11.4).
+# LMCache (3rd offload level) is a fast-follow once BackendConfig plumbs the KV connector.
+#
+# Topology: TP4 × PP1 = 4 GPUs → one GH200 node (intra-node NVLink-C2C). NO E2b workarounds —
+# the 0.23 image runs custom all-reduce + CUDA graphs clean (validated 2-node, job 2542392).
+#
+# Workload: 80% chat-short-turns (turn-1 ≈500 tok) + 20% agentic-coding (turn-1 ≈10000 tok),
+# both MULTI-TURN with append_delta context growth (turn N = full prior transcript + new turn;
+# scenario turn-count is a DISTRIBUTION — mean ~6, max 24/30 — so sessions span short→long, and
+# not every user fills the window). 256K context per the model spec; 256K-scale KV pressure comes
+# from many CONCURRENT accumulating sessions (what λ drives), not a single session.
+#
+# λ ladder [0.5..16] brackets the expected knee (single-node 70B serving long sessions saturates
+# at low session-start rates); refine around the located knee in a follow-up pass (same experiment).
+#
+# PREREQUISITE: Apertus-70B weights in the capstor hf-cache, AND the shared dataset pool generated
+# once and staged into each run_dir/dataset/ (pool.jsonl + manifest.json) — the orchestrator reuses
+# a pre-staged pool instead of regenerating this large real-text pool per cell.
+#
+# Validate: .venv/bin/python -m tools.common.config examples/benchmark-configs/apertus70b-kvgrid-single-node-slurm.yaml
+
+name: apertus70b-kvgrid-single-node-slurm
+description: >
+  Apertus-70B single-node (TP4, clariden/SLURM) KV-cache grid: KV-offloading {off, native} ×
+  KV-dtype {default, fp8} = 4 cells. Mixed 80/20 chat/agentic at 256K, λ swept toward the knee,
+  per-class SLOs (§13.4) + graded quality (gsm8k, §13.5) for capacity-vs-quality at each KV config.
+
+deployments:
+  # ---- cell 1: offload OFF, dtype default (the baseline) ----
+  - target: clariden
+    backend: vllm
+    backend_version: "0.23.0"
+    image: jfrog.svc.cscs.ch/ml/inference/vllm:0.23.0-alps.net.v1-gh200
+    model: swiss-ai/Apertus-70B-Instruct-2509
+    backend_config:
+      tensor_parallel_size: 4
+      pipeline_parallel_size: 1
+      max_model_len: 262144
+      env: { VLLM_ALLOW_LONG_MAX_MODEL_LEN: "1" }   # 256K > this checkpoint's 64K config → permit it (256K-pipeline validation ahead of native-256K Apertus)
+      max_num_batched_tokens: 16384
+      gpu_memory_utilization: 0.90
+      enable_prefix_caching: true
+      safetensors_load_strategy: prefetch
+  # ---- cell 2: offload OFF, dtype fp8 (KV fp8 doubles KV capacity) ----
+  - target: clariden
+    backend: vllm
+    backend_version: "0.23.0"
+    image: jfrog.svc.cscs.ch/ml/inference/vllm:0.23.0-alps.net.v1-gh200
+    model: swiss-ai/Apertus-70B-Instruct-2509
+    backend_config:
+      tensor_parallel_size: 4
+      pipeline_parallel_size: 1
+      max_model_len: 262144
+      env: { VLLM_ALLOW_LONG_MAX_MODEL_LEN: "1" }   # 256K > this checkpoint's 64K config → permit it (256K-pipeline validation ahead of native-256K Apertus)
+      max_num_batched_tokens: 16384
+      gpu_memory_utilization: 0.90
+      enable_prefix_caching: true
+      safetensors_load_strategy: prefetch
+      kv_cache_dtype: fp8
+  # ---- cell 3: offload NATIVE (Grace DRAM), dtype default ----
+  - target: clariden
+    backend: vllm
+    backend_version: "0.23.0"
+    image: jfrog.svc.cscs.ch/ml/inference/vllm:0.23.0-alps.net.v1-gh200
+    model: swiss-ai/Apertus-70B-Instruct-2509
+    backend_config:
+      tensor_parallel_size: 4
+      pipeline_parallel_size: 1
+      max_model_len: 262144
+      env: { VLLM_ALLOW_LONG_MAX_MODEL_LEN: "1" }   # 256K > this checkpoint's 64K config → permit it (256K-pipeline validation ahead of native-256K Apertus)
+      max_num_batched_tokens: 16384
+      gpu_memory_utilization: 0.90
+      enable_prefix_caching: true
+      safetensors_load_strategy: prefetch
+      kv_offloading_size: 400          # GiB total across TP ranks (100 GiB/GPU), §16.2
+      kv_offloading_backend: native    # GH200 Grace DRAM @ 900 GB/s via NVLink-C2C
+  # ---- cell 4: offload NATIVE + dtype fp8 ----
+  - target: clariden
+    backend: vllm
+    backend_version: "0.23.0"
+    image: jfrog.svc.cscs.ch/ml/inference/vllm:0.23.0-alps.net.v1-gh200
+    model: swiss-ai/Apertus-70B-Instruct-2509
+    backend_config:
+      tensor_parallel_size: 4
+      pipeline_parallel_size: 1
+      max_model_len: 262144
+      env: { VLLM_ALLOW_LONG_MAX_MODEL_LEN: "1" }   # 256K > this checkpoint's 64K config → permit it (256K-pipeline validation ahead of native-256K Apertus)
+      max_num_batched_tokens: 16384
+      gpu_memory_utilization: 0.90
+      enable_prefix_caching: true
+      safetensors_load_strategy: prefetch
+      kv_offloading_size: 400
+      kv_offloading_backend: native
+      kv_cache_dtype: fp8
+
+dataset_config:                        # IDENTICAL to the k8s sibling → one shared pool (§11.4)
+  scenario_mix:
+    - scenario: chat-short-turns
+      weight: 0.8
+      input_length:
+        distribution: lognormal
+        params: { mean: 500, sigma: 0.5, min: 50, max: 2000 }
+    - scenario: agentic-coding
+      weight: 0.2
+      input_length:
+        distribution: lognormal
+        params: { mean: 10000, sigma: 0.5, min: 4000, max: 16000 }
+  # Sized for the queue early-stop's realistic stop range (≤λ=8): Σλ[0.5..8]·(warmup+measurement)
+  # ·E[turns≈6] = 15.5 × 900 × 6 ≈ 84k + margin. Generated ONCE and reused across cells. NOTE: a
+  # high-knee cell (fp8/offload) that runs all 6 levels could exhaust this — bump if a run hits
+  # PoolExhaustedError (early-stop normally caps the sweep well before λ=16; §11.4, §12.2).
+  num_prompts: 100000
+  seed: 1234
+  output_length_mode: forced
+
+rate_levels: [0.5, 1, 2, 4, 8, 16]     # session starts/s (§12.3); knee-bracket, refine after pass 1
+
+rate_sweep:
+  early_stop: true                     # §12.2 — stop after 2 consecutive SATURATED levels (skip deep
+  stop_on: queue_nonempty              # overload past λ*). Saturation = request queue SUSTAINEDLY
+  stop_after_saturated_levels: 2       # non-empty: requests_waiting>0 in ≥50% of measurement scrapes
+  queue_nonempty_fraction: 0.5         # (robust to Poisson blips). Skipped λ logged; knee aligns w/ queue>0
+
+arrival_process:
+  kind: poisson
+
+routing_strategy: random
+
+phases:
+  warmup_s: 300
+  measurement_s: 600
+  drain_timeout_s: 600
+  request_timeout_s: 300
+  server_ready_timeout_s: 2400         # 70B load on capstor + single-node engine init
+
+slos:                                  # per-class (§13.4); λ* = highest λ meeting all
+  - { scenario: chat-short-turns, metric: ttft_ms,        percentile: p95, threshold: 800 }
+  - { scenario: chat-short-turns, metric: tpot_ms,        percentile: p95, threshold: 80 }
+  - { scenario: agentic-coding,   metric: session_e2e_ms, percentile: p90, threshold: 600000 }
+  - { scenario: all,              metric: error_rate_pct,                  threshold: 1.0 }
+
+quality_eval:                          # §13.5 — graded quality at every KV config
+  gate:                                # Stage-A: pre-sweep sanity gate (catches a corrupted deploy)
+    suite: gsm8k
+    sample_size: 500
+    floor: 0.20                        # corruption floor; legitimate fp8/offload stays well above
+    on_fail: abort                     # a deployment below floor is broken — don't run its sweep
+  compare:                             # Stage-B: post-sweep quality delta (the KV-dtype/offload axis)
+    suites: [gsm8k]
+    eval_concurrency: [1]
+  skip_quality_gate: false
+  skip_quality_compare: false
+
+system_prechecks:
+  skip_system_prechecks: false         # §8 foundation gate
+  system_prechecks_on_warn: continue
+  system_prechecks_on_fail: abort
+  collective_tests_version: "2.18.2"
+  shmem_required: false                # single-node dense model — no expert-parallel NVSHMEM dep
+
+server_time_limit: "04:00:00"          # 70B load + 6-level sweep (≈90 min) + drain + graded quality

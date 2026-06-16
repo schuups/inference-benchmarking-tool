@@ -1,0 +1,22 @@
+# Engine container EDF (SLURM --environment=) — rendered by the Planner (§5)
+# run_id: 20260616-095339_apertus-70b-instruct-2509_vllm_clariden_e5aa
+image = "jfrog.svc.cscs.ch/ml/inference/vllm:0.23.0-alps.net.v1-gh200"
+
+mounts = [
+    "/users",
+    "/capstor",
+    "/iopsstor"
+]
+
+workdir = "/capstor/scratch/cscs/stefschu/ibt/20260616-095339_apertus-70b-instruct-2509_vllm_clariden_e5aa"
+
+[annotations]
+# Alps-extended image: it bundles its own libfabric / NCCL / aws-ofi-nccl over
+# CXI, so disable the host CXI hook to give the image's network libraries
+# priority over the host's (§9.1; docs.cscs.ch/software/alps-extended-images).
+# Do NOT add the aws_ofi_nccl hook annotation.
+com.hooks.cxi.enabled = "false"
+
+[env]
+HF_HOME = "/capstor/scratch/cscs/stefschu/ibt/hf-cache"
+VLLM_ALLOW_LONG_MAX_MODEL_LEN = "1"
