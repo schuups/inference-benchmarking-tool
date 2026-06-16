@@ -336,7 +336,16 @@ An `mi300a` (AMD MI300A) node type is **planned for the coming months** — once
 it will enable prefill-disaggregation studies (e.g. GH200 prefill paired with MI300A
 decode, with KV transferred over Slingshot 11).
 
-- `nodeSelector: beta.kubernetes.io/instance-type: <type>` targets a specific node type.
+> **`breithorn` is a PRODUCTION cluster — shared with other live services. Operate only in the
+> `ml` namespace** (dedicated to the operator, full control there). The tool MUST NOT create,
+> modify, or delete cluster-scoped objects or anything outside `ml`, and MUST NOT touch shared
+> infrastructure other productive services depend on — operators, device plugins, storage
+> classes, the network / CXI-fabric setup, node configuration. Engine objects are namespaced,
+> labelled, and torn down per run (§7). Anything requiring a cluster-wide or admin change (e.g.
+> exposing Slingshot to pods, installing an operator) is a **request to the breithorn admins**,
+> never an action the tool takes. Read-only inspection of other namespaces is fine; mutation is not.
+
+- `nodeSelector: node.kubernetes.io/instance-type: <type>` targets a specific node type.
 - A single experiment may pin different components to different node types (once
   mi300a is available, see above). The deployment manifest sets the `nodeSelector` per
   component.
