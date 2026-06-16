@@ -2,9 +2,10 @@
 
 **Purpose.** Establish the **baseline operating point** for Apertus-70B served on a single GH200 node,
 run at a **256K context window to approximate the upcoming Apertus-70B 1.5** (which will natively
-support 256K). This is the **reference against which the KV-offloading and fp8 cells of the grid will be
-compared** (capacity and quality deltas, §15.1), and the first run of a **SLURM-vs-K8s platform
-comparison** of the identical deployment.
+support 256K). This checkpoint is natively 64K, so the 256K window is **forced**
+(`VLLM_ALLOW_LONG_MAX_MODEL_LEN`; see Disclosures). This is the **reference against which the
+KV-offloading and fp8 cells of the grid will be compared** (capacity and quality deltas, §15.1), and
+the first run of a **SLURM-vs-K8s platform comparison** of the identical deployment.
 
 **Setup.**
 
@@ -12,15 +13,9 @@ comparison** of the identical deployment.
 |---|---|
 | Model | `swiss-ai/Apertus-70B-Instruct-2509` (70B dense), full **256K** context (`max_model_len=262144`) |
 | Engine | vLLM **0.23.0**, TP4 × PP1 on **one GH200 node** (4× GH200, intra-node NVLink-C2C) |
-| Image | `jfrog.svc.cscs.ch/ml/inference/vllm:0.23.0-alps.net.v1-gh200` — official vLLM 0.23 + Alps Slingshot-11 netstack + baked Ray/NIXL/LMCache; self-contained (host CXI hook off) |
+| Image | `jfrog.svc.cscs.ch/ml/inference/vllm:0.23.0-alps.net.v1-gh200` — official base image vLLM 0.23 + [Alps Slingshot-11 netstack](../../tools/images/core/nvidia/netstack/v1) + baked Ray/NIXL/LMCache; self-contained (host CXI hook off) |
 | Storage | weights from the **capstor** Lustre HF-cache (`/capstor/scratch/.../ibt/hf-cache`); dataset pool on capstor. (K8s variant: weights from a `ceph-corbo-cephfs` PVC.) |
 | Platforms | **SLURM** (clariden) — results below · **Kubernetes** (breithorn) — in flight |
-
-> **Platform comparison — in progress.** The SLURM (clariden) results below are complete; the **K8s
-> (breithorn) run is in flight** and this report will be enriched with its results and a side-by-side
-> SLURM-vs-K8s comparison once it lands. *(256K note: this checkpoint is natively 64K; the 256K window
-> is forced to validate the pipeline ahead of **Apertus-70B 1.5** — the upcoming version, which will
-> natively support 256K — see Disclosures.)*
 
 ## 1. Pre-checks (§8 foundation gate)
 
