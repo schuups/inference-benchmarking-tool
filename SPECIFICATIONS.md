@@ -1139,6 +1139,16 @@ The sweep begins only once **all** instances are ready, profiled, primed, and �
 - `request_timeout_s`: client-side TTFT hard cutoff; exceeded requests recorded as `success=0`.
 - After the final rate level's drain, the **quality comparison** (§13.5 Stage B) runs
   against the still-running deployment(s), before teardown.
+- **Adaptive early-stop** (optional, `rate_sweep.early_stop`): the Benchmarker evaluates the
+  per-class SLOs (§13.4) on each level's measurement-phase requests; after
+  `rate_sweep.stop_after_breached_levels` **consecutive** SLO-breaching levels it skips the
+  remaining (higher) λ — which would only characterise deeper overload past λ*. The skipped
+  levels are **logged** (never silently dropped), and `RunSummary.rate_levels` reflects the
+  levels actually run. Off by default (every level runs); the breach check mirrors the report
+  notebook's measurement window + linear-interp percentiles (§13.4) but is pure-Python so it
+  needs no pandas. The dataset pool (§11.4 `num_prompts`) must still be sized for the **full**
+  ladder — a capacity-extending config (e.g. fp8 / offload) can push the knee high enough that
+  early-stop never triggers and every level runs.
 
 ### 12.3 Open-loop stochastic arrivals
 

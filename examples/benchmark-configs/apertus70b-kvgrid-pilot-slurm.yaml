@@ -76,6 +76,9 @@ dataset_config:                        # same mix as the grid; small pool (pilot
 
 rate_levels: [0.5, 2]
 
+rate_sweep:
+  early_stop: true                     # §12.2 — stop after 2 consecutive SLO-breaching levels
+
 arrival_process:
   kind: poisson
 

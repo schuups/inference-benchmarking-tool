@@ -346,6 +346,68 @@ async def _stage_b(
     log.info("Stage-B quality comparison: %d measurement rows (§13.5)", len(rows))
 
 
+# ----------------------------------------------------------- adaptive sweep early-stop
+
+
+def _percentile_linear(sorted_vals: list[float], frac: float) -> float:
+    """Linear-interpolated percentile (matches pandas/numpy .quantile default); frac in [0,1]."""
+    if len(sorted_vals) == 1:
+        return sorted_vals[0]
+    idx = frac * (len(sorted_vals) - 1)
+    lo = int(idx)
+    if lo + 1 >= len(sorted_vals):
+        return sorted_vals[-1]
+    return sorted_vals[lo] + (idx - lo) * (sorted_vals[lo + 1] - sorted_vals[lo])
+
+
+def _step_slo_breaches(requests, slos, warmup_s: float, measurement_s: float) -> list[str]:
+    """SLOs breached on a sweep level's MEASUREMENT-phase requests (§12.2, §13.4).
+
+    Mirrors the reports notebook's measurement window [warmup, warmup+measurement) and
+    linear-interp percentiles, in pure Python so the Benchmarker can early-stop the sweep
+    without importing the pandas-backed reports module. Returns human-readable breach strings
+    ([] = all SLOs attained, or insufficient data to judge a class)."""
+    if not slos:
+        return []
+    lo = warmup_s * 1000.0
+    hi = (warmup_s + measurement_s) * 1000.0
+    mreq = [r for r in requests if lo <= r.issued_at_ms < hi]
+    breaches: list[str] = []
+    for slo in slos:
+        sel = mreq if slo.scenario == "all" else [r for r in mreq if r.scenario == slo.scenario]
+        if not sel:
+            continue  # no data for this class at this level → can't judge; don't count as breach
+        if slo.metric == "error_rate_pct":
+            val = 100.0 * sum(1 for r in sel if not r.success) / len(sel)
+            if val > slo.threshold:
+                breaches.append(f"{slo.scenario}.error_rate_pct={val:.1f}>{slo.threshold:g}")
+            continue
+        frac = int(slo.percentile[1:]) / 100.0
+        if slo.metric == "session_e2e_ms":
+            spans: dict[int, list[float]] = {}
+            for r in sel:
+                if r.e2e_ms is None:
+                    continue
+                start, finish = r.issued_at_ms, r.issued_at_ms + r.e2e_ms
+                cur = spans.get(r.session_idx)
+                if cur is None:
+                    spans[r.session_idx] = [start, finish]
+                else:
+                    cur[0], cur[1] = min(cur[0], start), max(cur[1], finish)
+            vals = sorted(e - s for s, e in spans.values())
+        else:  # ttft_ms / tpot_ms / e2e_ms — per successful request
+            vals = sorted(
+                getattr(r, slo.metric) for r in sel
+                if r.success and getattr(r, slo.metric) is not None
+            )
+        if not vals:
+            continue
+        val = _percentile_linear(vals, frac)
+        if val > slo.threshold:
+            breaches.append(f"{slo.scenario}.{slo.metric} {slo.percentile}={val:.0f}>{slo.threshold:g}")
+    return breaches
+
+
 # ------------------------------------------------------------------- the driver
 
 
@@ -474,7 +536,9 @@ async def run_experiment(
             endpoints = [(i.instance_id, i.base_url) for i in instances]
             windows: list[tuple[float, datetime, datetime]] = []
             n_requests = n_truncated = 0
-            for rate in cfg.rate_levels:
+            levels_run = 0
+            consec_breach = 0
+            for i, rate in enumerate(cfg.rate_levels):
                 log.info("[%s] sweep step λ=%s", run_id, rate)
                 start = datetime.now(timezone.utc)
                 step = await run_step(pool, weights, _step_config(cfg, deployment, rate, endpoints))
@@ -484,6 +548,7 @@ async def run_experiment(
                 windows.append((rate, start, end))
                 n_requests += len(step.requests)
                 n_truncated += step.sessions_truncated
+                levels_run += 1
                 if step.lag_warning:
                     log.warning(
                         "[%s] λ=%s client event-loop lag %.0fms — latencies may be client "
@@ -495,6 +560,32 @@ async def run_experiment(
                         "[%s] λ=%s %d sessions truncated at drain (§12.2)",
                         run_id, rate, step.sessions_truncated,
                     )
+                # §12.2 adaptive early-stop: once we are clearly past λ* (N consecutive
+                # SLO-breaching levels), skip the remaining higher λ — they only characterise
+                # deeper overload. Skipped levels are logged, never silently dropped.
+                if cfg.rate_sweep.early_stop:
+                    breaches = _step_slo_breaches(
+                        step.requests, cfg.slos or [],
+                        cfg.phases.warmup_s, cfg.phases.measurement_s,
+                    )
+                    if breaches:
+                        consec_breach += 1
+                        log.info(
+                            "[%s] λ=%s SLO breach %d/%d: %s",
+                            run_id, rate, consec_breach,
+                            cfg.rate_sweep.stop_after_breached_levels, "; ".join(breaches),
+                        )
+                        if consec_breach >= cfg.rate_sweep.stop_after_breached_levels:
+                            skipped = cfg.rate_levels[i + 1:]
+                            if skipped:
+                                log.warning(
+                                    "[%s] adaptive early-stop (§12.2): %d consecutive SLO-breaching "
+                                    "levels past λ* — skipping remaining λ=%s",
+                                    run_id, consec_breach, skipped,
+                                )
+                            break
+                    else:
+                        consec_breach = 0
 
             # ---- phase 8: Stage-B quality comparison (§13.5)
             await _stage_b(db, run_id, quality, qe, instances, deployment.model, smoke)
@@ -512,7 +603,7 @@ async def run_experiment(
                 smoke_test_mode=smoke,
                 instances=len(instances),
                 requests=n_requests,
-                rate_levels=len(cfg.rate_levels),
+                rate_levels=levels_run,
                 sessions_truncated=n_truncated,
                 quality_flagged=quality_flagged,
                 db_path=db_path if not smoke else None,

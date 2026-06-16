@@ -223,6 +223,36 @@ async def test_reuses_prestaged_dataset_pool(tmp_path, monkeypatch):
     assert summary.persisted and summary.requests > 0
 
 
+def test_step_slo_breaches_and_measurement_filter():
+    # §12.2 adaptive early-stop signal: per-class SLO breach over the MEASUREMENT window only.
+    from tools.benchmarker.orchestrator import _percentile_linear, _step_slo_breaches
+    from tools.benchmarker.load_gen.scheduler import RequestRow
+    from tools.common.config import SLO
+
+    def row(issued_ms, ttft, *, scenario="chat", success=1):
+        return RequestRow(
+            rate_lambda=1.0, request_id=0, session_idx=0, scenario=scenario, turn_idx=0,
+            final_turn=0, issued_at_ms=issued_ms, ttft_ms=ttft, tpot_ms=None, e2e_ms=None,
+            input_tokens=1, output_tokens=1, success=success, error=None, instance_id="i0",
+        )
+
+    lat = [SLO(scenario="chat", metric="ttft_ms", percentile="p95", threshold=800)]
+    warmup, meas = 10, 10  # measurement window = [10000, 20000) ms
+
+    assert _step_slo_breaches([row(12000, 100) for _ in range(20)], lat, warmup, meas) == []
+    breach = _step_slo_breaches([row(12000, 5000) for _ in range(20)], lat, warmup, meas)
+    assert breach and "ttft_ms" in breach[0]
+    # identical high latencies but issued during WARMUP → outside window → not counted
+    assert _step_slo_breaches([row(2000, 5000) for _ in range(20)], lat, warmup, meas) == []
+
+    err = [SLO(scenario="all", metric="error_rate_pct", threshold=1.0)]
+    mixed = [row(12000, 100, success=0 if k < 5 else 1) for k in range(20)]  # 25% > 1%
+    assert _step_slo_breaches(mixed, err, warmup, meas)
+
+    assert _percentile_linear([10, 20, 30, 40], 0.0) == 10
+    assert _percentile_linear([10, 20, 30, 40], 1.0) == 40
+
+
 @pytest.mark.asyncio
 async def test_smoke_mode_no_persistence_and_two_warnings(tmp_path, caplog):
     run_dir = tmp_path / "run"

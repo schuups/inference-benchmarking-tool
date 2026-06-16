@@ -122,6 +122,10 @@ dataset_config:                        # IDENTICAL to the k8s sibling → one sh
 
 rate_levels: [0.5, 1, 2, 4, 8, 16]     # session starts/s (§12.3); knee-bracket, refine after pass 1
 
+rate_sweep:
+  early_stop: true                     # §12.2 — after 2 consecutive SLO-breaching levels, skip the
+  stop_after_breached_levels: 2        # remaining higher λ (deep overload past λ*); skipped λ logged
+
 arrival_process:
   kind: poisson
 

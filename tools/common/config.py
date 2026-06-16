@@ -271,6 +271,18 @@ class SystemPrechecks(StrictModel):
     shmem_required: bool = False
 
 
+class RateSweep(StrictModel):
+    """Adaptive λ-sweep early-stop (§12.2). With `early_stop` set, the Benchmarker evaluates the
+    per-class SLOs on each level's measurement-phase requests; after `stop_after_breached_levels`
+    CONSECUTIVE SLO-breaching levels it skips the remaining (higher) λ — those would only
+    characterise deeper overload past λ*. Off by default (every level runs); skipped levels are
+    logged, never silently dropped. E.g. with the default 2 and a knee below λ=2: λ=2 breaches
+    (1), λ=4 confirms (2) → skip λ=8, λ=16."""
+
+    early_stop: bool = False
+    stop_after_breached_levels: int = Field(default=2, ge=1)
+
+
 class BenchmarkConfig(StrictModel):
     name: str
     description: str | None = None
@@ -281,6 +293,7 @@ class BenchmarkConfig(StrictModel):
     routing_strategy: Literal["random", "session_affinity"] = "random"
     phases: Phases
     slos: list[SLO] | None = None
+    rate_sweep: RateSweep = RateSweep()
     quality_eval: QualityEval = QualityEval()
     system_prechecks: SystemPrechecks = SystemPrechecks()
     hardware_sampling_interval_s: float = Field(default=1.0, gt=0)

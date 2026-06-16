@@ -107,6 +107,10 @@ dataset_config:                        # IDENTICAL to the SLURM sibling → shar
 
 rate_levels: [0.5, 1, 2, 4, 8, 16]
 
+rate_sweep:
+  early_stop: true                     # §12.2 — stop after 2 consecutive SLO-breaching levels
+  stop_after_breached_levels: 2        # (skip deep overload past λ*); skipped λ are logged
+
 arrival_process:
   kind: poisson
 
