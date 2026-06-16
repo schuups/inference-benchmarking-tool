@@ -40,9 +40,12 @@ pre-check, or any signal a stakeholder needs to see.
 
 ## Plots & axes
 
-- **Capacity figure** = 3 stacked panels sharing the λ axis: **latency** (p50/p95/p99) · **error-rate** ·
+- **Capacity figure** = stacked panels sharing the λ axis: **latency** (p50/p95/p99) · **error-rate** ·
   **request-queue depth** — so the latency knee lines up vertically with the queue rising above 0 (§12.2
-  saturation onset). Render TTFT and TPOT as separate figures.
+  saturation onset). When **several latency metrics** are shown for the same runs (e.g. TTFT *and* TPOT),
+  stack them as rows above a **single shared error-rate + queue pair** (`compare_capacity_figure`) — error
+  and queue are per-request, so repeating them under each metric is redundant; one latency row per metric,
+  each with its own SLO line.
 - **Percentiles**: one colour per run, **p50 thickest/opaque → p95 → p99 thinnest/lightest** (so a second
   platform/config overlays in a second colour without collisions).
 - **Axes**: latency-y **log**; error-rate-y **linear, fixed 0–100 %**; queue-y **symlog** (logarithmic but

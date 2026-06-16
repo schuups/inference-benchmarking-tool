@@ -132,6 +132,23 @@ def test_hardware_compare_figure_empty_panel(fixture_db):
     ]  # SLURM column has data, no annotation
 
 
+def test_compare_capacity_figure_merges_error_and_queue(fixture_db):
+    # §15.1 merged capacity figure: N latency metrics stacked above ONE shared error + queue pair
+    # (per-request, so not repeated per metric). For 2 metrics × 2 platforms → (2+2) rows × 2 cols.
+    from tools.reports import plots
+
+    path, exp = fixture_db
+    report = analysis.load_run(path, exp["run_a"])
+    fig = plots.compare_capacity_figure(
+        [(report, plots.MODEL_COLOR, "SLURM"), (report, plots.K8S_COLOR, "K8s")],
+        [("ttft_ms", 800.0), ("tpot_ms", 80.0)],
+    )
+    assert len(fig.axes) == 8  # (2 latency + error + queue) rows × 2 columns
+    # each latency row carries an SLO line (a dashed red axhline)
+    slo_lines = [ln for ln in fig.axes[0].get_lines() if ln.get_color() == plots.SLO_COLOR]
+    assert slo_lines, "TTFT panel should carry its SLO line"
+
+
 def test_queue_depth_vs_lambda():
     # §12.2 / §15.1 queue panel: per-λ mean (sustained) + max (peak) requests_waiting.
     import pandas as pd

@@ -101,14 +101,12 @@ workload.
 
 ## 4. Capacity & throughput
 
-**TTFT** (time-to-first-token) — **SLURM (left) vs K8s (right)**, panels latency / error / queue, y-axes
-shared per row:
+**Latency vs λ — SLURM (left) vs K8s (right).** Rows: **TTFT** (time-to-first-token) and **TPOT**
+(time-per-output-token), each with its own per-class SLO line, then the **error-rate** and **request-queue**
+panels. error-rate and queue are per-request (identical for either latency metric), so they are shown
+**once** here rather than repeated under each. y-axes shared per row:
 
-![ttft vs λ — SLURM (left) vs K8s (right)](images/baseline-ttft.png)
-
-**TPOT** (time-per-output-token) — same side-by-side layout:
-
-![tpot vs λ — SLURM (left) vs K8s (right)](images/baseline-tpot.png)
+![capacity vs λ — TTFT / TPOT / error / queue, SLURM (left) vs K8s (right)](images/baseline-capacity.png)
 
 - **Supportable load: λ\* = 0.5 session-starts/s on BOTH platforms** — the only swept level meeting **all**
   per-class SLOs. Values shown per platform as **SLURM / K8s**:

@@ -143,6 +143,73 @@ def compare_latency_figure(entries, metric: str, slo_threshold: float | None = N
     return fig
 
 
+def compare_capacity_figure(entries, metrics):
+    """Merged side-by-side capacity figure: ONE COLUMN per run (`entries` = (report, colour, label),
+    e.g. SLURM left, K8s right). Rows = each latency metric in `metrics` (= list of (metric_column,
+    slo_threshold)) stacked above a SINGLE shared **error-rate** row and **request-queue** row.
+
+    error-rate and queue are per-request (metric-independent), so they appear ONCE here instead of being
+    repeated under every latency metric (the redundancy of rendering TTFT and TPOT as two separate
+    figures). y-axis shared per row, λ x-axis shared; per column p50 thickest/opaque → p99 lightest;
+    latency-y log + its SLO line, error-y linear 0–100%, queue-y symlog, plain λ ticks."""
+    import matplotlib.ticker as mticker
+
+    n = len(entries)
+    nlat = len(metrics)
+    nrows = nlat + 2  # latency rows + error + queue
+    fig, axes = plt.subplots(
+        nrows, n, figsize=(4.3 * n, 2.1 * nrows + 0.8), sharex=True, sharey="row", squeeze=False,
+        gridspec_kw={"height_ratios": [3] * nlat + [1, 1.4]},
+    )
+    lambdas: set[float] = set()
+    for col, (report, color, label) in enumerate(entries):
+        mreq = analysis.measurement_requests(report)
+        fail = analysis.failure_rate_vs_lambda(mreq)
+        q = analysis.queue_depth_vs_lambda(report.server_stats)
+        for mi, (metric, slo) in enumerate(metrics):
+            axL = axes[mi][col]
+            lat = analysis.latency_vs_lambda(mreq, metric)
+            for p, lw, alpha in (("p50", 2.6, 1.0), ("p95", 1.6, 0.70), ("p99", 1.0, 0.45)):
+                if not lat.empty:
+                    axL.plot(lat["rate_lambda"], lat[p], marker="o", ms=4, color=color, lw=lw,
+                             alpha=alpha, label=p)
+                    lambdas |= {float(x) for x in lat["rate_lambda"]}
+            if slo:
+                axL.axhline(slo, ls="--", color=SLO_COLOR, label=f"SLO {slo:g} ms")
+            axL.set_yscale("log")
+            if mi == 0:
+                axL.set_title(label)
+            axL.legend(fontsize=7)
+        axE = axes[nlat][col]
+        if not fail.empty:
+            axE.plot(fail["rate_lambda"], fail["error_rate_pct"], marker="s", ms=4, color=color)
+            lambdas |= {float(x) for x in fail["rate_lambda"]}
+        axE.set_ylim(0, 100)
+        axQ = axes[nlat + 1][col]
+        if not q.empty:
+            axQ.plot(q["rate_lambda"], q["waiting_mean"], marker="o", ms=4, color=color, label="mean")
+            axQ.plot(q["rate_lambda"], q["waiting_max"], marker=".", ls=":", color=color, alpha=0.5,
+                     label="max")
+            axQ.legend(fontsize=7)
+            lambdas |= {float(x) for x in q["rate_lambda"]}
+        axQ.set_yscale("symlog", linthresh=1)
+        axQ.set_xscale("log")
+        axQ.set_xlabel("λ (session starts/s)")
+    for mi, (metric, _slo) in enumerate(metrics):
+        axes[mi][0].set_ylabel(f"{metric.replace('_ms', '').upper()} (ms)")
+    axes[nlat][0].set_ylabel("error %")
+    axes[nlat + 1][0].set_ylabel("queue (reqs)")
+    if lambdas:
+        ticks = sorted(lambdas)
+        for col in range(n):
+            axes[-1][col].xaxis.set_major_locator(mticker.FixedLocator(ticks))
+            axes[-1][col].xaxis.set_minor_locator(mticker.NullLocator())
+            axes[-1][col].xaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _pos: f"{x:g}"))
+    fig.suptitle("Capacity vs λ — SLURM vs K8s")
+    fig.tight_layout()
+    return fig
+
+
 def throughput_figure(entries, title: str = "Token throughput vs λ — SLURM vs K8s"):
     """Input- and output-token throughput vs λ for one or more runs (`entries` = (report, colour,
     label)), overlaid — two panels: input tokens/s (top) and output tokens/s (bottom). Both rise with
