@@ -1,8 +1,13 @@
-# Apertus-70B — single-node baseline (clariden / SLURM), 256K window
+# Apertus-70B — single-node baseline (256K window): SLURM vs K8s
 
 **Curated synthesis (§15.3)** of the first full-settings capacity+quality run of the KV-cache grid's
 **baseline cell** (KV-offloading *off*, KV-dtype *default*). This is the reference against which the
 offloading and fp8 cells will be compared. Single GH200 node, TP4, vLLM 0.23.0.
+
+> **Platform comparison — in progress.** This report compares the same baseline across both
+> deployment platforms: **SLURM (clariden)** and **Kubernetes (breithorn)**. The SLURM results below
+> are complete; the **K8s run is in flight** and the report will be enriched with its results and a
+> side-by-side SLURM-vs-K8s comparison once it lands.
 
 ## Headline
 
