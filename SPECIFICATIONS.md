@@ -1806,7 +1806,7 @@ added per-experiment as the operator requests them. Claude extends the surface
 (BackendConfig field + Jinja template branch + the relevant table here) when a new knob
 or version comes into scope.
 
-#### vLLM — v0.22.x
+#### vLLM — v0.22.x / v0.23.x
 
 | Field | vLLM flag | Notes |
 |---|---|---|
@@ -1820,8 +1820,10 @@ or version comes into scope.
 | `kv_cache_dtype` | `--kv-cache-dtype` | e.g. `"fp8"`. Doubles KV capacity but worsens per-request latency due to higher batch concurrency. |
 | `enable_prefix_caching` | `--enable-prefix-caching` | Default True. Set False to isolate TTFT from cache artefacts (but prefer unique prompts instead). |
 | `safetensors_load_strategy` | `--safetensors-load-strategy` | `"prefetch"` recommended on Lustre (capstor / iopsstor) — see §6.1. |
+| `disable_custom_all_reduce` | `--disable-custom-all-reduce` | Default False. **Legacy 0.22.1 multi-node workaround only** — the 0.22.1 GH200 image hit a custom-all-reduce illegal memory access on the cross-node TP×PP path. **Not needed on 0.23** (custom all-reduce runs clean; validated 2-node, job 2542392). Leave False on 0.23. |
+| `enforce_eager` | `--enforce-eager` | Default False. **Legacy 0.22.1 multi-node workaround** (paired with the above, for the CUDA-graph-capture `CUBLAS_STATUS_EXECUTION_FAILED`); costs CUDA-graph perf. **Not needed on 0.23** — leave False so CUDA graphs are captured. |
 | `kv_offloading_size` | `--kv-offloading-size` | Total GiB across all TP ranks (e.g. `400` = 100 GiB/GPU for TP=4). Uses GH200 Grace DRAM at 900 GB/s via NVLink-C2C. |
-| `kv_offloading_backend` | `--kv-offloading-backend` | `"native"` (default). |
+| `kv_offloading_backend` | `--kv-offloading-backend` | `"native"` (default) — vLLM's builtin Grace-DRAM spill. **LMCache is NOT a value of this flag**: it is a separate vLLM KV *connector* (`--kv-transfer-config` with `LMCacheConnectorV1` / `kv_connector_module_path`, baked into the 0.23 image) — that connector, not this flag, is the configuration surface for the deferred `lmcache` offload level (TODOs.md). |
 | `speculative_decoding.draft_model` | part of `--speculative-config` JSON | Draft model identifier (HuggingFace ID or path). See the vLLM compatibility notes below. |
 | `speculative_decoding.num_speculative_tokens` | part of `--speculative-config` JSON | |
 | `speculative_decoding.draft_tensor_parallel_size` | part of `--speculative-config` JSON | Draft tensor-parallel size. Shared- vs dedicated-GPU guidance in §17.2. |
@@ -1839,6 +1841,8 @@ release, so that planner templates don't regress to deprecated syntax when the p
 | `--enable-prefix-caching` | ✅ Works | |
 | `--safetensors-load-strategy` | ✅ Works | |
 | `--speculative-config` | ✅ Works | JSON string |
+| `--disable-custom-all-reduce` / `--enforce-eager` | ⚠️ 0.22.1 multi-node workarounds | The cross-node custom-all-reduce illegal-memory-access + CUDA-graph `CUBLAS_STATUS_EXECUTION_FAILED` were 0.22.1-specific; **0.23 runs both custom all-reduce and CUDA graphs ON cleanly** (validated 2-node, job 2542392). Do not set on 0.23. |
+| `--kv-transfer-config` (LMCache / NIXL connector) | ✅ Available (image-baked) | Activates a KV connector (`LMCacheConnectorV1` for offload+reuse; `NixlConnector` for P/D). LMCache 0.4.6 + NIXL 1.2.0 are baked into the 0.23 image; the `BackendConfig` field is not yet wired (TODOs.md). |
 | `VLLM_ENABLE_CUDA_COMPATIBILITY=1` (env) | ❌ Must not be set on current GH200 drivers | Causes Error 803. |
 
 #### SGLang
