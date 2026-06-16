@@ -145,7 +145,24 @@ Quality is **identical across platforms** — Stage-B 0.7187 on both (determinis
 difference (0.732 vs 0.738) is sampling noise. This is the baseline quality the fp8 / KV-offload cells
 will be measured against (capacity-vs-quality, §15.1).
 
-## 7. Platform comparison — conclusion
+## 7. Conclusions
+
+### Supportable users at λ\* = 0.5 session-starts/s (single GH200 node)
+
+- **Concurrent users ≈ 42** — *grounded, no behavioural assumption*: Little's law on the **measured**
+  session throughput × mean session wall-time at λ\* — ≈ **30 chat + 12 agentic** active sessions (one
+  active session per user), essentially identical on both platforms (SLURM 41.6, K8s 43.1). This is the
+  firm single-node capacity figure for this 80/20 mix.
+- **Total user population ≈ 340** — *assumption-dependent*: if a chat user starts ~6 sessions/hour and an
+  agentic-coding user ~3 sessions/hour, the node sustains ≈ 229 chat + 114 agentic ≈ **340 users** (both
+  platforms). It scales **inversely** with sessions/user/hour (2× the per-user rate → ½ the population),
+  and those per-class rates are not yet validated (§15.1, TODO) — so treat the population as *illustrative*
+  and the **concurrent ≈ 42** as the firm number.
+
+Caveats: λ\* is **coarse** (one sub-knee point — a refinement pass would sharpen it and likely *raise* the
+estimate), and these are **single-node** figures (replicas scale ≈ linearly, modulo ingress/routing).
+
+### Platform parity
 
 Across every section above (capacity §4, queue §5, quality §6), **SLURM and K8s land at the same operating
 point**: λ\*=0.5 on both, the same λ=1.0 saturation knee (queue-84%), and **identical Stage-B quality**
