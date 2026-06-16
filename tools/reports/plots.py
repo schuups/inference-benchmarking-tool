@@ -55,7 +55,7 @@ def latency_figure(
                     alpha=alpha, label=f"{pfx}{p}")
     ax.set_yscale("log")
     if slo_threshold:
-        ax.axhline(slo_threshold, ls="--", color=SLO_COLOR, label=f"SLO {slo_threshold:g}")
+        ax.axhline(slo_threshold, ls="--", color=SLO_COLOR, label=f"SLO {slo_threshold:g} ms")
     ax.set_ylabel(f"{metric} (ms)")
     ax.set_title(f"{metric} vs λ — {report.run_id}")
     ax.legend()

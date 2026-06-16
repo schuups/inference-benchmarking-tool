@@ -20,7 +20,8 @@ the production-grade Alps image.
 > **Platform comparison — in progress.** The SLURM (clariden) results below are complete; the **K8s
 > (breithorn) run is in flight** and this report will be enriched with its results and a side-by-side
 > SLURM-vs-K8s comparison once it lands. *(256K note: this checkpoint is natively 64K; the 256K window
-> is forced to validate the pipeline ahead of the native-256K next Apertus — see Disclosures.)*
+> is forced to validate the pipeline ahead of **Apertus-70B 1.5** — the upcoming version, which will
+> natively support 256K — see Disclosures.)*
 
 ## 1. Pre-checks (§8 foundation gate)
 
@@ -32,7 +33,7 @@ foundation. All checks passed on the populated 1-node clariden reference:
 | NCCL all-reduce @128 MiB | 309.5 GB/s | 317.7 | ✅ pass |
 | NCCL all-gather @128 MiB | 278.9 GB/s | 283.5 | ✅ pass |
 | NCCL all-to-all @128 MiB | 307.8 GB/s | 306.2 | ✅ pass |
-| NVSHMEM all-to-all latency @128 KiB | 12.68 µs | — | ✅ pass |
+| NVSHMEM all-to-all latency @128 KiB *(not relevant for this model)* | 12.68 µs | — | ✅ pass |
 | capstor sequential read (single-stream O_DIRECT) | 0.197 GB/s | floor 0.063 | ✅ pass |
 | capstor parallel read (8-stream O_DIRECT) | 1.01 GB/s | — | ✅ pass |
 | capstor buffered read (readahead) | 14.32 GB/s | — | ✅ pass |
@@ -117,7 +118,7 @@ This is the baseline quality the fp8 / KV-offload cells will be measured against
 
 - **Forced 256K on a natively-64K checkpoint.** `config.json` caps at 64K (`max_position_embeddings=65536`);
   this run set `max_model_len=262144` + `VLLM_ALLOW_LONG_MAX_MODEL_LEN=1` to **validate the 256K serving
-  pipeline ahead of the native-256K next Apertus**. Outputs on requests exceeding 64K (the long
+  pipeline ahead of Apertus-70B 1.5** (the upcoming version, which will natively support 256K). Outputs on requests exceeding 64K (the long
   agentic-session tail) are degraded beyond the trained window. **Capacity timing and the queue/knee are
   unaffected** (forced output length, `ignore_eos`); **quality is unaffected** (gsm8k prompts are short).
 - **Latency at λ ≥ 1 is partly a client artifact.** At saturation the single-process load generator hit
