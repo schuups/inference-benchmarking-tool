@@ -74,6 +74,26 @@
   pass 1, add λ levels around the located λ* (per cell / platform) and re-run to resolve the knee —
   reuse the same staged dataset pool (extend `num_prompts` only if the refined levels push total
   session starts past the pool size). Then the 2-node grid, then the LMCache 3rd axis (above).
+- [ ] **Parallel campaign driver** — run independent cells (each its own benchmarker+engine node-set)
+  **concurrently** across separate allocations, not sequentially: generate the shared pool once → stage
+  it into every run dir → submit/monitor N cells in parallel (SLURM via FirecREST, K8s via kubectl) →
+  collect → teardown. No confounding (separate nodes); the single-node grid (8 cells) drops from ~12 h
+  sequential to ~1.5 h. Biggest campaign-speed lever (the deferred "sequential campaign driver", now parallel).
+- [ ] **Faster knee-finding sweeps** (operator 2026-06-16; the drain of stalled multi-turn sessions
+  dominates saturated-level wall-clock): for the offload/dtype cells apply the **Balanced bundle** —
+  `drain_timeout_s` ↓ (~120–180 s), `stop_after_saturated_levels: 1`, Stage-B `eval_concurrency` ↑, gate
+  `sample_size` ↓ — and consider **adaptive measurement-stop** (end a level once the queue is sustained
+  non-empty) + a **shorter knee-finding warmup** with a single **high-fidelity run at λ\*** for the
+  reported operating point (two-tier). None distort the workload model — they stop measuring overload
+  already characterised.
+- [ ] **K8s cross-cluster instrumentation gaps** (surfaced at the E3a K8s baseline, 2026-06-16 — the
+  ExternalEndpointLauncher benchmarker can't read in-pod state, so K8s runs lose data SLURM captures):
+  (a) **pre-check values** not persisted — the in-pod §8 torch-probe `results.json` (pod `/results` PVC)
+  isn't ingested into the benchmarker DB (`system_prechecks`=0 rows; only pass/admit known);
+  (b) **model-loading breakdown** not captured — the engine loads before the benchmarker attaches and
+  its vLLM log isn't read (`model_load_total_s` is only the ingress-readiness wait); parse `kubectl logs`;
+  (c) **hardware_stats**=0 — the in-pod sampler writes the pod `/results` PVC, never fetched. Decide a
+  cross-cluster mechanism (fetch the pod `/results` before teardown, or stream to the benchmarker).
 
 ### Cold-start optimisation experiment groups
 
