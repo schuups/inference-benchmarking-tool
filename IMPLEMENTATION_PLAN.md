@@ -267,7 +267,7 @@ Sizes are relative complexity (S < M < L), not time promises.
 - **DoD**: identification correctly lists deliberately-orphaned test resources on both
   platforms; pruning removes exactly the approved list; model-cache PVCs skipped.
 
-### M11 — Quality eval runner (M) — ✅ laptop half done 2026-06-13 (QualityEvalRunner implements M7's seam; BuiltinEvalBackend in-process grader is the tested path against the mock's canned answers; LmEvalBackend wraps lm-eval-harness `local-chat-completions` for standard suites — provisional model-args/parse, E1-validated like the readiness regexes; Stage-A floor gate + Stage-B suites×eval-concurrency rows persisted to `quality_evals`; wired into M7 `main.py`; GPQA gating + thinking-model parsing documented/deferred)
+### M11 — Quality eval runner (M) — ✅ laptop half done 2026-06-13 (QualityEvalRunner implements M7's seam; BuiltinEvalBackend in-process grader is the tested path against the mock's canned answers; LmEvalBackend wraps lm-eval-harness `local-chat-completions` for standard suites — **validated end-to-end on-cluster 2026-06-16 on BOTH SLURM + K8s** (real gsm8k Stage-A gate 0.56 + Stage-B 0.5436 against a deployed Apertus-8B, `quality_evals` rows persisted both platforms). **Gotcha:** the `lm-eval[api]` extra is REQUIRED (plain `lm-eval` ModuleNotFoundError's on `tenacity`); now pinned in `requirements.txt`. Stage-A floor gate + Stage-B suites×eval-concurrency rows persisted to `quality_evals`; wired into M7 `main.py`; GPQA gating + thinking-model parsing documented/deferred)
 
 - **Deliverables**: `tools/benchmarker/quality_eval/` — lm-eval-harness wrapper
   targeting the deployed OpenAI-compatible endpoint(s); **Stage A** sanity gate

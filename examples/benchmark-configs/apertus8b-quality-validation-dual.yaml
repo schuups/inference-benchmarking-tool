@@ -1,0 +1,79 @@
+# Quality-evaluation validation — Apertus-8B, clariden (SLURM) + breithorn (K8s).
+#
+# Purpose: prove the §13.5 GRADED-QUALITY path works end-to-end on BOTH platforms before the
+# E4 quantization (KV-dtype) sweeps that depend on it. It runs lm-eval-harness (LmEvalBackend,
+# previously never executed) against each deployed endpoint: a Stage-A gsm8k sanity gate + a
+# Stage-B comparison, persisting `quality_evals` rows (§14.9) and exercising the report's
+# capacity-vs-quality panel (§15.1). The λ sweep is deliberately minimal — quality is the point,
+# not capacity. Apertus-8B (TP1) keeps it fast/cheap; §8 pre-checks skipped (already validated).
+#
+# Validate: .venv/bin/python -m tools.common.config examples/benchmark-configs/apertus8b-quality-validation-dual.yaml
+
+name: apertus8b-quality-validation-dual
+description: >
+  Validate the graded-quality path (lm-eval → gsm8k) on clariden (SLURM) + breithorn (K8s):
+  Stage-A gate + Stage-B compare against each deployed Apertus-8B endpoint, → quality_evals rows.
+
+deployments:
+  - target: clariden                 # SLURM
+    backend: vllm
+    backend_version: "0.23.0"
+    image: jfrog.svc.cscs.ch/ml/inference/vllm:0.23.0-alps.net.v1-gh200
+    model: swiss-ai/Apertus-8B-Instruct-2509
+    backend_config:
+      tensor_parallel_size: 1        # 8B fits on one GH200
+      max_model_len: 16384
+      gpu_memory_utilization: 0.90
+  - target: breithorn                # K8s — identical engine; only the platform differs
+    backend: vllm
+    backend_version: "0.23.0"
+    image: jfrog.svc.cscs.ch/ml/inference/vllm:0.23.0-alps.net.v1-gh200
+    model: swiss-ai/Apertus-8B-Instruct-2509
+    backend_config:
+      tensor_parallel_size: 1
+      max_model_len: 16384
+      gpu_memory_utilization: 0.90
+
+dataset_config:
+  scenario_mix:
+    - scenario: smoke-synthetic
+      weight: 1.0
+  num_prompts: 400
+  seed: 1234
+  output_length_mode: forced
+
+rate_levels: [0.5]                   # minimal — the quality eval is the focus, not the sweep
+
+arrival_process:
+  kind: poisson
+
+routing_strategy: random
+
+phases:
+  warmup_s: 30
+  measurement_s: 60
+  drain_timeout_s: 60
+  request_timeout_s: 120
+  server_ready_timeout_s: 1200       # 8B loads fast; K8s adds first image-pull + ingress
+
+slos:                                # loose — not the point
+  - { scenario: smoke-synthetic, metric: ttft_ms, percentile: p95, threshold: 5000 }
+  - { scenario: all,             metric: error_rate_pct,            threshold: 5.0 }
+
+quality_eval:                        # THE POINT — graded quality runs (NOT skipped)
+  gate:                              # Stage-A: pre-sweep sanity gate
+    suite: gsm8k                     # ungated; works out of the box (lm-eval fetches from HF)
+    sample_size: 50                  # small — validating the path, not a full benchmark
+    floor: 0.20                      # lax
+    on_fail: continue                # don't abort the validation if a score is low — we want the row
+  compare:                           # Stage-B: post-sweep comparison (the KV-dtype delta mechanic)
+    suites: [gsm8k]
+    eval_concurrency: [1]            # minimal
+  skip_quality_gate: false
+  skip_quality_compare: false
+
+system_prechecks:
+  skip_system_prechecks: true        # §8 already validated at the dual-platform smoke; not the focus
+  collective_tests_version: "2.18.2"
+
+server_time_limit: "01:30:00"

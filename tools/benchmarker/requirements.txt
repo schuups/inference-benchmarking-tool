@@ -16,5 +16,8 @@ transformers         # target-model tokenizer (dataset_gen.tokenizers.HFTokenize
 datasets             # longbench / reasoning_trace_replay sources (HF datasets)
 pyarrow              # wildchat parquet shard reads (dataset_gen.sources.WildChatSource)
 
-# --- graded quality extras: install when Stage-A/B quality comes online ---
-# lm-eval              # Stage-A/B quality evaluation (pulls torch)
+# --- graded quality extras (§13.5): lm-eval-harness grades the deployed endpoint ---
+lm-eval[api]         # Stage-A gate + Stage-B compare (LmEvalBackend). The [api] EXTRA is REQUIRED
+                     # for lm-eval's local-chat-completions model (tenacity/tiktoken) — plain
+                     # `lm-eval` ModuleNotFoundError's on tenacity. Pulls torch (API-only eval, no
+                     # local GPU). Validated on-cluster (SLURM + K8s) 2026-06-16.
