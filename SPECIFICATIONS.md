@@ -474,9 +474,15 @@ test adds maintenance without adding signal.
     "<engine>"` — one task per node (vLLM drives its GPUs in-process, or via Ray for multi-node).
     The allocation is sized `--ntasks-per-node=<gpus_per_node>` so the pre-check step gets one task
     per GPU; the engine step simply uses fewer.
-  - **Kubernetes**: an equivalent pre-check container/step runs before the engine container in
-    the engine's own pod (same image, env, mounts, `securityContext`); K8s rank-topology details
-    are finalised at E2c.
+  - **Kubernetes**: K8s has no `srun`/PMIx, and Ray is control-plane only (vLLM's collectives
+    still run over NCCL/Slingshot), so the pre-check is launched **the way the engine is on K8s —
+    via Ray** (IMPLEMENTATION_PLAN.md decision 9): a Ray-placed `torch.distributed` collective
+    probe — one task per GPU, the same all_reduce / all_gather / alltoall busbw on vLLM's own
+    torch+NCCL stack — run on the engine's Ray cluster before `vllm serve`, gated identically
+    (§8.4). Single-node K8s is the 1-pod case of the same probe. *Interim, until the probe lands*:
+    single-node runs the in-pod **single-process** nccl-tests (`NCCL_TESTS_MPI=0`, one process
+    over the pod's GPUs) — the launch differs from SLURM's nccl-tests/PMIx, but busbw stays
+    comparable for the §16.1 platform overlay.
 
   This replaces the earlier welded `run_system_prechecks && exec <engine>` single-invocation model,
   which could only give the pre-checks the engine's **1-task-per-node** topology — adequate

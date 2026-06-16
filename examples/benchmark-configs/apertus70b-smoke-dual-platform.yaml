@@ -1,0 +1,100 @@
+# Apertus-70B dual-platform smoke test — clariden (SLURM) + breithorn (K8s).
+#
+# Purpose: rapid pipeline + platform validation of the freshly-baked vLLM 0.23.0 Alps image
+# (nvidia-gh200-vllm-0.23.0-net.v1, Ray baked in) serving Apertus-70B on a SINGLE GH200 node
+# (TP4) on BOTH targets. NOT a capacity run — smoke-synthetic scenario, a few λ levels, loose
+# SLOs; results are pipeline/platform validation, never findings (§9.2 smoke exemption). The
+# two deployments produce two run_ids with IDENTICAL engine config, so the only variable is
+# the platform (the E5 comparison shape, in miniature; also exercises the E2c K8s path).
+#
+# Image: built + pushed + 2-node sanity-GREEN on clariden 2026-06-15 (vllm 0.23.0, ray 2.55.1,
+# inter-node all_reduce 151.7 GB/s; manifest status: verified). Single-node TP4 uses intra-node
+# NVLink and vLLM's own multiprocessing — Ray is baked in but unused here, and none of the E2b
+# cross-node workarounds (disable_custom_all_reduce / enforce_eager) are needed.
+#
+# PREREQUISITES (outside this YAML):
+#   - clariden (SLURM): Apertus-70B weights in the capstor hf-cache (SPEC §9.2 matrix).
+#   - breithorn (K8s): Apertus-70B weights on the read-only model-cache PVC (HF_HOME=/model-cache,
+#     HF_HUB_OFFLINE=1); the 0.23.0 image pullable via the jfrog-pull secret. ingress_domain +
+#     image_pull_secret are already in global.yaml's breithorn entry.
+#
+# Validate: .venv/bin/python -m tools.common.config examples/benchmark-configs/apertus70b-smoke-dual-platform.yaml
+
+name: apertus70b-smoke-dual-platform
+description: >
+  Rapid dual-platform smoke of the vLLM 0.23.0 Alps image serving Apertus-70B single-node
+  (TP4) on clariden (SLURM) and breithorn (K8s): spawn → readiness → primer → 3-λ sweep →
+  DB → notebook, on each platform. Validates the 0.23 image + both engine paths end-to-end.
+  Pipeline/platform validation only, never findings (§9.2 smoke exemption).
+
+deployments:
+  # --- SLURM (clariden) ---
+  - target: clariden
+    backend: vllm
+    backend_version: "0.23.0"
+    image: jfrog.svc.cscs.ch/ml/inference/vllm:0.23.0-alps.net.v1-gh200
+    model: swiss-ai/Apertus-70B-Instruct-2509
+    backend_config:
+      tensor_parallel_size: 4          # §6.1: == gpus_per_node; intra-node NVLink, single-node (no Ray/PP)
+      max_model_len: 16384             # smoke-synthetic input is short → small KV → fast bring-up
+      gpu_memory_utilization: 0.90
+      enable_prefix_caching: true
+      safetensors_load_strategy: prefetch   # Lustre weight load (§6.1)
+  # --- K8s (breithorn) — IDENTICAL engine config; only the platform differs ---
+  - target: breithorn
+    backend: vllm
+    backend_version: "0.23.0"
+    image: jfrog.svc.cscs.ch/ml/inference/vllm:0.23.0-alps.net.v1-gh200   # same image; self-contained → K8s-ready
+    model: swiss-ai/Apertus-70B-Instruct-2509
+    backend_config:
+      tensor_parallel_size: 4          # breithorn gpus_per_node=4 (GH200) → TP4 single-node fits
+      max_model_len: 16384
+      gpu_memory_utilization: 0.90
+      enable_prefix_caching: true
+      safetensors_load_strategy: prefetch
+
+dataset_config:
+  scenario_mix:
+    - scenario: smoke-synthetic        # synthetic source: no HF egress; §9.2 exempt, never findings
+      weight: 1.0
+  num_prompts: 1500
+  seed: 1234
+  output_length_mode: forced
+
+rate_levels: [0.5, 1.0, 2.0]           # a few λ levels (session starts/s, §12.3) — rapid smoke
+
+arrival_process:
+  kind: poisson
+
+routing_strategy: random
+
+phases:
+  warmup_s: 60
+  measurement_s: 120
+  drain_timeout_s: 120
+  request_timeout_s: 120
+  server_ready_timeout_s: 3000         # 70B load (capstor / K8s PVC) + K8s first image-pull + ingress/cert
+
+slos:                                  # loose — validates the pipeline, not performance
+  - { scenario: smoke-synthetic, metric: ttft_ms, percentile: p95, threshold: 5000 }
+  - { scenario: all,             metric: error_rate_pct,            threshold: 5.0 }
+
+quality_eval:
+  skip_quality_gate: true
+  skip_quality_compare: true
+
+system_prechecks:
+  # Run the §8 foundation gate on BOTH platforms — the engine templates invoke
+  # run_system_prechecks.sh in-pod (K8s) / as a dedicated step (SLURM) before serving.
+  # on_*: continue → capture + grade, don't abort the smoke (E2b-style characterisation;
+  # the gated capacity run uses abort). Known methodology gap (parity upgrade tracked):
+  # SLURM runs the MULTI-RANK step (one process per GPU, NVSHMEM-capable); K8s currently
+  # runs SINGLE-PROCESS N-GPU collectives (NCCL_TESTS_MPI=0) — same NVLink fabric, but not
+  # yet one-process-per-GPU. breithorn reference rows are TBD → they grade informational.
+  skip_system_prechecks: false
+  system_prechecks_on_warn: continue
+  system_prechecks_on_fail: continue
+  collective_tests_version: "2.18.2"   # matches the 0.23 image's baked nccl-tests pin
+  shmem_required: false                # single-node dense model; NVSHMEM not on the serving path
+
+server_time_limit: "02:00:00"          # benchmarker (SLURM) wall-clock, per deployment

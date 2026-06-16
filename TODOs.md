@@ -127,6 +127,18 @@
   (intra-node NVLink — the low-risk case to validate NVSHMEM on the hook-disabled image before E2b's
   inter-node Slingshot path). Host CXI / `aws_ofi_nccl` hooks stay **disabled** (image provides
   libfabric/cxi).
+- [ ] **K8s §8 pre-check: torch.distributed probe — finish multi-node + validate** (IMPLEMENTATION_PLAN
+  decision 9). **Built (2026-06-15):** `collective_probe.py` (launcher-agnostic torch.distributed
+  all_reduce/all_gather/alltoall busbw, emits nccl-tests-shaped `collective_<c>.out` so `grade.py` +
+  the reference table are reused unchanged) + `run-collectives-torch.sh` (single-node / 1-pod via
+  `torchrun --standalone`, one rank per GPU); `run_system_prechecks.sh` forks on `PRECHECK_LAUNCHER`;
+  the K8s engine template sets `PRECHECK_LAUNCHER=torch`. Contract + busbw factors unit-tested off-GPU.
+  **Remaining:** (a) **on-cluster validation** of the probe in the breithorn engine pod (busbw vs the
+  SLURM nccl-tests numbers — first K8s run does this; the dual-platform smoke is the vehicle);
+  (b) the **multi-node Ray-placement launcher** — set RANK/WORLD_SIZE/MASTER_ADDR across the engine's
+  Ray worker pods and run the *same* probe (gated on the unbuilt multi-node K8s Ray engine); (c) populate
+  the breithorn reference rows (E2c); (d) NVSHMEM-over-Ray bootstrap (only for K8s multi-node MoE).
+  Note for E5: the K8s launch differs from SLURM's nccl-tests/PMIx but busbw stays comparable.
 - [ ] **Multi-node engine: durable fixes** (validated at E2b 2026-06-15, Apertus-70B TP4×PP2, 2 nodes —
   the full pipeline now runs: 8-rank prechecks → Ray 2-node → 70B load → readiness → sweep → persist):
   (a) **Ray not in the Alps image** (`import ray` fails). Interim is a diagnostic `pip install --target=
@@ -238,6 +250,12 @@ benchmark-YAML change per §9.2).
 - [ ] **Pin HF dataset revisions** (§11.8) — the WildChat / LongBench / gsm8k loaders
   read the dataset repos at HEAD; pin a `revision=` per experiment (recorded with the
   manifest) so pools regenerate identically across time and machines.
+- [ ] **Calibrate the E3a agentic char→token target** — `apertus70b-mixed-single-node-clariden.yaml`
+  sets the agentic `input_length` mean to 7000 tok as an estimate of the operator's "≈25k-char"
+  context (LongBench code ≈3.5 chars/tok). `input_length` is in tokens, so the realized char
+  length depends on the actual Apertus-70B tokenizer on lcc/repobench-p. After dataset gen, check
+  the per-class mean chars in the manifest (§14.7) and adjust the token target if it diverges
+  materially from ~25k chars before the graded sweep.
 - [ ] **Additional reasoning-trace datasets** (§11.5) — `_REASONING_TRACE_DATASETS`
   supports gsm8k; add MATH, AIME, and R1-distill traces (field mapping + licence check
   each).

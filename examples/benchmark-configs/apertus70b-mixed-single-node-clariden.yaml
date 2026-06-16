@@ -11,8 +11,10 @@
 # 1-node clariden reference (NCCL all_reduce 317.7 GB/s etc.; capstor storage floor).
 #
 # Workload (SPEC §9.2, corrected 2026-06-15): Apertus-70B is chat-dominated. The 20%
-# agentic share is drawn at ≈25k-char turn-1 context — overridden below to ~6250 tokens
-# (25 000 chars ÷ ~4 chars/token; the scenario default is 15000 tok ≈ 60k chars, too long).
+# agentic share is drawn at ≈25k-char turn-1 context — overridden below to ~7000 tokens
+# (25 000 chars ÷ ~3.5 chars/token for CODE from LongBench lcc/repobench-p; the scenario
+# default is 15000 tok ≈ 60k chars, too long). The realized mean chars should be checked
+# in the dataset manifest (§14.7) and the token target recalibrated if it diverges from ~25k.
 # Full 256K (262 144) context window per the model's real capability (operator choice).
 #
 # PREREQUISITE: Apertus-70B weights staged in the capstor hf-cache
@@ -40,10 +42,13 @@ deployments:
       tensor_parallel_size: 4          # §6.1: == gpus_per_node (4); intra-node NVLink, no Ray
       pipeline_parallel_size: 1        # single node — no cross-node PP, no Ray bring-up
       max_model_len: 262144            # 256K — full model capability (operator choice)
-      # Chunked-prefill budget. Deliberately NOT equal to max_model_len here (cf. §16.2 long-
-      # context convention): the traffic is short-dominated (80% chat, 20% agentic @ ~6.25k tok),
-      # so 16384 admits any agentic turn-1 prompt whole, chunks only the rare full-context
-      # request, and keeps prefill/decode interleave healthy for the chat majority.
+      # Chunked-prefill budget. Deliberately NOT equal to max_model_len (cf. the §16.2 long-
+      # context convention, which targets uniformly-long traffic): this workload is short-
+      # dominated (80% chat, 20% agentic ≤16k tok). 16384 ≥ the agentic input cap (16000) so
+      # every common prompt prefills in ONE chunk, while the rare full-256K request is chunked
+      # across ~16 steps — protecting chat TTFT/TPOT under mixed load. =max_model_len here
+      # would let one long prefill monopolize a scheduler step and balloon activation memory,
+      # hurting the very per-class SLOs this run measures.
       max_num_batched_tokens: 16384
       gpu_memory_utilization: 0.90
       enable_prefix_caching: true      # agentic turn-1 context reuse (append_delta) + chat
@@ -55,12 +60,13 @@ dataset_config:
       weight: 0.8
     - scenario: agentic-coding
       weight: 0.2
-      # Override turn-1 context to ≈25k chars ≈ 6250 tokens (scenario default is 15000 tok
-      # ≈ 60k chars). Session structure (turns, think-time, follow-ups) stays as the scenario
-      # defines. min/max scaled proportionally from the scenario's 4000/64000.
+      # Override turn-1 context to ≈25k chars ≈ 7000 tokens (LongBench code tokenizes at
+      # ~3.5 chars/tok; scenario default is 15000 tok ≈ 60k chars). Session structure (turns,
+      # think-time, follow-ups) stays as the scenario defines. max 16000 tok == the chunked-
+      # prefill budget below, so agentic prompts are never split mid-prefill.
       input_length:
         distribution: lognormal
-        params: { mean: 6250, sigma: 0.5, min: 4000, max: 16000 }
+        params: { mean: 7000, sigma: 0.5, min: 4000, max: 16000 }
   num_prompts: 8000                    # session pool > Σ λ·(warmup+measurement) across the sweep
   seed: 1234
   output_length_mode: forced           # §11.6 — sweep traffic stays reproducible
@@ -91,11 +97,13 @@ quality_eval:                          # capacity run — no graded quality (lm-
   skip_quality_compare: true
 
 system_prechecks:
-  skip_system_prechecks: false         # §8 foundation gate (only gate this run — quality skipped)
-  system_prechecks_on_warn: continue
-  system_prechecks_on_fail: continue   # capstor storage is known-degraded/variable — capture &
-                                       # review in the report rather than abort a long real run on
-                                       # a transient storage dip; NCCL collapse still shows in results
+  skip_system_prechecks: false         # §8 foundation gate (the ONLY gate this run — quality skipped)
+  system_prechecks_on_warn: continue   # minor shortfalls (incl. capstor's known wobble) → warn, not block
+  system_prechecks_on_fail: abort      # grade.py fails only at 0.5×/2× of reference: NCCL <159 GB/s
+                                       # (real TP-fabric collapse) or capstor seq-read <0.0315 GB/s
+                                       # (half the 0.063 degraded floor — E2 measured 0.07–0.19), so
+                                       # normal capstor variability stays in warn. A genuinely broken
+                                       # foundation must not silently corrupt the only-gated capacity run.
   collective_tests_version: "2.18.2"   # matches the Alps image's NCCL/nccl-tests ecosystem
   shmem_required: false                # single-node dense model — no expert-parallel NVSHMEM dep
 
