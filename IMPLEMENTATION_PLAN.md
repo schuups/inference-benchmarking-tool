@@ -198,9 +198,12 @@ Sizes are relative complexity (S < M < L), not time promises.
   `tools/templates/slurm/engine.sbatch.j2`, `tools/templates/benchmarker.sbatch.j2` (the
   Benchmarker is **always SLURM**, §2) and `tools/templates/k8s/engine.yaml.j2` (the K8s
   *engine* manifest, seeded from `examples/k8s-deployment/`); renders the full §14.8
-  experiment directory from one benchmark YAML; CLI + Claude-driven paths (§5). (The SLURM
-  Benchmarker that drives a K8s engine — endpoint reachability + benchmarker-cluster
-  designation — is an E5 deliverable; see §6.2.)
+  experiment directory from one benchmark YAML; CLI + Claude-driven paths (§5). **The SLURM
+  Benchmarker that drives a K8s engine is now rendered too** (2026-06-16): a K8s deployment
+  emits `benchmarker.sbatch` configured with `--endpoint-url <ingress>` (ExternalEndpointLauncher)
+  running on the `benchmarker_cluster` (a new `ClusterInfo` field, e.g. breithorn→clariden), plus
+  the per-run `/results` PVC (`results_storage_class`). Validated end-to-end at the dual-platform
+  smoke (§6.2).
 - **DoD**: golden-file render tests; rendered sbatch passes `sbatch --test-only` on
   `clariden`; rendered manifests pass `kubectl apply --dry-run=server` on `breithorn`;
   asserted in tests: time-limit alignment (§6.1), the §8.2

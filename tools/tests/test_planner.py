@@ -203,10 +203,15 @@ def test_k8s_render(tmp_path, canonical_dict, globals_cfg):
     assert backend["name"] == by_kind["Service"]["metadata"]["name"]  # → the engine Service
     assert backend["port"]["number"] == 8000
 
-    # The Benchmarker is ALWAYS SLURM (§2) — never a K8s pod. For a K8s engine target the
-    # SLURM Benchmarker wiring is an E5 deliverable, so no benchmarker artifact renders here.
+    # The Benchmarker is ALWAYS SLURM (§2) — never a K8s pod. For a K8s engine it renders a
+    # benchmarker.sbatch that runs on the designated benchmarker_cluster (clariden) and
+    # load-gens the engine ingress via --endpoint-url (§6.2).
     assert not (run_dir / "benchmarker-pod.yaml").exists()
-    assert not (run_dir / "benchmarker.sbatch").exists()
+    bench = (run_dir / "benchmarker.sbatch").read_text()
+    assert "--endpoint-url https://ibt-engine-" in bench and ".breithorn.svc.cscs.ch" in bench
+    assert "--engine-sbatch" not in bench              # K8s path: no engine spawn by the Benchmarker
+    assert "#SBATCH --partition=normal" in bench       # clariden's partition (benchmarker_cluster)
+    assert "#SBATCH --account=csstaff" in bench
 
 
 def test_k8s_names_within_63_chars(tmp_path, canonical_dict, globals_cfg):

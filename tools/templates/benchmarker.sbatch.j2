@@ -32,5 +32,6 @@ exec "$VENV/bin/python" -m tools.benchmarker.main \
     --config {{ run_dir_remote }}/benchmark_config.yaml \
     --run-id {{ run_id }} \
     --run-dir {{ run_dir_remote }} \
-    --engine-sbatch {{ run_dir_remote }}/engine.sbatch \
-    --deployment-index {{ deployment_index }}
+{% if endpoint_url %}    --endpoint-url {{ endpoint_url }} \
+{% else %}    --engine-sbatch {{ run_dir_remote }}/engine.sbatch \
+{% endif %}    --deployment-index {{ deployment_index }}

@@ -45,13 +45,21 @@ class ClusterInfo(StrictModel):
     # image registry (JFrog requires auth — anonymous pull is 403).
     ingress_domain: str | None = None
     image_pull_secret: str | None = None
+    # k8s only: the SLURM cluster that runs the Benchmarker for this K8s engine (§6.2 — the
+    # Benchmarker is ALWAYS SLURM; for a K8s engine it load-gens the ingress from a designated
+    # SLURM cluster) and the storage class for the per-run /results PVC.
+    benchmarker_cluster: str | None = None
+    results_storage_class: str | None = None
 
     @model_validator(mode="after")
     def _per_type_fields(self) -> "ClusterInfo":
         if self.type == "slurm" and (self.platform is None or self.partition is None):
             raise ValueError("slurm cluster needs 'platform' and 'partition'")
-        if self.type == "k8s" and self.namespace is None:
-            raise ValueError("k8s cluster needs 'namespace'")
+        if self.type == "k8s":
+            missing = [f for f in ("namespace", "benchmarker_cluster", "results_storage_class")
+                       if getattr(self, f) is None]
+            if missing:
+                raise ValueError(f"k8s cluster needs {missing}")
         return self
 
 
@@ -69,6 +77,20 @@ class GlobalConfig(StrictModel):
     scratch_base: str
     collective_tests_cache_dir: str
     registry: RegistryGlobals
+
+    @model_validator(mode="after")
+    def _benchmarker_clusters_valid(self) -> "GlobalConfig":
+        # A K8s engine's Benchmarker runs on a SLURM cluster (§6.2) — that target must exist
+        # and be SLURM (the Benchmarker is never a K8s pod).
+        for name, c in self.clusters.items():
+            if c.type == "k8s":
+                bc = self.clusters.get(c.benchmarker_cluster)
+                if bc is None or bc.type != "slurm":
+                    raise ValueError(
+                        f"k8s cluster '{name}': benchmarker_cluster "
+                        f"'{c.benchmarker_cluster}' must be a defined SLURM cluster"
+                    )
+        return self
 
 
 def load_global_config(path: Path = GLOBAL_CONFIG_PATH) -> GlobalConfig:

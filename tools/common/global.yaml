@@ -29,6 +29,8 @@ clusters:
     gpu_label: gh200
     ingress_domain: breithorn.svc.cscs.ch   # engine Ingress host: ibt-engine-<slug>.<this>; nginx + cert-manager letsencrypt, reachable from the SLURM Benchmarker (§6.2)
     image_pull_secret: jfrog-pull            # dockerconfigjson secret in ns ml for jfrog.svc.cscs.ch (anonymous pull is 403)
+    benchmarker_cluster: clariden            # the SLURM cluster that runs the Benchmarker for this K8s engine (load-gens the ingress, §6.2); validated end-to-end 2026-06-16
+    results_storage_class: ceph-corbo-cephfs # per-run /results PVC (pre-checks JSON + hw NDJSON + per-run DB); CephFS, reclaimed on teardown
 
 slurm:
   account: csstaff                 # never use other accounts (§6.1)

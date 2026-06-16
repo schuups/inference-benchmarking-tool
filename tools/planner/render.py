@@ -32,11 +32,6 @@ from tools.common.runid import (
 TEMPLATES_DIR = Path(__file__).resolve().parents[1] / "templates"
 TOOLS_DIR = Path(__file__).resolve().parents[1]
 
-# Storage class for the per-run K8s results PVC (/results: pre-check JSON, hw-sampler NDJSON,
-# the per-run SQLite DB). breithorn's CephFS class; TODO lift into global.yaml ClusterInfo when
-# a second K8s target appears (matches the cluster's `kubectl get storageclass`).
-K8S_RESULTS_STORAGE_CLASS = "ceph-corbo-cephfs"
-
 
 def k8s_tools_files() -> list[dict]:
     """The §8 pre-check + hw-sampler subset the K8s engine pod needs at /tools, for the
@@ -198,7 +193,13 @@ def render_experiment(
                 6, int((cfg.phases.server_ready_timeout_s) / 10)
             ),
             "tools_files": tools_files,  # K8s: /tools ConfigMap payload (decision 9)
-            "results_storage_class": K8S_RESULTS_STORAGE_CLASS,  # K8s: per-run /results PVC
+            "results_storage_class": cluster.results_storage_class,  # K8s: per-run /results PVC
+            # K8s engine endpoint the SLURM Benchmarker load-gens (ExternalEndpointLauncher,
+            # §6.2); None for SLURM, where the Benchmarker spawns the engine itself.
+            "endpoint_url": (
+                f"https://ibt-engine-{k8s_slug(run_id)}.{cluster.ingress_domain}"
+                if cluster.type == "k8s" else None
+            ),
         }
         # The Benchmarker is ALWAYS a SLURM allocation (§2, §5); only the engine
         # deployment under test is SLURM-or-K8s.
@@ -207,11 +208,13 @@ def render_experiment(
             _render(env, "slurm/engine.sbatch.j2", context, run_dir / "engine.sbatch")
             _render(env, "benchmarker.sbatch.j2", context, run_dir / "benchmarker.sbatch")
         else:
-            # K8s engine target: render the engine manifest. The SLURM Benchmarker that
-            # drives it (kubectl-deploys the engine + load-gens against an externally
-            # reachable endpoint, from a designated benchmarker cluster) is an E5
-            # deliverable — see SPECIFICATIONS.md §6.2 and TODOs.md. Never a K8s pod.
+            # K8s engine: kubectl-deploys via engine.yaml (assistant/Coordinator runs kubectl,
+            # Option B). The Benchmarker is STILL SLURM — it runs on the designated
+            # benchmarker_cluster and load-gens the engine's Ingress (--endpoint-url, §6.2).
             _render(env, "k8s/engine.yaml.j2", context, run_dir / "engine.yaml")
+            bench_cluster = glob.clusters[cluster.benchmarker_cluster]
+            bench_ctx = {**context, "partition": bench_cluster.partition}  # Benchmarker runs here, not on K8s
+            _render(env, "benchmarker.sbatch.j2", bench_ctx, run_dir / "benchmarker.sbatch")
     return exp_dir
 
 
