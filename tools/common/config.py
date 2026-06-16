@@ -272,15 +272,25 @@ class SystemPrechecks(StrictModel):
 
 
 class RateSweep(StrictModel):
-    """Adaptive λ-sweep early-stop (§12.2). With `early_stop` set, the Benchmarker evaluates the
-    per-class SLOs on each level's measurement-phase requests; after `stop_after_breached_levels`
-    CONSECUTIVE SLO-breaching levels it skips the remaining (higher) λ — those would only
-    characterise deeper overload past λ*. Off by default (every level runs); skipped levels are
-    logged, never silently dropped. E.g. with the default 2 and a knee below λ=2: λ=2 breaches
-    (1), λ=4 confirms (2) → skip λ=8, λ=16."""
+    """Adaptive λ-sweep early-stop (§12.2). With `early_stop`, the Benchmarker decides per level
+    whether the engine is SATURATED and, after `stop_after_saturated_levels` CONSECUTIVE saturated
+    levels, skips the remaining higher λ (logged, never silently dropped). `RunSummary.rate_levels`
+    reflects the levels actually run. Off by default (every level runs).
+
+    `stop_on` selects the saturation signal:
+      - `queue_nonempty` (default): the request queue is SUSTAINEDLY non-empty — `requests_waiting`
+        > 0 in ≥ `queue_nonempty_fraction` of the level's measurement-window scrapes (§14.4). This
+        is the physical onset of saturation (arrivals outrun service), independent of SLO
+        thresholds. A single transient blip from Poisson burstiness does NOT count (an M/M/1 queue
+        is occasionally non-empty even below capacity).
+      - `slo_breach`: any per-class SLO (§13.4) fails on the level's measurement-phase requests.
+
+    E.g. default 2 + a knee below λ=2: λ=2 saturated (1), λ=4 confirms (2) → skip λ=8, λ=16."""
 
     early_stop: bool = False
-    stop_after_breached_levels: int = Field(default=2, ge=1)
+    stop_on: Literal["queue_nonempty", "slo_breach"] = "queue_nonempty"
+    stop_after_saturated_levels: int = Field(default=2, ge=1)
+    queue_nonempty_fraction: float = Field(default=0.5, ge=0.0, le=1.0)
 
 
 class BenchmarkConfig(StrictModel):

@@ -141,6 +141,32 @@ def failure_rate_vs_lambda(req: pd.DataFrame, by_scenario: bool = False) -> pd.D
     )
 
 
+# --------------------------------------------------------------- server queue (§14.4)
+
+
+def queue_depth_vs_lambda(ss: pd.DataFrame) -> pd.DataFrame:
+    """Per-λ request-queue depth from the server scrapes (§14.4): mean (sustained) and max (peak)
+    `requests_waiting`, plus mean running + KV%. The latency knee aligns with the mean queue
+    rising above 0 — the saturation onset (§12.2). Empty frame if no scrapes / no waiting column."""
+    cols = ["rate_lambda", "waiting_mean", "waiting_max", "running_mean", "kv_pct_mean", "n"]
+    if ss is None or ss.empty or "requests_waiting" not in ss.columns:
+        return pd.DataFrame(columns=cols)
+    rows = []
+    for lam, grp in ss.dropna(subset=["requests_waiting"]).groupby("rate_lambda"):
+        rows.append({
+            "rate_lambda": float(lam),
+            "waiting_mean": float(grp["requests_waiting"].mean()),
+            "waiting_max": float(grp["requests_waiting"].max()),
+            "running_mean": float(grp["requests_running"].mean()),
+            "kv_pct_mean": float(grp["gpu_cache_pct"].mean()),
+            "n": int(len(grp)),
+        })
+    return (
+        pd.DataFrame(rows).sort_values("rate_lambda").reset_index(drop=True)
+        if rows else pd.DataFrame(columns=cols)
+    )
+
+
 # --------------------------------------------------------------- session metrics
 
 

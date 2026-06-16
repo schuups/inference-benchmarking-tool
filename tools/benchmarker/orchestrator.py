@@ -36,7 +36,7 @@ import logging
 import ssl
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Protocol
 
@@ -408,6 +408,27 @@ def _step_slo_breaches(requests, slos, warmup_s: float, measurement_s: float) ->
     return breaches
 
 
+def _measurement_queue_nonempty_fraction(server_stats, measurement_start: datetime) -> float | None:
+    """Fraction of a level's MEASUREMENT-window scrapes (§14.4) whose request queue is non-empty
+    (`requests_waiting` > 0). None if there are no usable scrapes. A SUSTAINED fraction is the
+    saturation signal (§12.2) — robust to single Poisson-burst blips that momentarily queue a
+    request even below capacity."""
+    waits = []
+    for r in server_stats:
+        w = r.get("requests_waiting")
+        if w is None:
+            continue
+        try:
+            ts = datetime.fromisoformat(r["ts"])
+        except (KeyError, ValueError):
+            continue
+        if ts >= measurement_start:
+            waits.append(w)
+    if not waits:
+        return None
+    return sum(1 for w in waits if w > 0) / len(waits)
+
+
 # ------------------------------------------------------------------- the driver
 
 
@@ -537,7 +558,7 @@ async def run_experiment(
             windows: list[tuple[float, datetime, datetime]] = []
             n_requests = n_truncated = 0
             levels_run = 0
-            consec_breach = 0
+            consec_saturated = 0
             for i, rate in enumerate(cfg.rate_levels):
                 log.info("[%s] sweep step λ=%s", run_id, rate)
                 start = datetime.now(timezone.utc)
@@ -560,32 +581,44 @@ async def run_experiment(
                         "[%s] λ=%s %d sessions truncated at drain (§12.2)",
                         run_id, rate, step.sessions_truncated,
                     )
-                # §12.2 adaptive early-stop: once we are clearly past λ* (N consecutive
-                # SLO-breaching levels), skip the remaining higher λ — they only characterise
-                # deeper overload. Skipped levels are logged, never silently dropped.
-                if cfg.rate_sweep.early_stop:
-                    breaches = _step_slo_breaches(
-                        step.requests, cfg.slos or [],
-                        cfg.phases.warmup_s, cfg.phases.measurement_s,
-                    )
-                    if breaches:
-                        consec_breach += 1
-                        log.info(
-                            "[%s] λ=%s SLO breach %d/%d: %s",
-                            run_id, rate, consec_breach,
-                            cfg.rate_sweep.stop_after_breached_levels, "; ".join(breaches),
+                # §12.2 adaptive early-stop: once the engine is SATURATED for N consecutive levels,
+                # skip the remaining higher λ — they only characterise deeper overload. Default
+                # signal = a SUSTAINED non-empty request queue (saturation onset, SLO-independent);
+                # `slo_breach` is the alternative. Skipped levels are logged, never silently dropped.
+                rs = cfg.rate_sweep
+                if rs.early_stop:
+                    if rs.stop_on == "queue_nonempty":
+                        meas_start = start + timedelta(seconds=cfg.phases.warmup_s)
+                        frac = _measurement_queue_nonempty_fraction(step.server_stats, meas_start)
+                        saturated = frac is not None and frac >= rs.queue_nonempty_fraction
+                        reason = (
+                            f"queue non-empty {frac:.0%} of measurement scrapes "
+                            f"(≥{rs.queue_nonempty_fraction:.0%})" if saturated else None
                         )
-                        if consec_breach >= cfg.rate_sweep.stop_after_breached_levels:
+                    else:  # slo_breach
+                        breaches = _step_slo_breaches(
+                            step.requests, cfg.slos or [],
+                            cfg.phases.warmup_s, cfg.phases.measurement_s,
+                        )
+                        saturated = bool(breaches)
+                        reason = "; ".join(breaches) if breaches else None
+                    if saturated:
+                        consec_saturated += 1
+                        log.info(
+                            "[%s] λ=%s saturated %d/%d (%s)",
+                            run_id, rate, consec_saturated, rs.stop_after_saturated_levels, reason,
+                        )
+                        if consec_saturated >= rs.stop_after_saturated_levels:
                             skipped = cfg.rate_levels[i + 1:]
                             if skipped:
                                 log.warning(
-                                    "[%s] adaptive early-stop (§12.2): %d consecutive SLO-breaching "
+                                    "[%s] adaptive early-stop (§12.2): %d consecutive saturated "
                                     "levels past λ* — skipping remaining λ=%s",
-                                    run_id, consec_breach, skipped,
+                                    run_id, consec_saturated, skipped,
                                 )
                             break
                     else:
-                        consec_breach = 0
+                        consec_saturated = 0
 
             # ---- phase 8: Stage-B quality comparison (§13.5)
             await _stage_b(db, run_id, quality, qe, instances, deployment.model, smoke)

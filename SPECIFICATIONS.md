@@ -1139,16 +1139,22 @@ The sweep begins only once **all** instances are ready, profiled, primed, and �
 - `request_timeout_s`: client-side TTFT hard cutoff; exceeded requests recorded as `success=0`.
 - After the final rate level's drain, the **quality comparison** (§13.5 Stage B) runs
   against the still-running deployment(s), before teardown.
-- **Adaptive early-stop** (optional, `rate_sweep.early_stop`): the Benchmarker evaluates the
-  per-class SLOs (§13.4) on each level's measurement-phase requests; after
-  `rate_sweep.stop_after_breached_levels` **consecutive** SLO-breaching levels it skips the
-  remaining (higher) λ — which would only characterise deeper overload past λ*. The skipped
-  levels are **logged** (never silently dropped), and `RunSummary.rate_levels` reflects the
-  levels actually run. Off by default (every level runs); the breach check mirrors the report
-  notebook's measurement window + linear-interp percentiles (§13.4) but is pure-Python so it
-  needs no pandas. The dataset pool (§11.4 `num_prompts`) must still be sized for the **full**
-  ladder — a capacity-extending config (e.g. fp8 / offload) can push the knee high enough that
-  early-stop never triggers and every level runs.
+- **Adaptive early-stop** (optional, `rate_sweep.early_stop`): the Benchmarker decides per level
+  whether the engine is SATURATED and, after `rate_sweep.stop_after_saturated_levels`
+  **consecutive** saturated levels, skips the remaining (higher) λ — which would only characterise
+  deeper overload past λ*. Skipped levels are **logged** (never silently dropped) and
+  `RunSummary.rate_levels` reflects the levels actually run. Off by default. `stop_on` picks the
+  signal: **`queue_nonempty`** (default) — the request queue is SUSTAINEDLY non-empty
+  (`requests_waiting` > 0 in ≥ `queue_nonempty_fraction` of the level's measurement-window scrapes,
+  §14.4): the SLO-threshold-independent **onset of saturation** (arrivals outrun service), robust to
+  single Poisson-burst blips that momentarily queue a request even below capacity; or
+  **`slo_breach`** — any per-class SLO (§13.4) fails on the measurement-phase requests (a pure-Python
+  mirror of the report notebook's measurement window + linear-interp percentiles, no pandas). The
+  report's latency figure (§15.1) stacks **latency, error-rate, and request-queue-depth** panels on
+  a shared λ axis, so the latency knee is seen to align vertically with the queue rising above 0.
+  The dataset pool (§11.4 `num_prompts`) must still be sized for the **full** ladder — a
+  capacity-extending config (e.g. fp8 / offload) can push the knee high enough that early-stop never
+  triggers and every level runs.
 
 ### 12.3 Open-loop stochastic arrivals
 

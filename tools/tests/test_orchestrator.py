@@ -253,6 +253,26 @@ def test_step_slo_breaches_and_measurement_filter():
     assert _percentile_linear([10, 20, 30, 40], 1.0) == 40
 
 
+def test_measurement_queue_nonempty_fraction_sustained_and_windowed():
+    # §12.2 default early-stop signal: SUSTAINED queue depth over the measurement window only.
+    from datetime import datetime, timedelta, timezone
+    from tools.benchmarker.orchestrator import _measurement_queue_nonempty_fraction
+
+    t0 = datetime(2026, 6, 16, 10, 0, 0, tzinfo=timezone.utc)
+    meas_start = t0 + timedelta(seconds=10)  # warmup_s = 10
+
+    def scrape(offset_s, waiting):
+        return {"ts": (t0 + timedelta(seconds=offset_s)).isoformat(), "requests_waiting": waiting}
+
+    # a warmup blip with queue>0 is IGNORED; measurement window has 2/4 non-empty → 0.5
+    stats = [scrape(2, 9), scrape(12, 0), scrape(13, 0), scrape(14, 3), scrape(15, 4)]
+    assert _measurement_queue_nonempty_fraction(stats, meas_start) == 0.5
+    assert _measurement_queue_nonempty_fraction([scrape(12, 0), scrape(13, 0)], meas_start) == 0.0
+    assert _measurement_queue_nonempty_fraction([scrape(2, 9)], meas_start) is None  # no measurement scrapes
+    # None-valued scrapes (sampling gaps) are skipped
+    assert _measurement_queue_nonempty_fraction([scrape(12, None), scrape(13, 2)], meas_start) == 1.0
+
+
 @pytest.mark.asyncio
 async def test_smoke_mode_no_persistence_and_two_warnings(tmp_path, caplog):
     run_dir = tmp_path / "run"

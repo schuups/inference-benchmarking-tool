@@ -25,27 +25,37 @@ def set_style() -> None:
 
 
 def latency_figure(report: analysis.ReportData, metric: str, slo_threshold: float | None = None):
-    """p50/p95/p99 of `metric` vs λ (log x) + a failure-rate panel (§15.1)."""
+    """p50/p95/p99 of `metric` vs λ (log x), an error-rate panel, and a request-queue-depth panel
+    (§15.1). The three panels SHARE the λ axis so the latency knee lines up vertically with the
+    request queue (`requests_waiting`) rising above 0 — the saturation onset (§12.2)."""
     mreq = analysis.measurement_requests(report)
     lat = analysis.latency_vs_lambda(mreq, metric)
     fail = analysis.failure_rate_vs_lambda(mreq)
-    fig, (ax, axf) = plt.subplots(
-        2, 1, figsize=(7, 5), gridspec_kw={"height_ratios": [3, 1]}
+    q = analysis.queue_depth_vs_lambda(report.server_stats)
+    fig, (ax, axf, axq) = plt.subplots(
+        3, 1, figsize=(7, 6.5), sharex=True, gridspec_kw={"height_ratios": [3, 1, 1.4]}
     )
     if not lat.empty:
         for p in ("p50", "p95", "p99"):
             ax.plot(lat["rate_lambda"], lat[p], marker="o", label=p)
-        ax.set_xscale("log")
+    ax.set_xscale("log")  # shared by all panels
     if slo_threshold:
         ax.axhline(slo_threshold, ls="--", color=SLO_COLOR, label=f"SLO {slo_threshold:g}")
     ax.set_ylabel(f"{metric} (ms)")
     ax.set_title(f"{metric} vs λ — {report.run_id}")
     ax.legend()
+    # error-rate panel (already a requirement)
     if not fail.empty:
         axf.plot(fail["rate_lambda"], fail["error_rate_pct"], marker="s", color="#cc6666")
-        axf.set_xscale("log")
     axf.set_ylabel("error %")
-    axf.set_xlabel("λ (session starts/s)")
+    # request-queue panel (new): mean = sustained backlog, max = peak. Knee aligns with mean > 0.
+    if not q.empty:
+        axq.plot(q["rate_lambda"], q["waiting_mean"], marker="o", color="#3366aa", label="mean waiting")
+        axq.plot(q["rate_lambda"], q["waiting_max"], marker=".", ls=":", color="#999999", label="max waiting")
+        axq.axhline(0, color="#cccccc", lw=0.8)
+        axq.legend()
+    axq.set_ylabel("queue (reqs)")
+    axq.set_xlabel("λ (session starts/s)")
     fig.tight_layout()
     return fig
 

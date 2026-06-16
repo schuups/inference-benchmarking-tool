@@ -77,7 +77,8 @@ dataset_config:                        # same mix as the grid; small pool (pilot
 rate_levels: [0.5, 2]
 
 rate_sweep:
-  early_stop: true                     # §12.2 — stop after 2 consecutive SLO-breaching levels
+  early_stop: true                     # §12.2 — stop after 2 consecutive SATURATED levels
+  stop_on: queue_nonempty              # saturation = request queue sustainedly non-empty (≥50% of scrapes)
 
 arrival_process:
   kind: poisson

@@ -108,8 +108,10 @@ dataset_config:                        # IDENTICAL to the SLURM sibling → shar
 rate_levels: [0.5, 1, 2, 4, 8, 16]
 
 rate_sweep:
-  early_stop: true                     # §12.2 — stop after 2 consecutive SLO-breaching levels
-  stop_after_breached_levels: 2        # (skip deep overload past λ*); skipped λ are logged
+  early_stop: true                     # §12.2 — stop after 2 consecutive SATURATED levels (skip deep
+  stop_on: queue_nonempty              # overload past λ*). Saturation = request queue SUSTAINEDLY
+  stop_after_saturated_levels: 2       # non-empty: requests_waiting>0 in ≥50% of measurement scrapes
+  queue_nonempty_fraction: 0.5         # (robust to Poisson blips). Skipped λ logged; knee aligns w/ queue>0
 
 arrival_process:
   kind: poisson

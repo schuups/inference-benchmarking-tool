@@ -108,6 +108,24 @@ def test_hardware_vs_lambda(fixture_db):
     assert sm == {1.0: 35.0, 2.0: 60.0, 3.0: 85.0}  # headroom overlay data present
 
 
+def test_queue_depth_vs_lambda():
+    # §12.2 / §15.1 queue panel: per-λ mean (sustained) + max (peak) requests_waiting.
+    import pandas as pd
+
+    ss = pd.DataFrame([
+        {"rate_lambda": 1.0, "requests_waiting": 0, "requests_running": 4, "gpu_cache_pct": 20.0},
+        {"rate_lambda": 1.0, "requests_waiting": 0, "requests_running": 5, "gpu_cache_pct": 25.0},
+        {"rate_lambda": 4.0, "requests_waiting": 12, "requests_running": 100, "gpu_cache_pct": 99.0},
+        {"rate_lambda": 4.0, "requests_waiting": 8, "requests_running": 110, "gpu_cache_pct": 98.0},
+    ])
+    q = analysis.queue_depth_vs_lambda(ss)
+    assert list(q["rate_lambda"]) == [1.0, 4.0]
+    assert q[q["rate_lambda"] == 1.0].iloc[0]["waiting_mean"] == 0.0           # below saturation
+    row4 = q[q["rate_lambda"] == 4.0].iloc[0]
+    assert row4["waiting_mean"] == 10.0 and row4["waiting_max"] == 12.0        # queue > 0
+    assert analysis.queue_depth_vs_lambda(pd.DataFrame()).empty                # no scrapes
+
+
 # ----------------------------------------------------------- notebook execution
 
 
