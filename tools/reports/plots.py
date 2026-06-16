@@ -84,6 +84,57 @@ def latency_figure(
     return fig
 
 
+def compare_latency_figure(entries, metric: str, slo_threshold: float | None = None):
+    """Overlay several runs on shared latency / error / queue panels vs λ (§15.1) for a
+    platform/config comparison. `entries` = list of (report, colour, label); each run draws in its
+    own colour with p50 thickest/opaque → p99 thinnest/lightest. Same axis treatment as
+    `latency_figure` (log latency-y, error 0–100% linear, symlog queue, plain λ ticks at data)."""
+    import matplotlib.ticker as mticker
+
+    fig, (ax, axf, axq) = plt.subplots(
+        3, 1, figsize=(7, 7), sharex=True, gridspec_kw={"height_ratios": [3, 1, 1.4]}
+    )
+    lambdas: set[float] = set()
+    for report, color, label in entries:
+        mreq = analysis.measurement_requests(report)
+        lat = analysis.latency_vs_lambda(mreq, metric)
+        fail = analysis.failure_rate_vs_lambda(mreq)
+        q = analysis.queue_depth_vs_lambda(report.server_stats)
+        for p, lw, alpha in (("p50", 2.6, 1.0), ("p95", 1.6, 0.70), ("p99", 1.0, 0.45)):
+            if not lat.empty:
+                ax.plot(lat["rate_lambda"], lat[p], marker="o", ms=4, color=color, lw=lw,
+                        alpha=alpha, label=f"{label} {p}")
+        if not fail.empty:
+            axf.plot(fail["rate_lambda"], fail["error_rate_pct"], marker="s", ms=4, color=color, label=label)
+        if not q.empty:
+            axq.plot(q["rate_lambda"], q["waiting_mean"], marker="o", ms=4, color=color, label=f"{label} mean")
+            axq.plot(q["rate_lambda"], q["waiting_max"], marker=".", ls=":", color=color, alpha=0.5)
+        for df in (lat, fail, q):
+            if not df.empty:
+                lambdas |= {float(x) for x in df["rate_lambda"]}
+    ax.set_yscale("log")
+    if slo_threshold:
+        ax.axhline(slo_threshold, ls="--", color=SLO_COLOR, label=f"SLO {slo_threshold:g} ms")
+    ax.set_ylabel(f"{metric} (ms)")
+    ax.set_title(f"{metric} vs λ — platform comparison")
+    ax.legend(fontsize=7, ncol=len(entries))
+    axf.set_ylim(0, 100)
+    axf.set_ylabel("error %")
+    axf.legend(fontsize=7)
+    axq.set_yscale("symlog", linthresh=1)
+    axq.set_ylabel("queue (reqs)")
+    axq.legend(fontsize=7)
+    ax.set_xscale("log")
+    if lambdas:
+        ticks = sorted(lambdas)
+        axq.xaxis.set_major_locator(mticker.FixedLocator(ticks))
+        axq.xaxis.set_minor_locator(mticker.NullLocator())
+        axq.xaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _pos: f"{x:g}"))
+    axq.set_xlabel("λ (session starts/s)")
+    fig.tight_layout()
+    return fig
+
+
 def hardware_figure(report: analysis.ReportData, signals: list[str]):
     """Telemetry signals vs λ — untapped-headroom overlay (§13.3/§15.1). None if no data."""
     fig, ax = plt.subplots(figsize=(7, 3.5))

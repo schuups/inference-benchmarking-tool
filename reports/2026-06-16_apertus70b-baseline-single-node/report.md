@@ -15,7 +15,7 @@ the first run of a **SLURM-vs-K8s platform comparison** of the identical deploym
 | Engine | vLLM **0.23.0**, TP4 × PP1 on **one GH200 node** (4× GH200, intra-node NVLink-C2C) |
 | Image | `jfrog.svc.cscs.ch/ml/inference/vllm:0.23.0-alps.net.v1-gh200` — official base image vLLM 0.23 + [Alps Slingshot-11 netstack](../../tools/images/core/nvidia/netstack/v1) + baked Ray/NIXL/LMCache; self-contained (host CXI hook off) |
 | Storage | weights from the **capstor** Lustre HF-cache (`/capstor/scratch/.../ibt/hf-cache`); dataset pool on capstor. (K8s variant: weights from a `ceph-corbo-cephfs` PVC.) |
-| Platforms | **SLURM** (clariden) — results below · **Kubernetes** (breithorn) — in flight |
+| Platforms | **SLURM** (clariden) + **Kubernetes** (breithorn) — both complete; compared in §7 |
 
 ## 1. Pre-checks (§8 foundation gate)
 
@@ -70,9 +70,10 @@ deep-overload.
 
 ## 4. Capacity — per-class SLO attainment
 
-![ttft vs λ — latency / error / queue (shared λ axis)](images/baseline-ttft.png)
+![ttft vs λ — latency / error / queue (shared λ axis), SLURM (blue) vs K8s (orange)](images/baseline-ttft.png)
 
-*(TPOT companion: `images/baseline-tpot.png`.)*
+*(TPOT companion: `images/baseline-tpot.png`. The figure overlays both platforms — SLURM blue, K8s
+orange — which are nearly coincident; per-platform numbers below are SLURM, the side-by-side is §7.)*
 
 - **Supportable load: λ\* = 0.5 session-starts/s** — the only swept level meeting **all** per-class SLOs.
 
@@ -108,27 +109,37 @@ scrapes), λ=2.0 confirmed (88%) → higher λ skipped.
 
 This is the baseline quality the fp8 / KV-offload cells will be measured against (capacity-vs-quality, §15.1).
 
-## 7. Platform comparison — SLURM vs K8s (preliminary)
+## 7. Platform comparison — SLURM vs K8s
 
-The **identical** baseline (same model, image, BackendConfig, 256K window, and the shared 100k pool) is
-being run on **Kubernetes (breithorn)** — engine deployed as a namespaced `ml` manifest, load-generated
-from a clariden SLURM benchmarker over the breithorn ingress. **This is preliminary: the K8s run is
-still in progress** (λ=2.0 + early-stop + Stage-B pending). The full latency/queue **overlay** (K8s in a
-second colour on §4/§5) and the side-by-side capacity (λ\*) / loading tables will be added on completion.
+The **identical** baseline (same model, image, BackendConfig, 256K window, shared 100k pool) was run on
+both platforms. The K8s engine was deployed as a namespaced `ml` manifest and load-generated from a
+clariden SLURM benchmarker over the breithorn ingress (then torn down). The §4/§5 figures overlay both
+(SLURM blue, K8s orange) — the curves are nearly coincident.
 
-What matches so far:
+**Capacity & quality — essentially identical:**
 
 | | SLURM (clariden) | K8s (breithorn) |
 |---|---|---|
-| §8 pre-checks | all pass | passed — engine admitted (decision-9 torch.distributed probe in-pod) |
-| 256K bring-up | clean | clean — weights from a CephFS PVC; `Using max model len 262144` |
-| gsm8k Stage-A gate | 0.732 | **0.738** |
-| knee / saturation onset | λ=1.0 saturated (queue 84%) | λ=1.0 saturated (queue 84%) |
+| **λ\*** (meets all SLOs) | **0.5** | **0.5** |
+| TTFT p50 / p95 @ λ=0.5 | 96 / 712 ms | 110 / 750 ms |
+| queue mean @ λ=1.0 (saturated) | 164 | 170 |
+| early-stop | [0.5,1,2] → skip 4/8/16 | [0.5,1,2] → skip 4/8/16 |
+| gsm8k gate / Stage-B | 0.732 / 0.7187 | 0.738 / **0.7187** |
+| requests / sessions truncated | 15 245 / 1134 | 15 277 / 1141 |
 
-**Early signal — platform parity.** The quality gate and the saturation knee are essentially identical
-across the two platforms, as expected for the same engine/model/config: K8s adds ingress + cert +
-cross-cluster load-gen on top, but lands at the same operating point. Final λ\* and the latency/loading
-deltas follow once the K8s sweep + Stage-B finish.
+**Read:** both platforms land at the **same operating point** — λ\*=0.5, same knee, **identical Stage-B
+quality** (0.7187, deterministic gsm8k). K8s adds only a **small fixed serving overhead at the operating
+point** (~14 ms p50 / ~38 ms p95 higher TTFT at λ=0.5) from the ingress + cross-cluster load-gen hop; at
+saturation the curves are indistinguishable. **No capacity or quality penalty** from the K8s path for
+this single-node baseline.
+
+**Path differences (not findings — K8s instrumentation gaps to close):**
+- **Model-loading breakdown — SLURM only.** The K8s engine is deployed externally (kubectl), so the
+  benchmarker can't read the pod's vLLM log to parse weights/capture/compile; the K8s
+  `model_load_total_s` (110 s) is just the benchmarker's *ingress-readiness wait*, not the model load.
+  Follow-up: parse `kubectl logs` for the K8s breakdown.
+- **Hardware telemetry — K8s empty.** The in-pod sampler writes to the pod's `/results` PVC, which the
+  clariden benchmarker doesn't read, so K8s `hardware_stats` has 0 rows (SLURM has the full §13.3 sampling).
 
 ## Disclosures & limitations (not hidden, per §15.3)
 
@@ -148,7 +159,8 @@ deltas follow once the K8s sweep + Stage-B finish.
 
 ## Provenance
 
-- **run_id**: `20260616-095339_apertus-70b-instruct-2509_vllm_clariden_5124` (SLURM job 2543765, clariden)
+- **run_id (SLURM)**: `20260616-095339_apertus-70b-instruct-2509_vllm_clariden_5124` (job 2543765, clariden)
+- **run_id (K8s)**: `20260616-134325_apertus-70b-instruct-2509_vllm_breithorn_2423` (benchmarker job 2545821 on clariden; engine on breithorn ns `ml`, deployed via kubectl + torn down post-run)
 - **model**: `swiss-ai/Apertus-70B-Instruct-2509` · image `vllm:0.23.0-alps.net.v1-gh200`
 - **BackendConfig**: TP4, PP1, `max_model_len=262144`, `max_num_batched_tokens=16384`,
   `gpu_memory_utilization=0.90`, `enable_prefix_caching=true`, `safetensors_load_strategy=prefetch`;
