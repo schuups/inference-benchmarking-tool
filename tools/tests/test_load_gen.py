@@ -262,6 +262,21 @@ def test_parse_metrics():
     assert parsed["spec_accept_rate"] is None
 
 
+def test_parse_metrics_vllm_023_kv_cache_rename():
+    # vLLM 0.23 renamed gpu_cache_usage_perc → kv_cache_usage_perc and labels the series; the plain
+    # num_requests_waiting gauge must be read, NOT the new num_requests_waiting_by_reason series.
+    body = (
+        'vllm:num_requests_running{engine="0",model_name="m"} 5\n'
+        'vllm:num_requests_waiting{engine="0",model_name="m"} 12\n'
+        'vllm:num_requests_waiting_by_reason{engine="0",model_name="m",reason="capacity"} 4\n'
+        'vllm:kv_cache_usage_perc{engine="0",model_name="m"} 0.97\n'
+    )
+    parsed = parse_metrics(body)
+    assert parsed["requests_running"] == 5
+    assert parsed["requests_waiting"] == 12          # plain gauge, not the _by_reason series
+    assert parsed["gpu_cache_pct"] == pytest.approx(97.0)
+
+
 def test_parse_model_load_fixture():
     # The exact vLLM 0.22.1 lines captured on the Alps image at E2a (2026-06-15): "GiB memory and",
     # engine-init/torch.compile report "s" (not "seconds"), torch.compile says "took" (not "takes").

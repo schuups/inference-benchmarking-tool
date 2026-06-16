@@ -11,7 +11,9 @@ import aiohttp
 _GAUGES = {
     "requests_running": re.compile(r"vllm:num_requests_running(?:\{[^}]*\})?\s+([0-9.eE+-]+)"),
     "requests_waiting": re.compile(r"vllm:num_requests_waiting(?:\{[^}]*\})?\s+([0-9.eE+-]+)"),
-    "gpu_cache_pct": re.compile(r"vllm:gpu_cache_usage_perc(?:\{[^}]*\})?\s+([0-9.eE+-]+)"),
+    # vLLM 0.23 renamed gpu_cache_usage_perc → kv_cache_usage_perc (confirmed on the 0.23 engine
+    # /metrics, 2026-06-16); match both so the KV-headroom scrape works across versions (§14.4).
+    "gpu_cache_pct": re.compile(r"vllm:(?:gpu_cache_usage_perc|kv_cache_usage_perc)(?:\{[^}]*\})?\s+([0-9.eE+-]+)"),
     "spec_accept_rate": re.compile(r"vllm:spec_decode_draft_acceptance_rate(?:\{[^}]*\})?\s+([0-9.eE+-]+)"),
 }
 

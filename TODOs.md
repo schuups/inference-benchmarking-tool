@@ -337,13 +337,12 @@ benchmark-YAML change per §9.2).
 
 ## Metrics & Analysis
 
-- [ ] **`gpu_cache_pct` scrape returns NULL on vLLM 0.23** (pilot 2026-06-16, run …_1450): the
-  scraper captured `requests_running` + `requests_waiting` fine, but `gpu_cache_pct` came back all-NULL
-  (`queue_depth_vs_lambda.kv_pct_mean = NaN`) even though the engine logger reported "GPU KV cache
-  usage: 97%". The `vllm:gpu_cache_usage_perc` metric name/labels likely changed in 0.23 — verify the
-  actual `/metrics` name on the 0.23 image and update the regex in `load_gen/scraper.py` (`_METRICS`).
-  Doesn't affect the §12.2 queue early-stop or the queue panel (those use `requests_waiting`), but the
-  §13.3/§15.1 KV-headroom overlay is empty until fixed.
+- [x] **`gpu_cache_pct` scrape returned NULL on vLLM 0.23 — FIXED 2026-06-16.** Root cause confirmed by
+  querying the live 0.23 engine `/metrics`: the gauge was **renamed `vllm:gpu_cache_usage_perc` →
+  `vllm:kv_cache_usage_perc`** (also now labeled `{engine,model_name}`). `scraper.py` `_GAUGES` now
+  matches both names (+ regression test). Still 0-1 scale (×100 kept). Note for later: 0.23 also adds
+  `vllm:num_requests_waiting_by_reason{reason=capacity|deferred}` and `vllm:num_preemptions_total` —
+  worth scraping for richer queue/saturation diagnostics (§14.4) if the queue panel needs the "why".
 
 - [ ] **Per-class `sessions_per_user_per_hour` defaults** — the supportable-users
   estimate (SPECIFICATIONS.md §15.1) needs a defensible default per scenario class
