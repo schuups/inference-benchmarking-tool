@@ -149,14 +149,18 @@ per λ; the K8s panels are empty (no telemetry collected, see below):
 | GPU memory (mean %) | 91.7 | 91.7 | 91.7 |
 | GPU temperature (mean °C) | 47.2 | 48.2 | 48.6 |
 
-**The GH200 is compute-bound from the lightest load.** GPU utilization sits at **~99–100% already at
-λ\*=0.5** — the level where every SLO still passes — and stays there as load climbs. So the SLO knee past
-λ\* is **not** a "spare-compute-then-cliff": the compute is pinned throughout, and what changes above λ\* is
-**queueing** (§6), not utilization. This is consistent with the flat token throughput at the engine ceiling
-(§4). Power is steady at **~512 W/GPU** (peak 563.9 W) with temperatures ~47–49 °C — **no thermal
-throttling**, and well within the GH200 envelope. GPU memory reads a constant **91.7%** because the KV cache
-is **pre-allocated** at startup (`gpu_memory_utilization=0.90`), so it is "full" by construction rather than
-a load-dependent signal.
+**The GH200 is never idle, even at the lightest load.** GPU utilization sits at **~99–100% already at
+λ\*=0.5** — the level where every SLO still passes — and stays there as load climbs. But `utilization.gpu`
+is a coarse signal: it is the **fraction of time at least one kernel was running**, not how much of the GPU
+was used — so it shows the GPU was **never idle**, *not* that it was compute-saturated, and it **cannot tell
+us which resource is the bottleneck** (SM occupancy vs tensor-core duty cycle vs HBM bandwidth). For
+70B-dense serving these differ by phase — prefill (the long agentic prompts) is compute-heavy, decode is
+typically **HBM-bandwidth-bound** — and only the DCGM counters (all `NULL` here, see below) would resolve it.
+What we *can* say: there is **no idle headroom** at any swept level, the token throughput is flat at the
+engine ceiling (§4), and the SLO knee past λ\* is **queueing** (§6), not a drop in utilization. Power is
+steady at **~512 W/GPU** (peak 563.9 W) with temperatures ~47–49 °C — **no thermal throttling**, well within
+the GH200 envelope. GPU memory reads a constant **91.7%** because the KV cache is **pre-allocated** at
+startup (`gpu_memory_utilization=0.90`), so it is "full" by construction rather than a load-dependent signal.
 
 **Telemetry limits (disclosed, not findings):** the image ships only coarse `nvidia-smi` counters
 (utilization / power / memory / temperature). The fine-grained **DCGM** signals — SM-active %, tensor-core
@@ -206,8 +210,8 @@ will be measured against (capacity-vs-quality, §15.1).
   and the **concurrent ≈ 42** as the firm number.
 
 **Burst caveat — these figures assume steady arrivals.** λ\*=0.5 and the ≈42 concurrent users are an
-**average-rate** ceiling under the swept **Poisson** arrival process. The GPU is already compute-bound at
-λ\* (utilization ~99–100%, §5), so there is **no spare compute to absorb a burst**: if many sessions start
+**average-rate** ceiling under the swept **Poisson** arrival process. The GPU is **never idle** even at
+λ\* (utilization ~99–100%, §5), so there is **no idle headroom to absorb a burst**: if many sessions start
 **at the same instant** — even while the long-run average stays at or below λ\* — the request queue can spike
 non-empty and **transiently breach the TTFT/TPOT SLOs** until it drains. The supportable-user numbers are
 therefore a **sustained-load** capacity, not a guarantee against coincident bursts; protecting the SLO under
