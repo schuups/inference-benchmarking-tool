@@ -1,11 +1,10 @@
 # Apertus-70B (256k context) - single-node baseline (SLURM vs K8s)
 
-**Purpose.** Establish the **baseline operating point** for Apertus-70B served on a single GH200 node —
-KV-offloading *off*, KV-cache dtype *default* (bf16) — at the model's full 256K context. This is the
-**reference against which the KV-offloading and fp8 cells of the grid will be compared** (capacity and
-quality deltas, §15.1), and the first run of a **SLURM-vs-K8s platform comparison** of the identical
-deployment. It also validates the end-to-end pipeline (pre-checks → load → sweep → graded quality) on
-the production-grade Alps image.
+**Purpose.** Establish the **baseline operating point** for Apertus-70B served on a single GH200 node,
+run at a **256K context window to approximate the upcoming Apertus-70B 1.5** (which will natively
+support 256K). This is the **reference against which the KV-offloading and fp8 cells of the grid will be
+compared** (capacity and quality deltas, §15.1), and the first run of a **SLURM-vs-K8s platform
+comparison** of the identical deployment.
 
 **Setup.**
 
