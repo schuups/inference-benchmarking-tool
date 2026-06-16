@@ -101,7 +101,8 @@ dataset_config:                        # IDENTICAL to the SLURM sibling → shar
       input_length:
         distribution: lognormal
         params: { mean: 10000, sigma: 0.5, min: 4000, max: 16000 }
-  num_prompts: 180000
+  num_prompts: 100000                  # identical to the SLURM sibling → shared pool (§11.4); see its
+                                       # note: sized for early-stop's ≤λ=8 stop range, bump on PoolExhausted
   seed: 1234
   output_length_mode: forced
 

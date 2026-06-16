@@ -114,9 +114,11 @@ dataset_config:                        # IDENTICAL to the k8s sibling → one sh
       input_length:
         distribution: lognormal
         params: { mean: 10000, sigma: 0.5, min: 4000, max: 16000 }
-  # Sized for Σλ·(warmup+measurement)·E[turns≈6] across the WHOLE sweep (pool consumed without
-  # replacement): 31.5 × 900 × 6 ≈ 170k + margin. Generated ONCE and reused across all 8 cells.
-  num_prompts: 180000
+  # Sized for the queue early-stop's realistic stop range (≤λ=8): Σλ[0.5..8]·(warmup+measurement)
+  # ·E[turns≈6] = 15.5 × 900 × 6 ≈ 84k + margin. Generated ONCE and reused across cells. NOTE: a
+  # high-knee cell (fp8/offload) that runs all 6 levels could exhaust this — bump if a run hits
+  # PoolExhaustedError (early-stop normally caps the sweep well before λ=16; §11.4, §12.2).
+  num_prompts: 100000
   seed: 1234
   output_length_mode: forced
 
