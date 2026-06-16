@@ -1,0 +1,68 @@
+# 2-node SLURM bring-up validation — Apertus-70B TP4×PP2 on the 0.23 image, NO workarounds.
+#
+# Purpose (operator 2026-06-16): the E2b multi-node faults (custom-all-reduce illegal memory
+# access + CUDA-graph CUBLAS_STATUS_EXECUTION_FAILED) were on vLLM 0.22.1. The colleagues run
+# multi-node WITHOUT --disable-custom-all-reduce / --enforce-eager (custom all-reduce + CUDA
+# graphs ON, stable 4 days) on a newer vLLM. This run tests whether OUR 0.23 image (Ray baked,
+# newer vLLM) also no longer needs those workarounds — if it comes up clean, we keep our image
+# and don't need the colleagues' Dockerfile. Bonus: the §8 step captures 2-node 0.23 fabric refs.
+#
+# Validate: .venv/bin/python -m tools.common.config examples/benchmark-configs/apertus70b-2node-0.23-validation.yaml
+
+name: apertus70b-2node-0.23-validation
+description: >
+  2-node (8× GH200) Apertus-70B TP4×PP2 on the 0.23 Alps image with custom all-reduce + CUDA
+  graphs ENABLED (no E2b workarounds), to confirm the 0.22.1 cross-node faults are gone in 0.23.
+
+deployments:
+  - target: clariden
+    backend: vllm
+    backend_version: "0.23.0"
+    image: jfrog.svc.cscs.ch/ml/inference/vllm:0.23.0-alps.net.v1-gh200
+    model: swiss-ai/Apertus-70B-Instruct-2509
+    backend_config:
+      tensor_parallel_size: 4          # intra-node NVLink (custom all-reduce path)
+      pipeline_parallel_size: 2        # → 8 GPUs → 2 nodes; PP boundary = inter-node Slingshot
+      max_model_len: 8192              # small — this is a bring-up test, not capacity
+      gpu_memory_utilization: 0.90
+      enable_prefix_caching: true
+      # NO disable_custom_all_reduce / enforce_eager — THE POINT of this run.
+
+dataset_config:
+  scenario_mix:
+    - scenario: smoke-synthetic
+      weight: 1.0
+  num_prompts: 300
+  seed: 42
+  output_length_mode: forced
+
+rate_levels: [0.5, 1.0]              # light — just exercise the served engine
+
+arrival_process:
+  kind: poisson
+
+routing_strategy: random
+
+phases:
+  warmup_s: 60
+  measurement_s: 90
+  drain_timeout_s: 60
+  request_timeout_s: 120
+  server_ready_timeout_s: 3000       # 70B load (capstor) + 2-node Ray bring-up
+
+slos:
+  - { scenario: smoke-synthetic, metric: ttft_ms, percentile: p95, threshold: 5000 }
+  - { scenario: all,             metric: error_rate_pct,            threshold: 5.0 }
+
+quality_eval:
+  skip_quality_gate: true            # bring-up test — quality not the point
+  skip_quality_compare: true
+
+system_prechecks:
+  skip_system_prechecks: false       # bonus: 8-rank §8 step → 2-node 0.23 NCCL/sendrecv/NVSHMEM refs
+  system_prechecks_on_warn: continue
+  system_prechecks_on_fail: continue # don't gate the bring-up test on a fabric ref
+  collective_tests_version: "2.18.2"
+  shmem_required: false
+
+server_time_limit: "02:30:00"

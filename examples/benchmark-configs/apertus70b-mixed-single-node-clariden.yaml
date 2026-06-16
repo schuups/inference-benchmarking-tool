@@ -58,15 +58,18 @@ dataset_config:
   scenario_mix:
     - scenario: chat-short-turns
       weight: 0.8
-    - scenario: agentic-coding
-      weight: 0.2
-      # Override turn-1 context to ≈25k chars ≈ 7000 tokens (LongBench code tokenizes at
-      # ~3.5 chars/tok; scenario default is 15000 tok ≈ 60k chars). Session structure (turns,
-      # think-time, follow-ups) stays as the scenario defines. max 16000 tok == the chunked-
-      # prefill budget below, so agentic prompts are never split mid-prefill.
+      # Chat turn-1 context ≈500 tokens (operator 2026-06-16; scenario default mean is 200).
       input_length:
         distribution: lognormal
-        params: { mean: 7000, sigma: 0.5, min: 4000, max: 16000 }
+        params: { mean: 500, sigma: 0.5, min: 50, max: 2000 }
+    - scenario: agentic-coding
+      weight: 0.2
+      # Agentic turn-1 context ≈10000 tokens (operator 2026-06-16; was 7000). Session structure
+      # (turns, think-time, follow-ups) stays as the scenario defines. max 16000 tok ≤ the
+      # chunked-prefill budget below, so even the tail prefills in one chunk.
+      input_length:
+        distribution: lognormal
+        params: { mean: 10000, sigma: 0.5, min: 4000, max: 16000 }
   num_prompts: 8000                    # session pool > Σ λ·(warmup+measurement) across the sweep
   seed: 1234
   output_length_mode: forced           # §11.6 — sweep traffic stays reproducible
