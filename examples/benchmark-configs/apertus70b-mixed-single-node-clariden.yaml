@@ -42,6 +42,7 @@ deployments:
       tensor_parallel_size: 4          # §6.1: == gpus_per_node (4); intra-node NVLink, no Ray
       pipeline_parallel_size: 1        # single node — no cross-node PP, no Ray bring-up
       max_model_len: 262144            # 256K — full model capability (operator choice)
+      env: { VLLM_ALLOW_LONG_MAX_MODEL_LEN: "1" }   # this checkpoint's config.json caps at 64K; permit the 256K override (next Apertus is natively 256K, same arch)
       # Chunked-prefill budget. Deliberately NOT equal to max_model_len (cf. the §16.2 long-
       # context convention, which targets uniformly-long traffic): this workload is short-
       # dominated (80% chat, 20% agentic ≤16k tok). 16384 ≥ the agentic input cap (16000) so

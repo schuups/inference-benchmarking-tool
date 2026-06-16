@@ -19,3 +19,6 @@ com.hooks.cxi.enabled = "false"
 {% endif %}
 [env]
 HF_HOME = "{{ scratch_base }}/hf-cache"
+{%- for k, v in engine_env.items() %}
+{{ k }} = "{{ v }}"
+{%- endfor %}

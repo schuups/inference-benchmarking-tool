@@ -129,6 +129,12 @@ class BackendConfig(StrictModel):
     safetensors_load_strategy: str | None = None
     kv_offloading_size: int | None = Field(default=None, gt=0)
     kv_offloading_backend: str | None = None
+    # Engine-process environment passthrough — rendered into the SLURM EDF `[env]` and the K8s
+    # pod env. For vLLM env-only feature/tuning flags with no CLI arg, e.g.
+    # `VLLM_ALLOW_LONG_MAX_MODEL_LEN: "1"` to serve a context window beyond the model's
+    # config.json `max_position_embeddings` (used to validate the 256K serving pipeline on the
+    # current 64K Apertus ahead of the native-256K next version). Values MUST be strings.
+    env: dict[str, str] = Field(default_factory=dict)
     speculative_decoding: SpeculativeDecoding | None = None
 
 

@@ -45,6 +45,7 @@ deployments:
       tensor_parallel_size: 4
       pipeline_parallel_size: 1
       max_model_len: 262144
+      env: { VLLM_ALLOW_LONG_MAX_MODEL_LEN: "1" }   # 256K > this checkpoint's 64K config → permit it (256K-pipeline validation ahead of native-256K Apertus)
       max_num_batched_tokens: 16384
       gpu_memory_utilization: 0.90
       enable_prefix_caching: true
@@ -59,6 +60,7 @@ deployments:
       tensor_parallel_size: 4
       pipeline_parallel_size: 1
       max_model_len: 262144
+      env: { VLLM_ALLOW_LONG_MAX_MODEL_LEN: "1" }   # 256K > this checkpoint's 64K config → permit it (256K-pipeline validation ahead of native-256K Apertus)
       max_num_batched_tokens: 16384
       gpu_memory_utilization: 0.90
       enable_prefix_caching: true
@@ -74,6 +76,7 @@ deployments:
       tensor_parallel_size: 4
       pipeline_parallel_size: 1
       max_model_len: 262144
+      env: { VLLM_ALLOW_LONG_MAX_MODEL_LEN: "1" }   # 256K > this checkpoint's 64K config → permit it (256K-pipeline validation ahead of native-256K Apertus)
       max_num_batched_tokens: 16384
       gpu_memory_utilization: 0.90
       enable_prefix_caching: true
@@ -90,6 +93,7 @@ deployments:
       tensor_parallel_size: 4
       pipeline_parallel_size: 1
       max_model_len: 262144
+      env: { VLLM_ALLOW_LONG_MAX_MODEL_LEN: "1" }   # 256K > this checkpoint's 64K config → permit it (256K-pipeline validation ahead of native-256K Apertus)
       max_num_batched_tokens: 16384
       gpu_memory_utilization: 0.90
       enable_prefix_caching: true

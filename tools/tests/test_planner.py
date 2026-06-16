@@ -138,6 +138,28 @@ def test_slurm_single_node_has_no_ray(tmp_path, canonical_dict, globals_cfg):
     assert 'PRECHECK_COLLECTIVES="all_reduce all_gather alltoall"' in engine
 
 
+def test_engine_env_passthrough_slurm(tmp_path, canonical_dict, globals_cfg):
+    # §16.2: backend_config.env → SLURM EDF [env], alongside (not clobbering) the base env.
+    canonical_dict["deployments"][0]["backend_config"]["env"] = {"VLLM_ALLOW_LONG_MAX_MODEL_LEN": "1"}
+    _, run_dirs = _render(tmp_path, canonical_dict, globals_cfg)
+    edf = (run_dirs[0] / "engine.toml").read_text()
+    assert 'VLLM_ALLOW_LONG_MAX_MODEL_LEN = "1"' in edf
+    assert "HF_HOME = " in edf  # base env preserved
+
+
+def test_engine_env_passthrough_k8s(tmp_path, canonical_dict, globals_cfg):
+    # §16.2: backend_config.env → K8s pod env, alongside the base env.
+    canonical_dict["deployments"][0]["target"] = "breithorn"
+    canonical_dict["deployments"][0]["backend_config"]["pipeline_parallel_size"] = 1
+    canonical_dict["deployments"][0]["backend_config"]["env"] = {"VLLM_ALLOW_LONG_MAX_MODEL_LEN": "1"}
+    _, run_dirs = _render(tmp_path, canonical_dict, globals_cfg)
+    docs = list(yaml.safe_load_all((run_dirs[0] / "engine.yaml").read_text()))
+    container = next(d for d in docs if d["kind"] == "Deployment")["spec"]["template"]["spec"]["containers"][0]
+    env = {e["name"]: e["value"] for e in container["env"]}
+    assert env["VLLM_ALLOW_LONG_MAX_MODEL_LEN"] == "1"
+    assert env["HF_HOME"] == "/model-cache"  # base env preserved
+
+
 def test_k8s_render(tmp_path, canonical_dict, globals_cfg):
     canonical_dict["deployments"][0]["target"] = "breithorn"
     canonical_dict["deployments"][0]["backend_config"]["pipeline_parallel_size"] = 1

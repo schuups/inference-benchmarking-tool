@@ -113,6 +113,9 @@ spec:
         # (mounted read-only below) — no HF egress, no HF_TOKEN, no writes.
         - { name: HF_HOME, value: "/model-cache" }
         - { name: HF_HUB_OFFLINE, value: "1" }
+{%- for k, v in engine_env.items() %}
+        - { name: {{ k }}, value: "{{ v }}" }
+{%- endfor %}
         ports:
         - { containerPort: 8000, name: http, protocol: TCP }
         resources:

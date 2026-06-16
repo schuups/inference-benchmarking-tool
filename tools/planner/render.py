@@ -160,6 +160,7 @@ def render_experiment(
             # annotation + the srun --network=disable_rdzv_get flag.
             "disable_cxi_hook": deployment.alps_extended_image,
             "engine_command": vllm_command(deployment),
+            "engine_env": deployment.backend_config.env,  # §16.2 engine-env passthrough → EDF/pod env
             "total_gpus": gpus,
             "gpus_per_node": cluster.gpus_per_node,
             "nodes": math.ceil(gpus / cluster.gpus_per_node),
