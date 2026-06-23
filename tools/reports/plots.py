@@ -187,9 +187,15 @@ def compare_capacity_figure(entries, metrics):
         axE.set_ylim(0, 100)
         axQ = axes[nlat + 1][col]
         if not q.empty:
-            axQ.plot(q["rate_lambda"], q["waiting_mean"], marker="o", ms=4, color=color, label="mean")
-            axQ.plot(q["rate_lambda"], q["waiting_max"], marker=".", ls=":", color=color, alpha=0.5,
-                     label="max")
+            # The TWO halves of the realized backend load that λ (session starts/s) hides:
+            # `running` = the in-service batch the engine is actually decoding concurrently;
+            # `waiting` = the queue behind it. running ≫ λ (each session fans out into many turns,
+            # all of which are in-flight at once) — so this panel shows the true applied request load.
+            axQ.plot(q["rate_lambda"], q["running_mean"], marker="o", ms=4, color=color, label="running")
+            axQ.plot(q["rate_lambda"], q["waiting_mean"], marker="s", ms=3, ls="--", color=color,
+                     label="waiting")
+            axQ.plot(q["rate_lambda"], q["waiting_max"], marker=".", ls=":", color=color, alpha=0.4,
+                     label="wait max")
             axQ.legend(fontsize=7)
             lambdas |= {float(x) for x in q["rate_lambda"]}
         axQ.set_yscale("symlog", linthresh=1)
@@ -198,7 +204,7 @@ def compare_capacity_figure(entries, metrics):
     for mi, (metric, _slo) in enumerate(metrics):
         axes[mi][0].set_ylabel(f"{metric.replace('_ms', '').upper()} (ms)")
     axes[nlat][0].set_ylabel("error %")
-    axes[nlat + 1][0].set_ylabel("queue (reqs)")
+    axes[nlat + 1][0].set_ylabel("requests in system")
     if lambdas:
         ticks = sorted(lambdas)
         for col in range(n):

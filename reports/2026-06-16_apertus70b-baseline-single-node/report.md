@@ -102,11 +102,28 @@ workload.
 ## 4. Capacity & throughput
 
 **Latency vs λ — SLURM (left) vs K8s (right).** Rows: **TTFT** (time-to-first-token) and **TPOT**
-(time-per-output-token), each with its own per-class SLO line, then the **error-rate** and **request-queue**
-panels. error-rate and queue are per-request (identical for either latency metric), so they are shown
-**once** here rather than repeated under each. y-axes shared per row:
+(time-per-output-token), each with its own per-class SLO line, then the **error-rate** panel and the
+**requests-in-system** panel (`running` = the batch the engine is decoding concurrently · `waiting` = the
+queue behind it). error-rate and the in-system counts are per-request (identical for either latency metric),
+so they are shown **once** here rather than repeated under each. y-axes shared per row:
 
-![capacity vs λ — TTFT / TPOT / error / queue, SLURM (left) vs K8s (right)](images/baseline-capacity.png)
+![capacity vs λ — TTFT / TPOT / error / requests-in-system, SLURM (left) vs K8s (right)](images/baseline-capacity.png)
+
+**What λ actually applies to the backend.** λ counts **session starts**, *not* requests. Each session fans
+out into many turns whose requests are in flight together, so the request-level load the engine sees is far
+higher than the x-axis number (SLURM shown; K8s within ~3%):
+
+| swept λ (sessions/s) | effective requests/s | mean concurrent **running** requests | mean queue (waiting) |
+|---|---|---|---|
+| **0.5** | 2.4 | **≈ 34** | 0 |
+| 1.0 | 2.9 | ≈ 111 | 164 |
+| 2.0 | 4.4 | ≈ 169 | 379 |
+
+So the headline **λ\*=0.5 is a session-start rate** — at that point the engine is already sustaining a
+**batch of ~34 concurrent requests** (≈70× the x-axis value), which is why the GPU is never idle (§5). Read
+the x-axis as session starts, not request load. Note the **closed-loop self-throttle**: 4× more offered
+sessions (0.5→2) yields **<2× more delivered req/s** (2.4→4.4) but a queue from **0→379** — the engine is
+service-capped, so surplus offered load becomes queue, not throughput.
 
 - **Supportable load: λ\* = 0.5 session-starts/s on BOTH platforms** — the only swept level meeting **all**
   per-class SLOs. Values shown per platform as **SLURM / K8s**:
@@ -123,7 +140,7 @@ Both platforms behave identically: at λ=0.5 all SLOs pass (K8s marginally highe
 ~0.5 s → ~200 s). λ\* is **bracketed but coarse** — only one sub-knee point (0.5) was measured; a
 refinement pass (λ = 0.6 / 0.7 / 0.8) is needed for a precise λ\*.
 
-**Token throughput** vs λ (input tokens/s top, output tokens/s bottom; SLURM blue, K8s orange):
+**Token throughput** vs λ (input tokens/s top, output tokens/s bottom; SLURM blue, K8s teal):
 
 ![throughput vs λ — input / output tokens/s, SLURM vs K8s](images/baseline-throughput.png)
 
@@ -173,15 +190,18 @@ empty right-hand panels.
 
 ## 6. Saturation onset = queue onset
 
-Mean / max request queue (`requests_waiting`), per platform as **SLURM / K8s**:
+Realized backend load — the in-service batch (`requests_running`) and the queue behind it
+(`requests_waiting`), per platform as **SLURM / K8s**:
 
-| λ | mean queue — SLURM / K8s | max queue — SLURM / K8s | all SLOs met? (both) |
-|---|---|---|---|
-| 0.5 | **0.0 / 0.0** | 0 / 1 | ✅ yes |
-| 1.0 | 164 / 170 | 468 / 453 | ❌ no |
-| 2.0 | 379 / 385 | 1150 / 1135 | ❌ no |
+| λ | mean **running** — SLURM / K8s | mean queue — SLURM / K8s | max queue — SLURM / K8s | all SLOs met? (both) |
+|---|---|---|---|---|
+| 0.5 | 34 / 35 | **0.0 / 0.0** | 0 / 1 | ✅ yes |
+| 1.0 | 111 / 111 | 164 / 170 | 468 / 453 | ❌ no |
+| 2.0 | 169 / 171 | 379 / 385 | 1150 / 1135 | ❌ no |
 
-On both platforms the queue is empty at λ=0.5 (engine keeps up) and jumps the instant the SLOs break —
+At λ=0.5 the engine runs a **batch of ~34** with an **empty queue** — it keeps up, so all SLOs pass even
+though the applied request concurrency is ~70× the session-start rate (§4). On both platforms the queue
+stays empty at λ=0.5 and jumps the instant the SLOs break —
 TTFT climbs because requests wait. The early-stop used this directly: λ=1.0 saturated (queue non-empty
 84% of measurement scrapes on both), λ=2.0 confirmed (SLURM 88% / K8s 87%) → higher λ skipped.
 
@@ -261,6 +281,17 @@ externally so the benchmarker can't read in-pod state):
 
 ## Provenance
 
+**Source experiments** (every figure and table above derives from these — see §15.3):
+
+| platform | experiment folder (config · sbatch · engine.toml · run DB) | run_id |
+|---|---|---|
+| SLURM | [`experiments/2026-06-16_apertus70b-kvgrid-single-node-slurm/`](../../experiments/2026-06-16_apertus70b-kvgrid-single-node-slurm/20260616-095339_apertus-70b-instruct-2509_vllm_clariden_5124/) ([config](../../experiments/2026-06-16_apertus70b-kvgrid-single-node-slurm/benchmark_config.yaml), cell 1 / baseline) | `20260616-095339_…_clariden_5124` |
+| K8s | [`experiments/2026-06-16_apertus70b-kvgrid-single-node-k8s/`](../../experiments/2026-06-16_apertus70b-kvgrid-single-node-k8s/20260616-134325_apertus-70b-instruct-2509_vllm_breithorn_2423/) | `20260616-134325_…_breithorn_2423` |
+
+The per-run SQLite DB (`run_<run_id>.db`) lives in each run folder (gitignored — re-pullable from the capstor
+source `/capstor/scratch/cscs/stefschu/ibt/<run_id>/`). The benchmark config is identical across platforms
+(one shared pool, §3).
+
 - **run_id (SLURM)**: `20260616-095339_apertus-70b-instruct-2509_vllm_clariden_5124` (job 2543765, clariden)
 - **run_id (K8s)**: `20260616-134325_apertus-70b-instruct-2509_vllm_breithorn_2423` (benchmarker job 2545821 on clariden; engine on breithorn ns `ml`, deployed via kubectl + torn down post-run)
 - **model**: `swiss-ai/Apertus-70B-Instruct-2509` · image `vllm:0.23.0-alps.net.v1-gh200`
@@ -270,4 +301,5 @@ externally so the benchmarker can't read in-pod state):
 - **workload**: 80% `chat-short-turns` + 20% `agentic-coding`; 100k-prompt real-text pool (WildChat + LongBench)
 - **sweep**: λ=[0.5,1,2,4,8,16], warmup 300 s / measurement 600 s / drain 600 s, queue early-stop (stop after 2 saturated)
 - **totals**: SLURM 15 245 req / 1134 truncated · K8s 15 277 req / 1141 truncated; 3 λ levels each (early-stop), quality_flagged=False (both)
-- **curated**: 2026-06-16. Source per-run DB + raw logs under `experiments/`.
+- **curated**: 2026-06-16 (figures re-rendered 2026-06-17 with the realized-load panel). Source
+  experiments linked in the table above.

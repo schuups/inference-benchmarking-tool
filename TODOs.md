@@ -101,6 +101,14 @@
   decomposed into SM-active vs memory-stall, and the §15.3 "untapped headroom" overlay (HBM-BW / NVLink) is
   blank. Wire `dcgm-exporter` (or the DCGM Python bindings) in the sampler and backfill `tools/images`; gate
   on availability per cluster.
+- [ ] **Per-run DBs must be persisted, not left in /tmp** (surfaced 2026-06-17 — the E3a baseline DBs were
+  hand-pulled to `/private/tmp/…` for report rendering, never ingested into the central `experiments/results.db`
+  nor co-located under `experiments/<run>/`; macOS tmp-cleanup zeroed them overnight and they had to be
+  re-pulled from capstor). The Coordinator's staged-download (§7) must land the per-run DB **in
+  `experiments/<run>/run_<run_id>.db`** *and* merge it into `experiments/results.db` (idempotent, run_id-keyed,
+  §15.1) as part of the success/teardown path — so a curated report's §15.3 source links always resolve to a
+  real local file. Manually-driven runs (FirecREST/ssh) need the same: pull straight into the run dir. (Now
+  done by hand for the baseline; automate it.)
 
 ### Cold-start optimisation experiment groups
 

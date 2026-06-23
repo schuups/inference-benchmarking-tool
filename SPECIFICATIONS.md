@@ -1722,9 +1722,18 @@ Each curated report must include:
 - A **narrative** framing the plots — what was measured, in what context, what to read
   from each figure.
 - The **selected plots and tables**, embedded inline.
-- A **provenance block** at the end of the Markdown: the source `run_id`s, the model +
-  BackendConfig of each, the date of curation, and the assistant-session reference if
-  available — so any figure can be traced back to its underlying experiment.
+- A **provenance block** at the end of the Markdown — **mandatory**, so any figure or number can be
+  traced back to the experiment that produced it. It must carry, for every source run:
+  - the source `run_id`(s), the model + BackendConfig of each, and the date of curation;
+  - **an explicit relative link to each source `experiments/<run>/` folder** (and its `benchmark_config.yaml`)
+    — a bare `run_id` is **not** sufficient: the reader must be able to click through to the config, sbatch,
+    `engine.toml`, and per-run DB that back the report;
+  - where the per-run DB physically lives (in-repo path if retained, else the cluster source path it is
+    re-pullable from — the report must never depend on data that exists only in a transient location);
+  - the assistant-session reference if available.
+
+  A report that cites results without linking back to their source experiment folder is **incomplete** and
+  must not be considered finished.
 
 #### Contract
 

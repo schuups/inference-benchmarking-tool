@@ -23,8 +23,16 @@ pre-check, or any signal a stakeholder needs to see.
   never omitted (§15.1).
 - **Uncollected data**: mark with ❓ "not captured", never a green ✅ — a check implies a *verified*
   value, so green for data that was never collected is misleading (data-integrity, §15.3).
-- **Provenance block** at the end of every curated report: source `run_id`s, model +
-  BackendConfig of each, curation date.
+- **Provenance block** at the end of every curated report (**mandatory**, §15.3): source `run_id`s, model +
+  BackendConfig of each, curation date, **and an explicit relative link to each source `experiments/<run>/`
+  folder + its `benchmark_config.yaml`** — a bare `run_id` is not enough; the reader must be able to click
+  through to the config/sbatch/`engine.toml`/run DB. State where the per-run DB lives (in-repo path, or the
+  cluster source it is re-pullable from — never cite data that exists only in a transient location). A report
+  that doesn't link back to its source experiments is **incomplete**.
+- **λ is session starts/s, not request load.** On any vs-λ figure, also surface the realized backend load
+  (mean concurrent `running` requests + queue, and/or effective req/s) — a reader must not mistake the
+  session-start rate for the request concurrency the engine actually sees (they differ by the per-session
+  turn fan-out, often ~10–100×).
 
 ## Per-audience sections
 
