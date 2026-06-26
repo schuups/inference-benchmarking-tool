@@ -194,6 +194,25 @@ On Kubernetes (`breithorn`), the equivalent layout lives under Ceph-backed PVCs 
 
 Remote scratch is **transient** for a given run: per-run subdirectories are reclaimed by the cleanup phases in §7.
 
+**Cluster-side working scope is the operator's personal scratch only.** On clariden (and the other CSCS SLURM
+clusters) the operator may read/write **only under their own personal scratch folder** — `/capstor/scratch/cscs/$USER/`
+(for this project, `/capstor/scratch/cscs/stefschu/`, with all project state beneath `…/stefschu/ibt/`).
+Nothing outside that personal folder is a permitted working location: do **not** create, stage, or write
+files anywhere else on the cluster (no other users' scratch, no shared/system paths). Every cluster-side path
+this tool constructs — run dirs, prompt pools, caches, image-build staging, the HF cache — must resolve under
+`scratch_base` (§3.3), which itself must point inside the personal scratch folder.
+
+**Capstor scratch has an automatic retention policy (~30 days, variable).** Files under
+`/capstor/scratch/cscs/$USER/` that are **not touched for roughly 30 days** (the exact threshold is set by the
+platform and varies) are **automatically deleted** by CSCS. The policy keys on file access/modification time,
+so data sitting untouched between experiment phases can disappear mid-campaign. Consequences this tool must
+respect: (a) anything that must **survive** — per-run result DBs, raw logs, the data a curated report cites —
+must be **copied into the repository** (`experiments/<run>/`, §15.3) and not left to live only on capstor;
+(b) long-lived caches (`hf-cache/`, `collective-tests-cache/`) are best-effort and may need re-staging if a
+campaign pauses for weeks; (c) never treat a capstor path as durable storage or as the sole copy of any
+result. (This is distinct from the per-run §7 cleanup, which the Coordinator drives deliberately; the
+retention policy is the *platform* reclaiming idle data regardless of our cleanup.)
+
 ### 3.3 Global configuration (`tools/common/global.yaml`)
 
 A single version-controlled YAML holding the **environmental constants shared by every

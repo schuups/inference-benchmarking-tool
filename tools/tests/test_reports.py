@@ -132,6 +132,25 @@ def test_hardware_compare_figure_empty_panel(fixture_db):
     ]  # SLURM column has data, no annotation
 
 
+def test_applied_load_matches_supportable_users_concurrency(fixture_db):
+    # §15.1: applied_load_vs_lambda must report requests/s and concurrent sessions, and its
+    # concurrent-sessions value at λ* must equal the supportable_users Little's-law figure
+    # (one definition of "concurrent sessions" across the report — no drift).
+    path, exp = fixture_db
+    report = analysis.load_run(path, exp["run_a"])
+    al = analysis.applied_load_vs_lambda(report)
+    assert {"requests_s", "concurrent_sessions"} <= set(al.columns)
+    assert (al["requests_s"] > 0).any()
+    lam = analysis.lambda_star(report)
+    if lam is not None:
+        su = analysis.supportable_users(report, lam, {})
+        row = al[al["rate_lambda"] == lam]
+        assert not row.empty
+        assert row["concurrent_sessions"].iloc[0] == pytest.approx(
+            su["concurrent_sessions"].sum(), rel=1e-6
+        )
+
+
 def test_compare_capacity_figure_merges_error_and_queue(fixture_db):
     # §15.1 merged capacity figure: N latency metrics stacked above ONE shared error + queue pair
     # (per-request, so not repeated per metric). For 2 metrics × 2 platforms → (2+2) rows × 2 cols.

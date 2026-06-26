@@ -216,6 +216,39 @@ def compare_capacity_figure(entries, metrics):
     return fig
 
 
+def applied_load_figure(entries, title: str = "Applied load vs λ — SLURM vs K8s"):
+    """The realized offered load the session-start rate λ understates (§15.1), overlaid per run
+    (`entries` = (report, colour, label)) — two panels: **requests/s** (top, the engine's served
+    request rate — service-capped past the knee) and **concurrent sessions** (bottom, live
+    conversations — balloons past the knee as sessions accumulate). λ stays on the x-axis as session
+    starts/s; this figure makes the gap between session starts and actual load explicit."""
+    import matplotlib.ticker as mticker
+
+    fig, (axr, axs) = plt.subplots(2, 1, figsize=(7, 5.5), sharex=True)
+    lambdas: set[float] = set()
+    for report, color, label in entries:
+        a = analysis.applied_load_vs_lambda(report)
+        if not a.empty:
+            axr.plot(a["rate_lambda"], a["requests_s"], marker="o", color=color, label=label)
+            axs.plot(a["rate_lambda"], a["concurrent_sessions"], marker="o", color=color, label=label)
+            lambdas |= {float(x) for x in a["rate_lambda"]}
+    axr.set_ylabel("requests/s")
+    axr.set_title(title)
+    axr.legend(fontsize=8)
+    axs.set_ylabel("concurrent sessions")
+    axs.set_yscale("symlog", linthresh=10)
+    axs.legend(fontsize=8)
+    axs.set_xscale("log")
+    axs.set_xlabel("λ (session starts/s)")
+    if lambdas:
+        ticks = sorted(lambdas)
+        axs.xaxis.set_major_locator(mticker.FixedLocator(ticks))
+        axs.xaxis.set_minor_locator(mticker.NullLocator())
+        axs.xaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _pos: f"{x:g}"))
+    fig.tight_layout()
+    return fig
+
+
 def throughput_figure(entries, title: str = "Token throughput vs λ — SLURM vs K8s"):
     """Input- and output-token throughput vs λ for one or more runs (`entries` = (report, colour,
     label)), overlaid — two panels: input tokens/s (top) and output tokens/s (bottom). Both rise with

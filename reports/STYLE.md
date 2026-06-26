@@ -29,10 +29,14 @@ pre-check, or any signal a stakeholder needs to see.
   through to the config/sbatch/`engine.toml`/run DB. State where the per-run DB lives (in-repo path, or the
   cluster source it is re-pullable from — never cite data that exists only in a transient location). A report
   that doesn't link back to its source experiments is **incomplete**.
-- **λ is session starts/s, not request load.** On any vs-λ figure, also surface the realized backend load
-  (mean concurrent `running` requests + queue, and/or effective req/s) — a reader must not mistake the
-  session-start rate for the request concurrency the engine actually sees (they differ by the per-session
-  turn fan-out, often ~10–100×).
+- **λ is session starts/s, not request load — always show the realized load too.** λ on a vs-λ axis counts
+  *session starts*; the actual load is far higher (per-session turn fan-out, often ~10–100×). Every report
+  must surface **both** of these alongside λ, never λ alone:
+  - **requests/s** (effective request rate the engine serves — service-capped past the knee), and
+  - **concurrent sessions** (live conversations — balloons past the knee as sessions accumulate).
+  Plus the in-service `running` batch + queue on the capacity figure. `analysis.applied_load_vs_lambda` +
+  `plots.applied_load_figure` produce these; the concurrent-sessions value at λ* must equal the §15.1
+  supportable-users concurrent figure (same Little's-law definition).
 
 ## Per-audience sections
 

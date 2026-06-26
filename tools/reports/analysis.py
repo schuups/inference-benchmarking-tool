@@ -191,6 +191,44 @@ def throughput_vs_lambda(req: pd.DataFrame, measurement_s: float) -> pd.DataFram
     )
 
 
+# --------------------------------------------------------------- applied load
+
+
+def applied_load_vs_lambda(report: "ReportData") -> pd.DataFrame:
+    """Per-λ realized offered load that the session-start rate λ **hides** (§15.1):
+
+    - `requests_s` — the effective request arrival the engine actually serves (measurement-window
+      request count / `measurement_s`). λ counts *session starts*; each session fans out into many
+      turns, so requests/s ≫ λ.
+    - `concurrent_sessions` — how many conversations are simultaneously *live*, via Little's law
+      (Σ over classes of session_throughput × mean completed-session wall-time — the SAME definition
+      as `supportable_users`, so the λ* row equals the §15.1 concurrent-users figure).
+
+    requests/s is service-capped (flat past the knee); concurrent_sessions balloons past the knee as
+    sessions accumulate faster than they complete. Empty frame if no measurement requests."""
+    cols = ["rate_lambda", "requests_s", "concurrent_sessions", "n_sessions"]
+    mreq = measurement_requests(report)
+    if mreq.empty or report.measurement_s <= 0:
+        return pd.DataFrame(columns=cols)
+    sm = session_metrics(mreq)
+    rows = []
+    for lam, grp in mreq.groupby("rate_lambda"):
+        starts = grp[grp["turn_idx"] == 0]
+        sml = sm[sm["rate_lambda"] == lam]
+        concurrent = 0.0
+        for scen in starts["scenario"].unique():
+            throughput = int((starts["scenario"] == scen).sum()) / report.measurement_s
+            wall = sml[sml["scenario"] == scen]["session_e2e_ms"].dropna()
+            concurrent += throughput * (float(wall.mean()) / 1000.0 if not wall.empty else 0.0)
+        rows.append({
+            "rate_lambda": float(lam),
+            "requests_s": len(grp) / report.measurement_s,
+            "concurrent_sessions": concurrent,
+            "n_sessions": int(len(starts)),
+        })
+    return pd.DataFrame(rows).sort_values("rate_lambda").reset_index(drop=True)
+
+
 # --------------------------------------------------------------- session metrics
 
 

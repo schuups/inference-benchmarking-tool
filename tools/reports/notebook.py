@@ -103,6 +103,15 @@ print("λ* =", lam_star)
 display(att)
 """
 
+_APPLIED_LOAD = """\
+# Applied load vs λ (§15.1): requests/s & concurrent sessions — the realized load the
+# session-start rate λ hides. λ counts session starts; requests/s and concurrent sessions
+# are what the backend actually carries (always report BOTH, per reports/STYLE.md).
+display(analysis.applied_load_vs_lambda(report))
+fig = plots.applied_load_figure([(report, plots.MODEL_COLOR, report.run_id)])
+fig.savefig(out / "applied-load.png", bbox_inches="tight"); fig
+"""
+
 _USERS = """\
 # Supportable-users estimate at λ* (§15.1) — edit sessions_per_user_per_hour above
 users = analysis.supportable_users(report, lam_star, sessions_per_user_per_hour)
@@ -164,6 +173,8 @@ def build_notebook() -> nbformat.NotebookNode:
         new_code_cell(_PER_CLASS),
         new_markdown_cell("## SLO attainment & λ*"),
         new_code_cell(_SLO),
+        new_markdown_cell("## Applied load (requests/s & concurrent sessions)"),
+        new_code_cell(_APPLIED_LOAD),
         new_markdown_cell("## Supportable users"),
         new_code_cell(_USERS),
         new_markdown_cell("## Response quality"),

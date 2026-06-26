@@ -110,20 +110,25 @@ so they are shown **once** here rather than repeated under each. y-axes shared p
 ![capacity vs λ — TTFT / TPOT / error / requests-in-system, SLURM (left) vs K8s (right)](images/baseline-capacity.png)
 
 **What λ actually applies to the backend.** λ counts **session starts**, *not* requests. Each session fans
-out into many turns whose requests are in flight together, so the request-level load the engine sees is far
-higher than the x-axis number (SLURM shown; K8s within ~3%):
+out into many turns whose requests are in flight together, so the load the engine sees is far higher than the
+x-axis number. The three views that matter (SLURM shown; K8s within ~3%):
 
-| swept λ (sessions/s) | effective requests/s | mean concurrent **running** requests | mean queue (waiting) |
-|---|---|---|---|
-| **0.5** | 2.4 | **≈ 34** | 0 |
-| 1.0 | 2.9 | ≈ 111 | 164 |
-| 2.0 | 4.4 | ≈ 169 | 379 |
+| swept λ (sessions/s) | effective **requests/s** | concurrent **sessions** (live conversations) | concurrent **running** requests | mean queue (waiting) |
+|---|---|---|---|---|
+| **0.5** | 2.4 | **≈ 42** | ≈ 34 | 0 |
+| 1.0 | 2.9 | ≈ 380 | ≈ 111 | 164 |
+| 2.0 | 4.4 | ≈ 618 | ≈ 169 | 379 |
 
-So the headline **λ\*=0.5 is a session-start rate** — at that point the engine is already sustaining a
-**batch of ~34 concurrent requests** (≈70× the x-axis value), which is why the GPU is never idle (§5). Read
-the x-axis as session starts, not request load. Note the **closed-loop self-throttle**: 4× more offered
-sessions (0.5→2) yields **<2× more delivered req/s** (2.4→4.4) but a queue from **0→379** — the engine is
-service-capped, so surplus offered load becomes queue, not throughput.
+![applied load vs λ — requests/s and concurrent sessions, SLURM vs K8s](images/baseline-applied-load.png)
+
+So the headline **λ\*=0.5 is a session-start rate** — at that point the system is sustaining **~42 live
+conversations** and the engine a **batch of ~34 concurrent requests** (≈70× the x-axis value), which is why
+the GPU is never idle (§5). Read the x-axis as session starts, not request load. Two distinct effects past
+the knee: (1) the **closed-loop self-throttle** — 4× more offered sessions (0.5→2) yields **<2× more
+delivered requests/s** (2.4→4.4) because the engine is **service-capped**; and (2) **sessions pile up** — the
+live-conversation count balloons **42 → 380 → 618** as sessions arrive faster than the saturated engine can
+complete them. requests/s and concurrent sessions are reported together throughout (per STYLE.md) so neither
+the served request rate nor the conversation backlog is hidden behind the session-start knob.
 
 - **Supportable load: λ\* = 0.5 session-starts/s on BOTH platforms** — the only swept level meeting **all**
   per-class SLOs. Values shown per platform as **SLURM / K8s**:
